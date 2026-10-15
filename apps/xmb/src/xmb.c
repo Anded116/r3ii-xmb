@@ -205,7 +205,7 @@ static struct {
 	uint32_t settings_ms;
 	unsigned settings_sig;
 	lv_obj_t *cat_icons[8], *cat_title, *mini_icon, *mini_text, *mini_bar, *off;
-	lv_obj_t *tb, *tb_left, *tb_right, *tb_bat, *hint[2];
+	lv_obj_t *tb, *tb_left, *tb_right, *tb_bat, *hint[2], *bhint, *bhint_lbl;
 	int bat, bat_chg;
 	lv_font_t *f_bat;
 	lv_obj_t *opt_panel, *opt_rows[MAX_OPTS], *opt_checks[MAX_OPTS], *opt_sw[MAX_OPTS];
@@ -213,7 +213,7 @@ static struct {
 	int cat, at_cats, depth, screen_on, glow_x, glow_y;
 	double glow_k, level;
 	lv_obj_t *glow, *main, *mini, *mini_thumb, *mini_artist, *mini_time;
-	double cat_pos, depth_t, focus_t, hint_t[2], slide;
+	double cat_pos, depth_t, focus_t, hint_t[2], bhint_t, slide;
 	/* настройки */
 	int theme, wave, touch_off, bright, sleep, bt_off, wifi_off, codec, shuffle, repeat, usb_dac, eq_on, ui_size;
 	int screen_off, album_view, dev_sleep, gain, rg_mode, xfade, lang;
@@ -3108,6 +3108,13 @@ static void frame_cb(lv_timer_t *t)
 	if (s.t_mode != T_PULL && s.t_mode != T_SHADE)
 		s.sh_t = approach(s.sh_t, s.sh_open, dt, 14);
 
+	if (s.bhint_t > 0) {   /* подсказка кнопки: съезжает сверху и гаснет */
+		s.bhint_t = fmax(0, s.bhint_t - dt / 0.7);
+		int w = lv_obj_get_width(s.bhint);
+		set_pos(s.bhint, (SCR_W - w) / 2, TOP_H + 10 + (int)((1.0 - s.bhint_t) * 10));
+		lv_obj_set_style_opa(s.bhint, (lv_opa_t)(230 * fmin(1.0, s.bhint_t * 2)), 0);
+		set_hidden(s.bhint, s.bhint_t == 0);
+	}
 	for (int i = 0; i < 2; i++) {
 		if (s.hint_t[i] > 0) {
 			s.hint_t[i] = fmax(0, s.hint_t[i] - dt / 0.5);
@@ -3252,8 +3259,8 @@ static void frame_cb(lv_timer_t *t)
 	if (player_progress() > 0) {
 		mini_t = 0;
 	} else if (mini_t < 1) {
-		mini_t = fmin(1.0, mini_t + dt / 0.25);
-		lv_opa_t o = mini_t >= 1 ? LV_OPA_COVER : (lv_opa_t)(255 * mini_t * mini_t);
+		mini_t = fmin(1.0, mini_t + dt / 0.15);
+		lv_opa_t o = mini_t >= 1 ? LV_OPA_COVER : (lv_opa_t)(255 * mini_t);
 		for (uint32_t i = 0; i < lv_obj_get_child_count(s.mini); i++)
 			lv_obj_set_style_opa(lv_obj_get_child(s.mini, (int32_t)i), o, 0);
 	}
@@ -3415,6 +3422,20 @@ static void set_cat(int c)
 static void show_hint(int i)
 {
 	s.hint_t[i] = 1.0;
+}
+
+/* что сделала кнопка на корпусе — значком сверху по центру (как «назад» и «выбрать» у тапа) */
+static void show_btn_hint(const char *glyph, const lv_font_t *f)
+{
+	if (!s.screen_on || !glyph)
+		return;
+	lv_obj_set_style_text_font(s.bhint_lbl, f, 0);
+	lv_label_set_text(s.bhint_lbl, glyph);
+	lv_point_t sz;
+	lv_text_get_size(&sz, glyph, f, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+	lv_obj_set_width(s.bhint, sz.x + 26 > 44 ? sz.x + 26 : 44);
+	lv_obj_center(s.bhint_lbl);
+	s.bhint_t = 1.0;
 }
 
 static void shade_set(int open)
@@ -3757,6 +3778,10 @@ int xmb_input_name(const char *name)
 		lv_textarea_set_text(s.kb_ta, name + 5);
 		return 1;
 	}
+	if (!strncmp(name, "btn:", 4) && name[4] && name[5]) {   /* кнопка на корпусе: btn:<кнопка><жест>, как в настройках */
+		xmb_button(name[4] - '0', name[5] - '0');
+		return 1;
+	}
 	if (!strcmp(name, "prevalbum")) {   /* в жизни — кнопкой (BA_PREV_ALBUM) или свайпом */
 		prev_group();
 		return 1;
@@ -3937,7 +3962,8 @@ void xmb_button(int button, int gesture)
 	s.input_ms = lv_tick_get();
 	if (s.kb_panel)
 		return;
-	switch (s.btn[button][gesture]) {
+	int act = s.btn[button][gesture];
+	switch (act) {
 	case BA_PLAY: xmb_input(XMB_PLAY); break;
 	case BA_NEXT: xmb_input(XMB_NEXT_TRACK); break;
 	case BA_PREV: xmb_input(XMB_PREV_TRACK); break;
@@ -3958,6 +3984,18 @@ void xmb_button(int button, int gesture)
 	case BA_SCREEN: xmb_input(XMB_POWER); break;
 	default: break;
 	}
+	/* значок — уже после действия: у паузы и избранного видно, каким стало состояние */
+	const lv_font_t *f = &lv_font_montserrat_20;
+	const char *g = act == BA_PLAY ? (s.playing ? LV_SYMBOL_PLAY : LV_SYMBOL_PAUSE) : act == BA_NEXT ? LV_SYMBOL_NEXT :
+			act == BA_PREV ? LV_SYMBOL_PREV : act == BA_NEXT_ALBUM ? LV_SYMBOL_IMAGE "  " LV_SYMBOL_NEXT :
+			act == BA_PREV_ALBUM ? LV_SYMBOL_PREV "  " LV_SYMBOL_IMAGE : act == BA_FWD ? "+10" :
+			act == BA_REW ? "-10" : act == BA_SHUFFLE ? LV_SYMBOL_SHUFFLE : act == BA_REPEAT ? LV_SYMBOL_LOOP : NULL;
+	if (act == BA_FAV && s.f_icons && s.track >= 0) {   /* сердечко — Font Awesome, как в плеере */
+		int on = s.pls && pl_find(&s.pls[PL_FAVORITES], s.track) >= 0;
+		g = on ? "\xEF\x80\x84" : "\xEF\x82\x8A";
+		f = s.f_icons;
+	}
+	show_btn_hint(g, f);
 }
 
 bool xmb_button_has_double(int button)
@@ -4539,6 +4577,7 @@ void xmb_init(const char *font_dir)
 	for (int i = 0; i < EQ_BANDS; i++)
 		s.eq_custom[i] = 12;
 	s.volume = 30;
+	s.album_view = 2;   /* «Список с обложками»: под колесо вертикальный список удобнее сетки */
 	s.track = -1;
 	s.ui_size = 1;
 	s.seek_preview = -1;
@@ -4700,6 +4739,15 @@ void xmb_init(const char *font_dir)
 	lv_obj_set_size(s.tb_bat, 34, 16);
 	lv_obj_set_pos(s.tb_bat, SCR_W - 44, 6);
 	lv_obj_add_event_cb(s.tb_bat, battery_draw, LV_EVENT_DRAW_MAIN, NULL);
+
+	/* подсказка кнопки на корпусе: значок действия сверху по центру */
+	s.bhint = plain(top);
+	lv_obj_set_size(s.bhint, 44, 44);
+	lv_obj_set_style_radius(s.bhint, LV_RADIUS_CIRCLE, 0);
+	lv_obj_set_style_bg_color(s.bhint, lv_color_black(), 0);
+	lv_obj_set_style_bg_opa(s.bhint, 120, 0);
+	s.bhint_lbl = label(s.bhint, &lv_font_montserrat_20, "");
+	lv_obj_set_hidden(s.bhint, true);
 
 	/* подсказки тапа: назад / выбрать */
 	const char *hint_icons[2] = { LV_SYMBOL_LEFT, LV_SYMBOL_OK };
