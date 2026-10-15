@@ -1,0 +1,1 @@
+cat /sys/kernel/config/usb_gadget/android0/functions/mass_storage.0/lun.0/file; for p in /proc/[0-9]*; do ls -l $p/fd 2>/dev/null | grep -q mmcblk && echo "$p $(cat $p/comm)"; done; ls /sys/block/mmcblk0/mmcblk0p1/holders; cat /sys/block/mmcblk0/size

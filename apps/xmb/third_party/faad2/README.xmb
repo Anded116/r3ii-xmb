@@ -1,0 +1,4 @@
+FAAD2 2.11.2 (https://github.com/knik0/faad2, тег 2.11.2), GPL-2.0-or-later — декодер AAC для .m4a.
+Взяты libfaad/ и include/ без изменений, кроме патча Compas (Starnished66/compas-player,
+patches/faad2_ps_dec_init.patch): инициализация переменных в ps_dec.c, чтобы не читать неинициализированное.
+Собирается со своими флагами (Makefile: FAAD_FLAGS) — его libfaad/mp4.h не должен перекрывать third_party/sonix/mp4.h.

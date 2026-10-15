@@ -1,0 +1,25 @@
+# прошивки, утилиты, тулчейн, журналы с устройства — локально, не в репозитории
+/firmware/
+/tools/
+/device_logs/
+/sd/
+/.claude/
+
+# сборка
+/apps/xmb/build/
+/apps/fbtest/fbtest
+/apps/touchtest/touchtest
+/apps/inject/inject
+/apps/inject/fbprobe
+
+# модули ядра HiBy (пропатченные бинарники) и тестовые звуки
+/apps/lcdhz/
+/apps/audiotest/
+/overlay/module_driver/
+
+# локальные помощники под этот компьютер
+/scripts/winshot.ps1
+/scripts/xmb_keys.ps1
+/scripts/wsl_apt.*
+/scripts/device/tone_*.sh
+/scripts/device/play_flac_test.sh

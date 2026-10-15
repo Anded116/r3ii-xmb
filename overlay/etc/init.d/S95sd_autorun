@@ -1,0 +1,23 @@
+#!/bin/sh
+
+case "$1" in
+  start)
+	# система загрузилась целиком: 60 Гц панели (если включены) — рабочие, отметка попытки снимается
+	rm -f /usr/data/xmb_lcd60_try
+	sync
+	(
+		i=0
+		while [ $i -lt 300 ]; do
+			for d in /data/mnt/sd_0/hiby_dev /mnt/sd_0/hiby_dev; do
+				if [ -f $d/autorun.sh ]; then
+					sh $d/autorun.sh $d > $d/autorun.log 2>&1
+					exit 0
+				fi
+			done
+			sleep 2; i=$((i+1))
+		done
+	) &
+	;;
+esac
+
+exit 0

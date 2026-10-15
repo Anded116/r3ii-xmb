@@ -1,0 +1,17 @@
+diff --git a/src/draw/sw/blend/lv_draw_sw_blend_to_rgb565.c b/src/draw/sw/blend/lv_draw_sw_blend_to_rgb565.c
+index d332076..0aa387f 100644
+--- a/src/draw/sw/blend/lv_draw_sw_blend_to_rgb565.c
++++ b/src/draw/sw/blend/lv_draw_sw_blend_to_rgb565.c
+@@ -248,9 +248,10 @@ static inline void * /* LV_ATTRIBUTE_FAST_MEM */ drawbuf_next_row(const void * b
+     do {                                                                \
+         uint16_t d_ = (dest_px);                                        \
+         if(last_dest_color != d_) {                                     \
+-            uint16_t res_ = lv_color_16_16_mix(color16, d_, opa);       \
++            uint16_t mixed_;                                            \
++            LV_COLOR_MIX_16_TO_16_PREPARED(mixed_, fg_prep, d_, opa);   \
+             last_dest_color = d_;                                       \
+-            last_res32_color = (uint32_t)res_ | ((uint32_t)res_ << 16); \
++            last_res32_color = (uint32_t)mixed_ | ((uint32_t)mixed_ << 16); \
+         }                                                               \
+         (dest_px) = (uint16_t)last_res32_color;                         \
+     } while(0)
