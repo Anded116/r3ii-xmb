@@ -145,7 +145,7 @@ int main(int argc, char **argv)
 	if (getenv("XMB_SCRIPT")) {
 		script = strdup(getenv("XMB_SCRIPT"));
 		script_pos = script;
-		lv_timer_create(script_step, 300, NULL);
+		lv_timer_create(script_step, getenv("XMB_STEP") ? atoi(getenv("XMB_STEP")) : 300, NULL);
 	}
 
 	while (1) {
