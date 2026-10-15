@@ -3108,10 +3108,10 @@ static void frame_cb(lv_timer_t *t)
 	if (s.t_mode != T_PULL && s.t_mode != T_SHADE)
 		s.sh_t = approach(s.sh_t, s.sh_open, dt, 14);
 
-	if (s.bhint_t > 0) {   /* подсказка кнопки: съезжает сверху и гаснет */
+	if (s.bhint_t > 0) {   /* подсказка кнопки: уходит вверх, к своему краю, как боковые — к своим, и гаснет */
 		s.bhint_t = fmax(0, s.bhint_t - dt / 0.7);
 		int w = lv_obj_get_width(s.bhint);
-		set_pos(s.bhint, (SCR_W - w) / 2, TOP_H + 10 + (int)((1.0 - s.bhint_t) * 10));
+		set_pos(s.bhint, (SCR_W - w) / 2, TOP_H + 14 - (int)((1.0 - s.bhint_t) * 14));
 		lv_obj_set_style_opa(s.bhint, (lv_opa_t)(230 * fmin(1.0, s.bhint_t * 2)), 0);
 		set_hidden(s.bhint, s.bhint_t == 0);
 	}
