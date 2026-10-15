@@ -48,7 +48,7 @@ git -C lvgl apply ../../../patches/lvgl-9.6.0-rgb565-opa-fill.patch
 
 Прошивки, образы и инструменты HiBy в репозиторий не входят.
 
-## Лицензии
+## Лицензия
 
-Чужой код — со своими лицензиями (см. `third_party/*`). Файлы Sonix (`mp4.c`, `alacdec.c`) — GPL-3.0,
-поэтому собранный XMB распространяется на условиях GPL-3.0. Шрифты: Noto Sans и Font Awesome 4 — SIL OFL 1.1.
+GPL-3.0 — см. `LICENSE`. Чужой код — со своими лицензиями (см. `third_party/*`), все совместимы с GPL-3.0.
+Шрифты: Noto Sans и Font Awesome 4 — SIL OFL 1.1.
