@@ -9,7 +9,7 @@ FAAD_FLAGS := -Ithird_party/faad2/include -Ithird_party/faad2/libfaad -DHAVE_INT
 	-DHAVE_STRING_H=1 -DHAVE_STRINGS_H=1 -DHAVE_SYS_STAT_H=1 -DHAVE_SYS_TYPES_H=1 -DHAVE_LRINTF=1 -DAPPLY_DRC \
 	-DPACKAGE_VERSION=\"2.11.2\" -w
 WAVES := $(addprefix src/waves/wave_,ps3.c ribbon.c particles.c spectrum.c silk.c aurora.c dust.c dust_smooth.c pulse.c ripple.c psp.c)
-APP_SRC := src/xmb.c src/i18n.c src/xmb_bg.c $(WAVES) src/xmb_player.c src/audio.c src/library.c src/playlist.c src/cover.c third_party/tjpgd/tjpgd.c $(SONIX) $(FAAD2)
+APP_SRC := src/xmb.c src/i18n.c src/filesave.c src/xmb_bg.c $(WAVES) src/xmb_player.c src/audio.c src/library.c src/playlist.c src/cover.c third_party/tjpgd/tjpgd.c $(SONIX) $(FAAD2)
 TINYALSA := $(addprefix third_party/tinyalsa/src/,pcm.c pcm_hw.c mixer.c mixer_hw.c limits.c snd_card_plugin.c)
 COMMON := -Ilvgl/include -Ilvgl -Isrc -Isrc/waves -Ithird_party/dr_libs -Ithird_party/tjpgd -Ithird_party/stb -Ithird_party/sonix -Ithird_party/faad2/include -DLV_CONF_INCLUDE_SIMPLE -Wall -Wno-unused-parameter
 
@@ -62,7 +62,7 @@ build/dev/%.o: %.c src/lv_conf.h
 	@mkdir -p $(dir $@)
 	@$(DEV_CC) $(DEV_CFLAGS) $(XFLAGS) -c $< -o $@
 
-$(HOST_OBJ) $(DEV_OBJ): src/xmb.h src/xmb_bg.h src/xmb_player.h src/audio.h src/library.h src/playlist.h src/cover.h
+$(HOST_OBJ) $(DEV_OBJ): src/xmb.h src/xmb_bg.h src/xmb_player.h src/audio.h src/library.h src/playlist.h src/cover.h src/filesave.h
 
 clean:
 	rm -rf build

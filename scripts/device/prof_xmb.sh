@@ -1,10 +1,10 @@
-# prof_xmb.sh [list|grid|back|artist|cats|opts|opts2|player|player2|pidle|play] — замер плавности и нагрузки XMB по сценарию (громкость 0).
+# prof_xmb.sh [list|grid|back|artist|cats|opts|opts2|player|player2|popen|pidle|play] — замер плавности и нагрузки XMB по сценарию (громкость 0).
 # list — прокрутка «Всех треков»; grid — сетка альбомов; back — вход в альбом и возврат в сетку (обложки);
 # artist — исполнитель → сетка его альбомов → альбом и обратно, по шести исполнителям;
 # cats — переключение категорий; opts — прокрутка меню выбора (тема, с предпросмотром); opts2 — меню без
-# тяжёлого предпросмотра (яркость); player — смена альбомов в плеере; player2 — туда и обратно; pidle — плеер в покое;
+# тяжёлого предпросмотра (яркость); player — смена альбомов в плеере; player2 — туда и обратно; popen — раскрыть и свернуть плеер; pidle — плеер в покое;
 # play — плеер играет, затем экран гаснет.
-# Переменные: WAVE=номер стиля фона, PLAY=1 — нажать «играть/пауза» в начале, ART=номер исполнителя (artist).
+# Переменные: WAVE=номер стиля фона, MUSIC=1 — через 3 с после старта включить музыку, PLAY=1 — нажать «играть/пауза» в начале, ART=номер исполнителя (artist).
 # Медленные кадры (> 30 мс) — строками «медленно»: последнее нажатие, через сколько, отрисовка и ожидание pan.
 # Обычный XMB останавливается и после замера запускается снова. Строки fps: на кадр мс в lvgl (с копированием
 # и pan), копирование, ожидание pan, сон в poll, строк скопировано, кадров дольше 20 мс, самый долгий
@@ -28,6 +28,7 @@ opts2) SC="wait$W,left$(rep wait 5)$(rep down 8),enter$(rep wait 10)$(rep down 9
 player) C=",nextalbum$(rep wait 8)"; SC="wait$W,enter${PLAY:+,play}$(rep wait 15)$C$C$C$C$C$C$C$C$C$C$C$C$W"; M="7:покой 10:плеер" ;;
 player2) C=",nextalbum$(rep wait 8)"; B=",prevalbum$(rep wait 8)"   # туда и обратно: обратно — всё уже в кэшах
 	SC="wait$W,enter${PLAY:+,play}$(rep wait 15)$C$C$C$C$C$C$C$C$B$B$B$B$B$B$B$B$W"; M="7:покой 10:плеер" ;;
+popen) C=",enter$(rep wait 20),esc$(rep wait 20)"; SC="wait$W${PLAY:+,play}$C$C$C$C$C$C$C$C$W"; M="7:покой 10:плеер" ;;   # раскрыть и свернуть плеер
 pidle) SC="wait$W,enter${PLAY:+,play}$W$W$W"; M="9:плеер 15:плеер" ;;
 play) SC="wait$W,enter,play$W$W,power$W$W$W,power,play"; M="9:играет 17:экран_погашен 24:экран_погашен" ;;
 esac
@@ -35,7 +36,7 @@ sh /tmp/stop_xmb.sh > /dev/null
 X=/data/mnt/sd_0/.xmb
 mkdir -p /tmp/prof_save && cp $X/settings.txt $X/last.txt $X/queue.txt /tmp/prof_save/ 2>/dev/null   # сценарий меняет — вернуть
 cd /tmp/xmb
-env ${WAVE:+XMB_WAVE=$WAVE} XMB_STEP=80 XMB_SCRIPT="$SC" ./xmb /tmp/xmb/fonts > /tmp/prof.log 2>&1 &   # WAVE=номер стиля фона
+env ${WAVE:+XMB_WAVE=$WAVE} XMB_STEP=80 XMB_SCRIPT="${MUSIC:+$(rep wait 40),play,}$SC" ./xmb /tmp/xmb/fonts > /tmp/prof.log 2>&1 &   # WAVE=номер стиля фона
 P=$!
 t=0
 for m in $M; do
@@ -45,6 +46,6 @@ for m in $M; do
 done
 wait $P
 cp /tmp/prof_save/* $X/ 2>/dev/null
-grep -E "fps|suspend|медленно" /tmp/prof.log
+grep -E "fps|suspend|медленно|ввод|кадр логики" /tmp/prof.log
 setsid nohup sh /tmp/run_xmb.sh > /dev/null 2>&1 < /dev/null &
 sleep 3

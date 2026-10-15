@@ -14,6 +14,7 @@
 #include <unistd.h>
 
 #include "lvgl/lvgl.h"
+#include "filesave.h"
 #include "xmb.h"
 
 #define W 320
@@ -107,6 +108,7 @@ static void script_step(lv_timer_t *t)
 {
 	(void)t;
 	if (!script_pos || !*script_pos) {
+		fsave_flush();
 		exit(0);
 	}
 	char *end = strchr(script_pos, ',');

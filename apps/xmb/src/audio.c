@@ -742,20 +742,34 @@ static void eq_setup(int on, const float *gain, int rate)
 	eq.on = on && eq.n > 0;
 }
 
+/* полоса за полосой по всему куску, каждый канал отдельно: состояние фильтра — в регистрах, а не в памяти
+ * на каждом сэмпле (так было в 5 раз дороже: ~20% процессора на 96 кГц) */
 static void eq_process(int16_t *buf, unsigned frames)
 {
-	for (unsigned i = 0; i < frames; i++)
+	static float x[2][CHUNK];
+	for (unsigned i = 0; i < frames; i++) {
+		x[0][i] = buf[i * 2] * eq.pre + 1e-18f;   /* добавка — против денормалов на хвостах */
+		x[1][i] = buf[i * 2 + 1] * eq.pre + 1e-18f;
+	}
+	for (int k = 0; k < eq.n; k++) {
+		const float b0 = eq.f[k].b0, b1 = eq.f[k].b1, b2 = eq.f[k].b2, a1 = eq.f[k].a1, a2 = eq.f[k].a2;
 		for (int c = 0; c < 2; c++) {
-			float x = buf[i * 2 + c] * eq.pre + 1e-18f;   /* добавка — против денормалов на хвостах */
-			for (int k = 0; k < eq.n; k++) {
-				float y = eq.f[k].b0 * x + eq.f[k].z[c][0];
-				eq.f[k].z[c][0] = eq.f[k].b1 * x - eq.f[k].a1 * y + eq.f[k].z[c][1];
-				eq.f[k].z[c][1] = eq.f[k].b2 * x - eq.f[k].a2 * y;
-				x = y;
+			float z0 = eq.f[k].z[c][0], z1 = eq.f[k].z[c][1], *v = x[c];
+			for (unsigned i = 0; i < frames; i++) {
+				float in = v[i], y = b0 * in + z0;
+				z0 = b1 * in - a1 * y + z1;
+				z1 = b2 * in - a2 * y;
+				v[i] = y;
 			}
-			int v = (int)lrintf(x);
-			buf[i * 2 + c] = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
+			eq.f[k].z[c][0] = z0;
+			eq.f[k].z[c][1] = z1;
 		}
+	}
+	for (unsigned i = 0; i < frames * 2; i++) {
+		float y = x[i & 1][i >> 1];
+		y = y > 32767.0f ? 32767.0f : y < -32768.0f ? -32768.0f : y;
+		buf[i] = (int16_t)(y >= 0 ? y + 0.5f : y - 0.5f);   /* округление без lrintf — он здесь вызов функции */
+	}
 }
 
 void audio_set_eq(int on, const float gain[EQ_BANDS])
@@ -835,6 +849,7 @@ static void take_cmds(void)
 static void *audio_thread(void *arg)
 {
 	(void)arg;
+
 	static int16_t buf[CHUNK * 2], nb[CHUNK * 2];
 	for (;;) {
 		pthread_mutex_lock(&a.mu);
@@ -904,8 +919,14 @@ static void *audio_thread(void *arg)
 			a.level = rms > 1 ? 1 : rms;
 			if (eq.on)
 				eq_process(buf, got);
-			if (spec_on)   /* экран погашен — спектр никто не видит */
+			/* экран погашен или фону спектр не нужен — не считать; фон обновляется 45 раз в секунду, а куски
+			 * на 96 кГц идут под сотню в секунду — БПФ не чаще 25 раз */
+			static unsigned spec_frames;
+			spec_frames += got;
+			if (spec_on && spec_frames >= (unsigned)rate / 25) {
+				spec_frames = 0;
 				spectrum(buf, got, rate);
+			}
 #if XMB_DEVICE
 			a.idle = 0;
 #endif

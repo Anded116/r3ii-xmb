@@ -17,6 +17,7 @@
 #include "lvgl/lvgl.h"
 #include "audio.h"
 #include "cover.h"
+#include "filesave.h"
 #include "library.h"
 #include "i18n.h"
 #include "playlist.h"
@@ -451,11 +452,29 @@ static void set_pos(lv_obj_t *o, int x, int y)
 		lv_obj_set_pos(o, x, y);
 }
 
+/* прозрачность текста — при отрисовке, а не стилем: у метки любое изменение стиля пересчитывает раскладку текста
+ * (замер всех букв, «…»), а при прокрутке прозрачность строк меняется каждый кадр. Значение — в user_data + 1
+ * (0 — ещё не задано) */
+static void opa_draw_cb(lv_event_t *e)
+{
+	lv_draw_label_dsc_t *d = lv_draw_task_get_label_dsc(lv_event_get_draw_task(e));
+	if (d)
+		d->opa = LV_OPA_MIX2(d->opa, (int)(intptr_t)lv_obj_get_user_data(lv_event_get_current_target(e)) - 1);
+}
+
 static void set_opa(lv_obj_t *o, int opa)
 {
 	opa = opa < 0 ? 0 : opa > 255 ? 255 : opa;
-	if (lv_obj_get_style_text_opa(o, 0) != opa)
-		lv_obj_set_style_text_opa(o, (lv_opa_t)opa, 0);
+	intptr_t cur = (intptr_t)lv_obj_get_user_data(o);
+	if (cur == opa + 1)
+		return;
+	if (!cur) {
+		lv_obj_set_style_text_opa(o, LV_OPA_COVER, 0);
+		lv_obj_set_send_draw_task_events(o, true);
+		lv_obj_add_event_cb(o, opa_draw_cb, LV_EVENT_DRAW_TASK_ADDED, NULL);
+	}
+	lv_obj_set_user_data(o, (void *)(intptr_t)(opa + 1));
+	lv_obj_invalidate(o);
 }
 
 static void set_scale(lv_obj_t *o, int scale)
@@ -1065,6 +1084,19 @@ static void layout_index(void)
 	}
 }
 
+/* колонка без видимых строк — скрыть контейнер целиком: иначе каждая перерисовка любой области обходит все его
+ * строки (у LVGL цена области — обход дерева объектов, а колонок с пулами строк до десятка) */
+static void column_cont_vis(column_t *c)
+{
+	int vis = 0;
+	for (int i = 0; i < POOL && c->pool_ready && !vis; i++) {
+		const row_t *r = &c->rows[i];
+		vis = !lv_obj_is_hidden(r->icon) || !lv_obj_is_hidden(r->img) || !lv_obj_is_hidden(r->title) ||
+		      !lv_obj_is_hidden(r->sub);
+	}
+	set_hidden(c->cont, !vis);
+}
+
 static void layout(void)
 {
 	double dt_ = s.depth_t, ft = s.focus_t, deep = clamp01(dt_);
@@ -1116,6 +1148,10 @@ static void layout(void)
 	if (s.sh_t > 0 || s.sh_open)
 		layout_shade();
 	layout_index();
+	for (int c = 0; c < NCAT; c++)
+		column_cont_vis(&s.cat_col[c]);
+	for (int d = 1; d < MAX_DEPTH; d++)
+		column_cont_vis(&s.stack[d]);
 }
 
 /* ---------- верхняя панель, мини-плеер ---------- */
@@ -2422,12 +2458,11 @@ static void last_save(void)
 		return;
 	char f[320];
 	last_file(f, sizeof(f));
-	FILE *fp = fopen(f, "w");
-	if (!fp)
-		return;
 	const lib_track_t *tr = &s.lib->tracks[s.track];
-	fprintf(fp, "path=%s\nstart=%.3f\npos=%.1f\nqi=%d\n", tr->path, tr->start, s.resume ? s.resume_pos : s.pos, s.qi);
-	fclose(fp);
+	char buf[1200];
+	int n = snprintf(buf, sizeof(buf), "path=%s\nstart=%.3f\npos=%.1f\nqi=%d\n", tr->path, tr->start,
+			 s.resume ? s.resume_pos : s.pos, s.qi);
+	fsave(f, buf, n < (int)sizeof(buf) ? (size_t)n : sizeof(buf) - 1);
 }
 
 /* при старте: последний трек прошлого запуска — в мини-плеер, на паузе, очередь — его альбом */
@@ -2461,8 +2496,8 @@ static void q_file(char *out, size_t cap)
 		snprintf(sl + 1, cap - (size_t)(sl + 1 - out), "queue.txt");
 }
 
-/* запись на карту (exFAT) может встать на десятки миллисекунд — в кадре анимации это рывок. Очередь и последний
- * трек пишутся через 2 с после последнего изменения (frame_cb), перед сном, USB, стоком, удалением — сразу */
+/* очередь и последний трек пишутся через 2 с после последнего изменения (frame_cb) фоновой записью (filesave),
+ * перед сном, USB, стоком, удалением — сразу и с ожиданием */
 static uint32_t q_dirty, last_dirty;
 
 static void q_save(void)
@@ -2484,22 +2519,24 @@ static void save_flush(void)
 		q_write();
 	q_dirty = last_dirty = 0;
 	last_save();
+	fsave_flush();
 }
 
 static void q_write(void)
 {
-	char f[320], tmp[330];
+	char f[320], *buf = NULL;
+	size_t len = 0;
 	if (!s.settings_path[0])
 		return;
 	q_file(f, sizeof(f));
-	snprintf(tmp, sizeof(tmp), "%s.tmp", f);
-	FILE *fp = fopen(tmp, "w");
+	FILE *fp = open_memstream(&buf, &len);
 	if (!fp)
 		return;
 	for (int i = 0; i < q_len; i++)
 		fprintf(fp, "%s\t%.3f\n", s.lib->tracks[q_nodes[i].track].path, s.lib->tracks[q_nodes[i].track].start);
 	fclose(fp);
-	rename(tmp, f);
+	fsave(f, buf, len);
+	free(buf);
 }
 
 /* очередь изменилась: открытый её список, пункт «Очередь», заказанный движку следующий, файл */
@@ -3101,12 +3138,20 @@ static void frame_cb(lv_timer_t *t)
 	bg_set_spectrum(sp, AUDIO_BANDS);
 
 	if (s.screen_on) {
+		static int prof = -1;   /* замеры (XMB_SCRIPT): долгие раскладка и волна — в журнал */
+		if (prof < 0)
+			prof = getenv("XMB_SCRIPT") != NULL;
+		uint32_t t0 = lv_tick_get();
 		player_tick(dt);
 		if (!player_covers())
 			layout();
+		uint32_t t1 = lv_tick_get();
 		if (!player_carousel_moving())   /* полоса обложек и волна вместе не укладываются в кадр — волна ждёт */
 			bg_tick(dt);
 		update_topbar();
+		uint32_t t2 = lv_tick_get();
+		if (prof && t2 - t0 > 8)
+			printf("кадр логики: раскладка %u мс, волна и верх %u мс\n", t1 - t0, t2 - t1);
 	}
 	set_hidden(s.main, player_covers());
 	bg_set_dim(player_covers() ? PLAYER_DIM : 0);
@@ -3120,9 +3165,12 @@ static void apply_theme(void)
 	bg_set_colors(theme_colors[s.theme][0], theme_colors[s.theme][1]);
 }
 
+static void spectrum_update(void);
+
 static void apply_wave(void)
 {
 	bg_set_wave((bg_wave_t)s.wave);
+	spectrum_update();
 }
 
 static void apply_gain(void)
@@ -3363,6 +3411,7 @@ void xmb_storage_prepare(void)
 	save_flush();
 	s.settings_ms = 0;
 	settings_poll();
+	fsave_flush();
 	audio_release();
 	cover_hold(1);
 	s.settings_path[0] = 0;
@@ -3580,10 +3629,16 @@ static void eq_touch(lv_point_t p)
 	eq_set(band, (int)lround((EQ_MID - p.y) / (double)EQ_PX));
 }
 
+/* спектр звука — для фонов, которые его показывают (у «Волны PSP» — только уровень), пока экран включён */
+static void spectrum_update(void)
+{
+	audio_set_spectrum(s.screen_on && s.wave != BG_WAVE_PSP && s.wave != BG_WAVE_OFF);
+}
+
 static void screen(int on)
 {
 	s.screen_on = on;
-	audio_set_spectrum(on);
+	spectrum_update();
 	set_hidden(s.off, on);
 	s.input_ms = lv_tick_get();
 }
@@ -4339,12 +4394,15 @@ static void settings_poll(void)
 	snprintf(dir, sizeof(dir), "%s", s.settings_path);
 	*strrchr(dir, '/') = 0;
 	mkdir(dir, 0755);
-	FILE *f = fopen(s.settings_path, "w");
+	char *buf = NULL;
+	size_t len = 0;
+	FILE *f = open_memstream(&buf, &len);
 	if (f) {
 		for (unsigned i = 0; i < N(settings); i++)
 			fprintf(f, "%s=%d\n", settings[i].key, *settings[i].val);
 		fclose(f);
-		sync();
+		fsave(s.settings_path, buf, len);
+		free(buf);
 	}
 	s.settings_sig = h;
 }
@@ -4352,6 +4410,7 @@ static void settings_poll(void)
 void xmb_init(const char *font_dir)
 {
 	memset(&s, 0, sizeof(s));
+	fsave_init();
 	s.f_title = load_font(font_dir, "NotoSans-SemiBold.ttf", 17);
 	s.f_item = load_font(font_dir, "NotoSans-Regular.ttf", 15);
 	s.f_sub = load_font(font_dir, "NotoSans-Regular.ttf", 12);
@@ -4395,6 +4454,7 @@ void xmb_init(const char *font_dir)
 	lv_obj_set_scrollable(scr, false);
 	bg_create(scr);
 	apply_theme();
+	bg_prerender(theme_colors, N(theme_colors));
 	apply_wave();
 	apply_bright();
 	s.main = plain(scr);

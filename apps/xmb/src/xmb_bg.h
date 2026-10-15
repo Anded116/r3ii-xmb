@@ -24,6 +24,7 @@ typedef enum {
 
 void bg_create(lv_obj_t *parent);
 void bg_set_colors(uint32_t top, uint32_t bottom);
+void bg_prerender(const uint32_t (*colors)[2], int n);   /* фоны тем — заранее, в фоне */
 void bg_set_wave(bg_wave_t w);
 void bg_tick(double dt);
 void bg_set_level(double level);            /* 0..1 — уровень звука для визуализатора */

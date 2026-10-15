@@ -5,10 +5,14 @@
  * и отдаёт прямоугольники, которые изменились; LVGL перерисовывает только их (и то, что лежит поверх).
  * Спектр звука раскладывается по ширине экрана, басы слева. В плеере полоса опускается под обложку.
  */
+#define _GNU_SOURCE   /* SCHED_IDLE */
 #include "xmb_bg.h"
 #include "waves/wave.h"
 
 #include <math.h>
+#include <pthread.h>
+#include <sched.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define W 320
@@ -52,21 +56,22 @@ static const uint8_t bayer[8][8] = {
 	{ 15, 47, 7, 39, 13, 45, 5, 37 }, { 63, 31, 55, 23, 61, 29, 53, 21 },
 };
 
-void bg_set_colors(uint32_t top, uint32_t bottom)
+/* мягкое светлое пятно сверху слева, как в XMB: не зависит от темы, считается один раз */
+static uint8_t glow[W * H];
+
+static void glow_init(void)
 {
-	/* мягкое светлое пятно сверху слева, как в XMB: не зависит от темы, считается один раз */
-	static uint8_t glow[W * H];
-	static int glow_ready;
-	if (!glow_ready) {
-		for (int y = 0; y < H; y++)
-			for (int x = 0; x < W; x++) {
-				double dx = (x - 90) / 260.0, dy = (y - 120) / 300.0;
-				glow[y * W + x] = (uint8_t)(255 * exp(-(dx * dx + dy * dy) * 2.2));
-			}
-		glow_ready = 1;
-	}
-	/* целочисленно (предпросмотр темы пересчитывает фон на каждом шаге по списку): канал в 1/65536 долях,
-	 * свечение добавляет до 0.10; уровень = канал × (уровней − 1) + дизеринг (Байер 8×8) */
+	for (int y = 0; y < H; y++)
+		for (int x = 0; x < W; x++) {
+			double dx = (x - 90) / 260.0, dy = (y - 120) / 300.0;
+			glow[y * W + x] = (uint8_t)(255 * exp(-(dx * dx + dy * dy) * 2.2));
+		}
+}
+
+/* целочисленно: канал в 1/65536 долях, свечение добавляет до 0.10; уровень = канал × (уровней − 1) + дизеринг
+ * (Байер 8×8). Фон — ~20 мс: на каждом шаге предпросмотра тем это рывок, поэтому фоны тем готовятся заранее */
+static void render_bg(uint16_t *out, uint32_t top, uint32_t bottom)
+{
 	int t[3] = { (top >> 16) & 255, (top >> 8) & 255, top & 255 };
 	int b[3] = { (bottom >> 16) & 255, (bottom >> 8) & 255, bottom & 255 };
 	static const int levels[3] = { 32, 64, 32 };
@@ -84,9 +89,57 @@ void bg_set_colors(uint32_t top, uint32_t bottom)
 				int q = (v * (levels[i] - 1) + d) >> 16;
 				c[i] = q >= levels[i] ? levels[i] - 1 : q;
 			}
-			pixels[y * W + x] = (uint16_t)((c[0] << 11) | (c[1] << 5) | c[2]);
+			out[y * W + x] = (uint16_t)((c[0] << 11) | (c[1] << 5) | c[2]);
 		}
 	}
+}
+
+/* готовые фоны тем: заполняет поток с SCHED_IDLE (bg_prerender), берёт bg_set_colors */
+#define CACHE 16
+static struct {
+	uint32_t top, bottom;
+	uint16_t *px;
+	int ready;   /* __atomic: поток дописал px */
+} cache[CACHE];
+static int ncache;
+
+static void *prerender(void *arg)
+{
+	(void)arg;
+	struct sched_param sp = { 0 };
+	pthread_setschedparam(pthread_self(), SCHED_IDLE, &sp);
+	for (int i = 0; i < ncache; i++) {
+		render_bg(cache[i].px, cache[i].top, cache[i].bottom);
+		__atomic_store_n(&cache[i].ready, 1, __ATOMIC_RELEASE);
+	}
+	return NULL;
+}
+
+void bg_prerender(const uint32_t (*colors)[2], int n)
+{
+	for (int i = 0; i < n && ncache < CACHE; i++) {
+		uint16_t *px = malloc(sizeof(pixels));
+		if (!px)
+			break;
+		cache[ncache].top = colors[i][0];
+		cache[ncache].bottom = colors[i][1];
+		cache[ncache].px = px;
+		ncache++;
+	}
+	pthread_t t;
+	if (pthread_create(&t, NULL, prerender, NULL) == 0)
+		pthread_detach(t);
+}
+
+void bg_set_colors(uint32_t top, uint32_t bottom)
+{
+	int i = 0;
+	while (i < ncache && (cache[i].top != top || cache[i].bottom != bottom || !__atomic_load_n(&cache[i].ready, __ATOMIC_ACQUIRE)))
+		i++;
+	if (i < ncache)
+		memcpy(pixels, cache[i].px, sizeof(pixels));
+	else
+		render_bg(pixels, top, bottom);
 	full = 1;
 	dim_done = 0;
 	if (dim)
@@ -257,6 +310,7 @@ void bg_tick(double dt)
 
 void bg_create(lv_obj_t *parent)
 {
+	glow_init();
 	memset(&img, 0, sizeof(img));
 	img.header.magic = LV_IMAGE_HEADER_MAGIC;
 	img.header.cf = LV_COLOR_FORMAT_RGB565;

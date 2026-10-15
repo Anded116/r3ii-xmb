@@ -39,7 +39,7 @@ void audio_set_replaygain(float db, float peak);
  * кроссфейд. path = NULL — следующего нет. audio_play_range сбрасывает заказ */
 void audio_set_next(const char *path, double start, double end, double dur_hint, float rg_db, float rg_peak, int xfade);
 void audio_set_crossfade(int ms);   /* 0 — выкл */
-void audio_set_spectrum(int on);    /* считать спектр (при погашенном экране не нужен) */
+void audio_set_spectrum(int on);    /* считать спектр (при погашенном экране и фону без спектра не нужен) */
 void audio_get_status(audio_status_t *st);
 int audio_supported(const char *path);   /* по расширению */
 

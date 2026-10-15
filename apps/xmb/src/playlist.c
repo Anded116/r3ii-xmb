@@ -4,6 +4,8 @@
  */
 #include "playlist.h"
 
+#include "filesave.h"
+
 #include <dirent.h>
 #include <math.h>
 #include <stdio.h>
@@ -218,13 +220,14 @@ static void rel_path(const char *dir, const char *path, char *out, size_t cap)
 
 int pl_save(const library_t *L, const playlist_t *p, const char *root)
 {
-	char dir[1100], tmp[1110];
+	char dir[1100];
 	snprintf(dir, sizeof(dir), "%s", p->file);
 	*strrchr(dir, '/') = 0;
 	(void)root;
 	mkdir(dir, 0755);
-	snprintf(tmp, sizeof(tmp), "%s.tmp", p->file);
-	FILE *f = fopen(tmp, "w");
+	char *buf = NULL;
+	size_t len = 0;
+	FILE *f = open_memstream(&buf, &len);
 	if (!f)
 		return -1;
 	fprintf(f, "#EXTM3U\n");
@@ -238,9 +241,9 @@ int pl_save(const library_t *L, const playlist_t *p, const char *root)
 		fprintf(f, "%s\n", rel);
 	}
 	fclose(f);
-	int r = rename(tmp, p->file);
-	sync();
-	return r;
+	fsave(p->file, buf, len);
+	free(buf);
+	return 0;
 }
 
 void pl_move(playlist_t *p, int pos, int dir)
@@ -263,21 +266,23 @@ int pl_rename(playlist_t *pls, int n, int i, const char *dir, const char *name)
 	struct stat st;
 	if (strcmp(f, pls[i].file) && stat(f, &st) == 0)
 		return -1;
+	fsave_flush();   /* заказанная запись под старым именем иначе создала бы его заново */
 	if (stat(pls[i].file, &st) == 0 && rename(pls[i].file, f) != 0)   /* ещё не сохранённый — файла нет */
 		return -1;
 	free(pls[i].name);
 	free(pls[i].file);
 	pls[i].name = strdup(name);
 	pls[i].file = strdup(f);
-	sync();
+	fsave_sync();
 	return 0;
 }
 
 void pl_delete(playlist_t **pls, int *n, int i)
 {
 	playlist_t *v = *pls;
+	fsave_flush();
 	unlink(v[i].file);
-	sync();
+	fsave_sync();
 	free(v[i].name);
 	free(v[i].file);
 	free(v[i].tracks);

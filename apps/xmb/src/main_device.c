@@ -23,6 +23,7 @@
 
 #include "lvgl/lvgl.h"
 #include "audio.h"
+#include "filesave.h"
 #include "xmb.h"
 
 #define W 320
@@ -260,7 +261,10 @@ static void script_step(lv_timer_t *t)
 		snprintf(script_tok, sizeof(script_tok), "%s", tok);
 		script_tok_ms = tick_ms();
 	}
+	uint32_t t0 = tick_ms();
 	xmb_input_name(tok);
+	if (tick_ms() - t0 > 5)
+		printf("ввод %s: %u мс\n", tok, tick_ms() - t0);
 }
 
 static uint32_t tick_ms(void)
@@ -394,7 +398,7 @@ void platform_brightness(int percent)
 {
 	bl_level = percent > 100 ? 100 : percent;
 	if (xmb_screen_on())
-		backlight(1);
+		bl_write(bl_level);   /* экран и так включён: без промежуточного 0 (лишняя запись и мигание) */
 }
 
 /* заряд перечитывается раз в 10 с: верхняя панель спрашивает каждый кадр */
@@ -665,6 +669,7 @@ int main(int argc, char **argv)
 			t_fps = now;
 		}
 	}
+	fsave_flush();   /* заказанные записи настроек и очереди — до выхода */
 	screen_set(1);
 	return exit_code;
 }
