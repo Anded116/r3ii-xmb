@@ -24,11 +24,11 @@
 _Static_assert(WAVE_Y == BAND_Y && WAVE_H == BAND_H && WAVE_W == W && WAVE_BANDS == NSPEC, "полоса модулей волны");
 
 extern const wave_t wave_ps3, wave_ribbon, wave_particles, wave_spectrum, wave_silk, wave_aurora, wave_dust,
-	wave_dust_smooth, wave_pulse, wave_ripple, wave_psp;
+	wave_pulse, wave_ripple, wave_psp;
 /* по порядку bg_wave_t */
 static const wave_t *const modules[BG_WAVE_OFF] = {
 	&wave_ps3, &wave_ribbon, &wave_particles, &wave_spectrum, &wave_silk,
-	&wave_aurora, &wave_dust, &wave_dust_smooth, &wave_pulse, &wave_ripple, &wave_psp,
+	&wave_aurora, &wave_dust, &wave_pulse, &wave_ripple, &wave_psp,
 };
 
 static uint16_t pixels[W * H];

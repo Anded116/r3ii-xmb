@@ -147,7 +147,7 @@ static const uint32_t theme_colors[12][2] = {
 	{ 0x4a1f5a, 0xa35cc0 }, { 0x5a3a08, 0xc98f2a }, { 0x4a2a16, 0x9a6844 }, { 0x5a0f14, 0xc4373e },
 };
 static const char *const wave_names[] = { "Волна PS3", "Лента", "Частицы", "Спектр", "Шёлк", "Сияние", "Звёздная пыль",
-					    "Пыль (плавная)", "Пульс", "Круги", "Волна PSP", "Выключен", NULL };
+					    "Пульс", "Круги", "Волна PSP", "Выключен", NULL };
 static const char *const onoff[] = { "Включено", "Выключено", NULL };
 static const char *const bright_names[] = { "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%", "100%", NULL };
 static const char *const sleep_names[] = { "1 минута", "5 минут", "10 минут", "30 минут", "Выключен", NULL };
@@ -4466,7 +4466,7 @@ static const struct {
 	const char *key;
 	int *val, max;
 } settings[] = {
-	{ "theme", &s.theme, 11 }, { "wave", &s.wave, BG_WAVE_COUNT - 1 }, { "touch_off", &s.touch_off, 1 },
+	{ "theme", &s.theme, 11 }, { "bg", &s.wave, BG_WAVE_COUNT - 1 }, { "touch_off", &s.touch_off, 1 },
 	{ "bright", &s.bright, 9 }, { "bt_off", &s.bt_off, 1 }, { "wifi_off", &s.wifi_off, 1 },
 	{ "codec", &s.codec, 5 }, { "shuffle", &s.shuffle, 1 }, { "repeat", &s.repeat, 2 }, { "eq_on", &s.eq_on, 1 },
 	{ "ui_size", &s.ui_size, 3 }, { "volume", &s.volume, 100 }, { "screen_off", &s.screen_off, 5 },
@@ -4508,6 +4508,12 @@ static void settings_load(void)
 		if (!eq)
 			continue;
 		*eq = 0;
+		if (!strcmp(line, "wave")) {   /* старый ключ: была ещё «Пыль (плавная)» под номером 7 — номера после неё на 1 больше */
+			int v = atoi(eq + 1);
+			v = v <= 6 ? v : v - 1;
+			s.wave = v < 0 ? 0 : v > BG_WAVE_COUNT - 1 ? BG_WAVE_COUNT - 1 : v;
+			continue;
+		}
 		for (unsigned i = 0; i < N(settings); i++)
 			if (!strcmp(line, settings[i].key)) {
 				int v = atoi(eq + 1);

@@ -15,7 +15,6 @@ static const char *const table[][LANG_COUNT] = {
 	{ "Волна PS3", "PS3 wave", "Onda PS3" }, { "Лента", "Ribbon", "Cinta" }, { "Частицы", "Particles", "Partículas" },
 	{ "Спектр", "Spectrum", "Espectro" }, { "Шёлк", "Silk", "Seda" }, { "Сияние", "Aurora", "Aurora" },
 	{ "Звёздная пыль", "Stardust", "Polvo de estrellas" },
-	{ "Пыль (плавная)", "Stardust (smooth)", "Polvo (suave)" },
 	{ "Волна PSP", "PSP wave", "Onda PSP" }, { "Пульс", "Pulse", "Pulso" }, { "Круги", "Ripples", "Ondas" },
 	{ "Выключен", "Off", "Desactivado" }, { "Включён", "On", "Activado" }, { "Включено", "On", "Activado" },
 	{ "Выключено", "Off", "Desactivado" },

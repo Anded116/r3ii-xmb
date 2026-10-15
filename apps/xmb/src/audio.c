@@ -710,12 +710,17 @@ static void spectrum(const int16_t *buf, unsigned frames, int rate)
 
 const int eq_freq[EQ_BANDS] = { 31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000 };
 
-/* пиковые фильтры RBJ (Q ≈ 1.4 — октавные полосы), транспонированная прямая форма II, float.
- * Перед ними — ослабление на самый большой подъём, чтобы усиленные полосы не перегружали 16 бит */
+/* пиковые фильтры RBJ (Q ≈ 1.4 — октавные полосы) в фиксированной точке: коэффициенты Q2.29, сигнал — 16 бит
+ * с EQ_S дробными битами, прямая форма I, накопление в 64 бита (mult/madd/msub на MIPS32). Отброшенная при
+ * округлении часть уходит в следующий сэмпл: у низких полос на 96 кГц полюса почти на единичной окружности, и без
+ * этого ошибка округления раздувается. Точнее float (тот на 96 кГц ошибался до сотен единиц) и на треть быстрее.
+ * Перед фильтрами — ослабление на самый большой подъём, чтобы усиленные полосы не перегружали 16 бит */
+#define EQ_Q 29
+#define EQ_S 10
 static struct {
 	int on, n, rate;
-	float pre;
-	struct { float b0, b1, b2, a1, a2, z[2][2]; } f[EQ_BANDS];
+	int32_t pre;   /* Q15 */
+	struct { int32_t b0, b1, b2, a1, a2, x[2][2], y[2][2]; int64_t e[2]; } f[EQ_BANDS];
 } eq;
 
 static void eq_setup(int on, const float *gain, int rate)
@@ -729,46 +734,53 @@ static void eq_setup(int on, const float *gain, int rate)
 		if (fabsf(gain[i]) < 0.05f || eq_freq[i] > rate * 0.45)
 			continue;
 		double A = pow(10, gain[i] / 40.0), w = 2 * M_PI * eq_freq[i] / rate, al = sin(w) / (2 * 1.41);
-		double a0 = 1 + al / A;
-		eq.f[eq.n].b0 = (float)((1 + al * A) / a0);
-		eq.f[eq.n].b1 = (float)(-2 * cos(w) / a0);
-		eq.f[eq.n].b2 = (float)((1 - al * A) / a0);
+		double a0 = 1 + al / A, q = (double)(1 << EQ_Q);
+		memset(&eq.f[eq.n], 0, sizeof(eq.f[eq.n]));
+		eq.f[eq.n].b0 = (int32_t)lrint((1 + al * A) / a0 * q);
+		eq.f[eq.n].b1 = (int32_t)lrint(-2 * cos(w) / a0 * q);
+		eq.f[eq.n].b2 = (int32_t)lrint((1 - al * A) / a0 * q);
 		eq.f[eq.n].a1 = eq.f[eq.n].b1;
-		eq.f[eq.n].a2 = (float)((1 - al / A) / a0);
-		memset(eq.f[eq.n].z, 0, sizeof(eq.f[eq.n].z));
+		eq.f[eq.n].a2 = (int32_t)lrint((1 - al / A) / a0 * q);
 		eq.n++;
 	}
-	eq.pre = powf(10, -top / 20);
+	eq.pre = (int32_t)lrint(pow(10, -top / 20) * 32768);
 	eq.on = on && eq.n > 0;
 }
 
-/* полоса за полосой по всему куску, каждый канал отдельно: состояние фильтра — в регистрах, а не в памяти
- * на каждом сэмпле (так было в 5 раз дороже: ~20% процессора на 96 кГц) */
+/* полоса за полосой по всему куску, каждый канал отдельно: состояние фильтра — в регистрах */
 static void eq_process(int16_t *buf, unsigned frames)
 {
-	static float x[2][CHUNK];
+	static int32_t x[2][CHUNK];
 	for (unsigned i = 0; i < frames; i++) {
-		x[0][i] = buf[i * 2] * eq.pre + 1e-18f;   /* добавка — против денормалов на хвостах */
-		x[1][i] = buf[i * 2 + 1] * eq.pre + 1e-18f;
+		x[0][i] = (buf[i * 2] * eq.pre) >> (15 - EQ_S);
+		x[1][i] = (buf[i * 2 + 1] * eq.pre) >> (15 - EQ_S);
 	}
 	for (int k = 0; k < eq.n; k++) {
-		const float b0 = eq.f[k].b0, b1 = eq.f[k].b1, b2 = eq.f[k].b2, a1 = eq.f[k].a1, a2 = eq.f[k].a2;
+		const int32_t b0 = eq.f[k].b0, b1 = eq.f[k].b1, b2 = eq.f[k].b2, a1 = eq.f[k].a1, a2 = eq.f[k].a2;
 		for (int c = 0; c < 2; c++) {
-			float z0 = eq.f[k].z[c][0], z1 = eq.f[k].z[c][1], *v = x[c];
+			int32_t x1 = eq.f[k].x[c][0], x2 = eq.f[k].x[c][1], y1 = eq.f[k].y[c][0], y2 = eq.f[k].y[c][1], *v = x[c];
+			int64_t e = eq.f[k].e[c];
 			for (unsigned i = 0; i < frames; i++) {
-				float in = v[i], y = b0 * in + z0;
-				z0 = b1 * in - a1 * y + z1;
-				z1 = b2 * in - a2 * y;
-				v[i] = y;
+				int32_t in = v[i];
+				int64_t acc = (int64_t)b0 * in + (int64_t)b1 * x1 + (int64_t)b2 * x2 - (int64_t)a1 * y1 - (int64_t)a2 * y2 + e;
+				int32_t out = (int32_t)(acc >> EQ_Q);
+				e = acc - ((int64_t)out << EQ_Q);
+				x2 = x1;
+				x1 = in;
+				y2 = y1;
+				y1 = out;
+				v[i] = out;
 			}
-			eq.f[k].z[c][0] = z0;
-			eq.f[k].z[c][1] = z1;
+			eq.f[k].x[c][0] = x1;
+			eq.f[k].x[c][1] = x2;
+			eq.f[k].y[c][0] = y1;
+			eq.f[k].y[c][1] = y2;
+			eq.f[k].e[c] = e;
 		}
 	}
 	for (unsigned i = 0; i < frames * 2; i++) {
-		float y = x[i & 1][i >> 1];
-		y = y > 32767.0f ? 32767.0f : y < -32768.0f ? -32768.0f : y;
-		buf[i] = (int16_t)(y >= 0 ? y + 0.5f : y - 0.5f);   /* округление без lrintf — он здесь вызов функции */
+		int32_t y = (x[i & 1][i >> 1] + (1 << (EQ_S - 1))) >> EQ_S;
+		buf[i] = (int16_t)(y > 32767 ? 32767 : y < -32768 ? -32768 : y);
 	}
 }
 
@@ -787,8 +799,9 @@ static void apply_rg(int16_t *buf, unsigned n, float k)
 {
 	if (k == 1.0f || k <= 0)
 		return;
+	int32_t g = (int32_t)(k * 65536 + 0.5f);   /* Q16, целиком: lrintf на каждом сэмпле — вызов функции */
 	for (unsigned i = 0; i < n * 2; i++) {
-		int v = (int)lrintf(buf[i] * k);
+		int32_t v = (int32_t)(((int64_t)buf[i] * g + 32768) >> 16);
 		buf[i] = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
 	}
 }
