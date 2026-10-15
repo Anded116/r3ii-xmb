@@ -3287,13 +3287,21 @@ static void shade_activate(void)
 	refresh_subs();
 }
 
+/* громкость колесом — по делениям шкалы: щелчок — ровно одно деление (к следующему, даже если стоит между ними) */
+static int volume_seg(int v, int dir)
+{
+	int step = 100 / SEG;
+	v = dir > 0 ? (v / step + 1) * step : ((v + step - 1) / step - 1) * step;
+	return v < 0 ? 0 : v > 100 ? 100 : v;
+}
+
 static void shade_adjust(int i, int d)
 {
 	if (i == 0) {
 		s.bright = s.bright + d < 0 ? 0 : s.bright + d > 9 ? 9 : s.bright + d;
 		apply_bright();
 	} else {
-		s.volume = s.volume + d * 2 < 0 ? 0 : s.volume + d * 2 > 100 ? 100 : s.volume + d * 2;
+		s.volume = volume_seg(s.volume, d);
 		audio_set_volume(s.volume);
 		player_set_state(s.playing, s.pos, s.volume);
 	}
@@ -3612,9 +3620,9 @@ int xmb_input_name(const char *name)
 }
 
 /* громкость колесом: в плеере и при погашенном экране */
-static void volume_step(int d)
+static void volume_step(int dir)
 {
-	s.volume = s.volume + d < 0 ? 0 : s.volume + d > 100 ? 100 : s.volume + d;
+	s.volume = volume_seg(s.volume, dir);
 	audio_set_volume(s.volume);
 	player_set_state(s.playing, s.pos, s.volume);
 	player_show_volume();
@@ -3629,7 +3637,7 @@ void xmb_input(xmb_input_t in)
 		return;
 	}
 	if (!s.screen_on && (in == XMB_WHEEL_UP || in == XMB_WHEEL_DOWN)) {   /* погашенный экран: колесо — громкость */
-		volume_step(in == XMB_WHEEL_UP ? 2 : -2);
+		volume_step(in == XMB_WHEEL_UP ? 1 : -1);
 		return;
 	}
 	/* погашенный экран: работают кнопки воспроизведения, меню — нет */
@@ -3720,7 +3728,7 @@ void xmb_input(xmb_input_t in)
 
 	if (player_shown()) {
 		if (in == XMB_WHEEL_UP || in == XMB_WHEEL_DOWN) {
-			volume_step(in == XMB_WHEEL_UP ? 2 : -2);
+			volume_step(in == XMB_WHEEL_UP ? 1 : -1);
 		} else if (in == XMB_SELECT) {
 			toggle_play();
 		} else if (in == XMB_BACK) {
