@@ -627,15 +627,16 @@ int main(int argc, char **argv)
 			screen_set(screen);
 		}
 		/* автосон: экран погашен, музыка давно не играет — экран загорается с отсчётом, любая кнопка или касание
-		 * отменяет, иначе сон */
-		if (screen && !auto_cd)
+		 * отменяет, иначе сон. Пока на кабеле компьютер (adb, накопитель) — не спим: сон рвёт USB, а adbd после
+		 * него перестаёт открывать оболочку; отсчёт — с отключения кабеля */
+		if ((screen || host) && !auto_cd)
 			off_since = now;
 		uint32_t after = xmb_sleep_after_ms();
 		if (!screen && after && now - off_since >= after && !auto_cd) {
 			xmb_wake();
 			auto_cd = tick_ms();
 		}
-		if (auto_cd && xmb_last_input() > auto_cd) {   /* касание */
+		if (auto_cd && (xmb_last_input() > auto_cd || host)) {   /* касание или подключили к компьютеру */
 			auto_cd = 0;
 			xmb_sleep_countdown(-1, NULL);
 			off_since = now;
