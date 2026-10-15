@@ -69,8 +69,10 @@ static const ui_size_t *sz = &ui_sizes[1];
 #define ROW_COVER 34  /* обложка в строке */
 #define GRID_COLS 3    /* сетка альбомов: колонки, шаг ячейки, обложка, центр текущего ряда */
 #define GRID_CELL 86
-#define GRID_COVER 78
-#define GRID_SEL_Y DEEP_SEL_Y   /* текущий ряд сетки — в ряд со звеном цепочки */
+#define GRID_COVER 70
+#define GRID_TOP (TOP_H + 2)    /* верх первого ряда сетки: 4 ряда с подписями — до мини-плеера */
+#define BIG_ROW 72     /* «список с обложками»: шаг строки и обложка */
+#define BIG_COVER 60
 #define MAX_DEPTH 6
 #define OPT_ROW 40
 #define OPT_W 232   /* наибольшая ширина бокового меню; обычно — по самой длинной строке */
@@ -125,6 +127,7 @@ typedef struct {
 	int nlet, let_at[NLET];   /* алфавитный указатель: буква и первый пункт на неё */
 	char let[NLET][8];
 	int grid;                 /* сетка: ряды по GRID_COLS, rpos — плавная позиция ряда */
+	int big;                  /* список с крупными обложками и тремя строками текста */
 	double rpos;
 } column_t;
 
@@ -155,7 +158,7 @@ static const char *const screen_names[] = { "15 секунд", "30 секунд"
 static const int screen_sec[] = { 15, 30, 60, 120, 300, 0 };
 static const char *const dev_sleep_names[] = { "Через 1 минуту", "Через 5 минут", "Выключен", NULL };
 static const int dev_sleep_sec[] = { 60, 300, 0 };
-static const char *const album_views[] = { "Сетка", "Список", NULL };
+static const char *const album_views[] = { "Сетка", "Список", "Список с обложками", NULL };
 static const char *const gain_names[] = { "Высокое", "Среднее", "Низкое", NULL };
 static const char *const rg_names[] = { "Выключен", "По трекам", "По альбомам", NULL };
 static const char *const lang_names[] = { "Русский", "English", "Español", NULL };   /* каждый — на своём языке */
@@ -685,28 +688,26 @@ static void column_fill(column_t *c, const node_t *nodes, int count)
 	c->sel = 0;
 	c->pos = 0;
 	c->grid = 0;
+	c->big = 0;
 	c->rpos = 0;
 	column_index(c);
 	column_widths(c);
 }
 
-/* иконка строки: в сетке — квадрат цвета альбома (у альбомов без обложки), в списке — просто значок */
-static void grid_tile(row_t *r, const node_t *n)
+/* иконка строки: в сетке у альбома без обложки — пустая обложка (серый квадрат с серой нотой), в списке — значок */
+static void grid_tile(row_t *r, const node_t *n, int size)
 {
-	int w = n ? GRID_COVER : 40, h = n ? GRID_COVER : 30;
+	int w = n ? size : 40, h = n ? size : 30;
 	if (lv_obj_get_width(r->icon) != w || lv_obj_get_height(r->icon) != h) {
 		lv_obj_set_size(r->icon, w, h);
 		lv_obj_set_style_transform_pivot_x(r->icon, w / 2, 0);
 		lv_obj_set_style_transform_pivot_y(r->icon, h / 2, 0);
-		lv_obj_set_style_radius(r->icon, n ? 6 : 0, 0);
 	}
-	if (n) {
-		uint32_t c = player_album_color(n->title);
-		lv_obj_set_style_bg_color(r->icon, lv_color_hex(c), 0);
-		lv_obj_set_style_bg_grad_color(r->icon, lv_color_mix(lv_color_hex(c), lv_color_black(), 140), 0);
-		lv_obj_set_style_bg_grad_dir(r->icon, LV_GRAD_DIR_VER, 0);
-	}
-	if (!n)
+	lv_label_set_text(r->icon, n ? LV_SYMBOL_AUDIO : r->icon_txt);
+	lv_obj_set_style_text_color(r->icon, n ? lv_color_hex(EMPTY_FG) : lv_color_white(), 0);
+	if (n)
+		lv_obj_set_style_bg_color(r->icon, lv_color_hex(EMPTY_BG), 0);
+	else
 		lv_obj_set_style_bg_opa(r->icon, LV_OPA_TRANSP, 0);
 }
 
@@ -718,16 +719,59 @@ static const char *row_icon(const node_t *n)
 	return s.playing ? LV_SYMBOL_PLAY : LV_SYMBOL_PAUSE;
 }
 
+/* «год · N треков» альбома (и его исполнитель — в artist), для списка с обложками */
+static void album_extra(const node_t *n, const char **artist, char *b, size_t cap)
+{
+	int a = 0;
+	while (a < s.lib->nalbums && s.album_nodes[a] != n->kids)
+		a++;
+	int k = n->nkids, m10 = k % 10, m100 = k % 100, year = a < s.lib->nalbums ? s.lib->albums[a].year : 0;
+	*artist = a < s.lib->nalbums ? tx(s.lib->albums[a].artist) : node_sub(n);
+	const char *w = s.lang == LANG_EN ? (k == 1 ? "track" : "tracks") : s.lang == LANG_ES ? (k == 1 ? "pista" : "pistas") :
+			m10 == 1 && m100 != 11 ? "трек" : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? "трека" : "треков";
+	if (year)
+		snprintf(b, cap, "%d · %d %s", year, k, w);
+	else
+		snprintf(b, cap, "%d %s", k, w);
+}
+
+/* шрифт, выравнивание и размер подписей — по виду колонки (пул строк общий для списков и сеток) */
+static void row_style(const column_t *c, row_t *r)
+{
+	const lv_font_t *f = c->grid ? s.m_sub : s.m_item;
+	lv_text_align_t al = c->grid ? LV_TEXT_ALIGN_CENTER : LV_TEXT_ALIGN_LEFT;
+	int w = c->grid ? GRID_CELL - 6 : SCR_W - CAT_X - TEXT_DX - 6 - (c->nlet ? IDX_W : 0) - (c->big ? BIG_COVER - ROW_COVER : 0);
+	int th = c->grid ? s.h_sub + 1 : s.h_title, sh = c->big ? 2 * s.h_sub : s.h_sub;
+	if (lv_obj_get_style_text_font(r->title, 0) != f)
+		lv_obj_set_style_text_font(r->title, f, 0);
+	if (lv_obj_get_style_text_align(r->title, 0) != al) {
+		lv_obj_set_style_text_align(r->title, al, 0);
+		lv_obj_set_style_text_align(r->sub, al, 0);
+	}
+	if (lv_obj_get_width(r->title) != w || lv_obj_get_height(r->title) != th)
+		lv_obj_set_size(r->title, w, th);
+	if (lv_obj_get_width(r->sub) != w || lv_obj_get_height(r->sub) != sh)
+		lv_obj_set_size(r->sub, w, sh);
+}
+
 static void bind_row(column_t *c, row_t *r, int i)
 {
 	const node_t *n = &c->nodes[i];
 	r->idx = i;
 	r->icon_txt = row_icon(n);
+	row_style(c, r);
 	lv_label_set_text(r->icon, r->icon_txt);
 	lv_label_set_text(r->title, tx(n->title));
-	lv_label_set_text(r->sub, node_sub(n));
-	int cs = c->grid ? GRID_COVER : ROW_COVER;   /* пул строк общий для списков и сеток */
-	grid_tile(r, c->grid ? n : NULL);
+	if (c->big && n->kids) {
+		const char *artist;
+		char extra[64];
+		album_extra(n, &artist, extra, sizeof(extra));
+		lv_label_set_text_fmt(r->sub, "%s\n%s", artist, extra);
+	} else {
+		lv_label_set_text(r->sub, node_sub(n));
+	}
+	int cs = c->grid ? GRID_COVER : c->big ? BIG_COVER : ROW_COVER;
+	grid_tile(r, c->grid ? n : NULL, GRID_COVER);
 	if (lv_obj_get_width(r->img) != cs)
 		lv_obj_set_size(r->img, cs, cs);
 	if (lv_image_get_scale(r->img) != 256)
@@ -770,12 +814,35 @@ static double grid_x0(double x)
 	return x - 30;
 }
 
-/* сетка обложек: ряды по GRID_COLS, текущий ряд — на GRID_SEL_Y, название выбранного — внизу над мини-плеером.
- * У родителя (tk → 0) остаётся только выбранная обложка: уменьшается и уезжает в цепочку, как иконка списка */
+/* ряд сетки — обложка и название под ней; у выбранного под названием ещё строка (исполнитель или год), ряды ниже
+ * раздвигаются на неё плавно, по мере подхода выбора */
+static int grid_row_h(void)
+{
+	return GRID_COVER + 8 + s.h_sub;
+}
+
+/* верхний видимый ряд (дробный): сетка — на всю высоту, выбранный ряд — вторым сверху, у краёв упирается */
+static double grid_top(const column_t *c)
+{
+	int rows = (c->count + GRID_COLS - 1) / GRID_COLS;
+	double vis = (double)(SCR_H - MINI_H - GRID_TOP - s.h_sub) / grid_row_h(), max = rows - vis;
+	double top = c->rpos - 1;
+	return top > max ? (max > 0 ? max : 0) : top < 0 ? 0 : top;
+}
+
+/* центр обложки ряда row по вертикали */
+static double grid_cy(const column_t *c, double top, int row)
+{
+	return GRID_TOP + GRID_COVER / 2.0 + (row - top) * grid_row_h() + s.h_sub * clamp01(row - c->rpos);
+}
+
+/* сетка обложек на всю высоту, под каждой — название. У родителя (tk → 0) остаётся только выбранная обложка:
+ * уменьшается и уезжает в цепочку, как иконка списка */
 static void layout_grid(column_t *c, double x, double fade, double tk, int active)
 {
-	int r0 = (int)floor(c->rpos);
-	int lo = (r0 - 1) * GRID_COLS, hi = (r0 + 4) * GRID_COLS - 1;
+	double top = grid_top(c);
+	int r0 = (int)floor(top);
+	int lo = (r0 - 1) * GRID_COLS, hi = (r0 + 5) * GRID_COLS - 1;
 	lo = lo < 0 ? 0 : lo;
 	hi = hi >= c->count ? c->count - 1 : hi;
 	for (int k = 0; k < POOL; k++)
@@ -783,7 +850,7 @@ static void layout_grid(column_t *c, double x, double fade, double tk, int activ
 			c->rows[k].idx = -1;
 			hide_row(&c->rows[k]);
 		}
-	int bot = SCR_H - MINI_H - 58;
+	int lim = SCR_H - MINI_H, tw = GRID_CELL - 6;
 	for (int i = lo; i <= hi; i++) {
 		row_t *r = &c->rows[i % POOL];
 		const node_t *n = &c->nodes[i];
@@ -791,8 +858,10 @@ static void layout_grid(column_t *c, double x, double fade, double tk, int activ
 			bind_row(c, r, i);
 		int sel = i == c->sel;
 		double cx = grid_x0(x) + GRID_CELL / 2.0 + (i % GRID_COLS) * GRID_CELL;
-		double cy = GRID_SEL_Y + (i / GRID_COLS - c->rpos) * GRID_CELL;
-		double edge = clamp01((cy - (TOP_H + 20)) / 60.0) * clamp01((bot - cy) / 60.0);
+		double cy = grid_cy(c, top, i / GRID_COLS);
+		/* у краёв ряды появляются и уходят плавно; низ ячейки — с подписью */
+		double t0 = cy - GRID_COVER / 2.0, t1 = cy + GRID_COVER / 2.0 + 4 + s.h_sub * (sel ? 2 : 1);
+		double edge = clamp01((t0 - (GRID_TOP - 14)) / 12.0) * clamp01((lim + 14 - t1) / 12.0);
 		double k = (sel && active ? 1.0 : active ? 0.62 : 0.45) * fade;
 		if (sel) {   /* к звену цепочки */
 			cx = x + (cx - x) * tk;
@@ -801,7 +870,7 @@ static void layout_grid(column_t *c, double x, double fade, double tk, int activ
 		} else {
 			k *= tk * edge;
 		}
-		if (k < 0.02 || cy < TOP_H - 30 || cy > SCR_H - MINI_H) {
+		if (k < 0.02 || t1 < TOP_H - 10 || t0 > lim) {
 			hide_row(r);
 			continue;
 		}
@@ -826,7 +895,7 @@ static void layout_grid(column_t *c, double x, double fade, double tk, int activ
 		} else {
 			/* квадрат цвета альбома в сетке; в цепочке — обычный значок */
 			if ((tk > 0.5) != (lv_obj_get_width(r->icon) == GRID_COVER))   /* стили — только при смене вида */
-				grid_tile(r, tk > 0.5 ? n : NULL);
+				grid_tile(r, tk > 0.5 ? n : NULL, GRID_COVER);
 			int w = lv_obj_get_width(r->icon), h = lv_obj_get_height(r->icon);
 			set_pos(r->icon, (int)cx - w / 2, (int)cy - h / 2);
 			set_icon_px(r->icon, tk > 0.5 ? 32 : 14);
@@ -836,20 +905,17 @@ static void layout_grid(column_t *c, double x, double fade, double tk, int activ
 			if (lv_obj_get_style_bg_opa(r->icon, 0) != bo)
 				lv_obj_set_style_bg_opa(r->icon, (lv_opa_t)bo, 0);
 		}
-		/* название и исполнитель выбранного — под сеткой */
-		int show_t = sel && tk > 0.5 && active;
+		/* подпись под каждой обложкой: название, у выбранного — и исполнитель (год) */
+		int show_t = tk > 0.5;
 		set_hidden(r->title, !show_t);
-		set_hidden(r->sub, !show_t);
+		set_hidden(r->sub, !(show_t && sel));
 		if (show_t) {
-			int w = GRID_COLS * GRID_CELL, tx = (int)grid_x0(x);
-			if (lv_obj_get_width(r->title) != w)
-				lv_obj_set_width(r->title, w);
-			if (lv_obj_get_width(r->sub) != w)
-				lv_obj_set_width(r->sub, w);
-			set_pos(r->title, tx, bot + 8);
-			set_pos(r->sub, tx, bot + 8 + s.h_title);
-			set_opa(r->title, (int)(255 * fade * (tk - 0.5) * 2));
-			set_opa(r->sub, (int)(180 * fade * (tk - 0.5) * 2));
+			int ty = (int)(cy + GRID_COVER / 2.0 + 3);
+			double kt = k * (tk - 0.5) * 2;
+			set_pos(r->title, (int)cx - tw / 2, ty);
+			set_pos(r->sub, (int)cx - tw / 2, ty + s.h_sub);
+			set_opa(r->title, (int)(255 * fmin(1.0, kt * 1.1)));
+			set_opa(r->sub, (int)(190 * kt));
 		}
 		if (sel && active) {
 			s.glow_x = (int)cx;
@@ -862,11 +928,12 @@ static void layout_grid(column_t *c, double x, double fade, double tk, int activ
 /* ячейка сетки под пальцем или −1 */
 static int grid_hit(const column_t *c, lv_point_t p)
 {
-	double x0 = grid_x0(CAT_X);
+	double x0 = grid_x0(CAT_X), top = grid_top(c);
 	int col = (int)floor((p.x - x0) / GRID_CELL);
-	double rowf = (p.y - GRID_SEL_Y + GRID_CELL / 2.0) / GRID_CELL + c->rpos;
-	int row = (int)floor(rowf);
-	if (col < 0 || col >= GRID_COLS || p.y > SCR_H - MINI_H - 58)
+	int row = (int)floor(top + (p.y - GRID_TOP + 5) / grid_row_h());
+	if (row > c->rpos)   /* ниже выбранного ряды раздвинуты на строку подписи */
+		row = (int)floor(top + (p.y - GRID_TOP + 5 - s.h_sub) / grid_row_h());
+	if (col < 0 || col >= GRID_COLS || p.y < GRID_TOP - 5 || p.y > SCR_H - MINI_H)
 		return -1;
 	int i = row * GRID_COLS + col;
 	return i >= 0 && i < c->count ? i : -1;
@@ -892,7 +959,7 @@ static void layout_column(column_t *c, double x, double fade, double tk, int act
 		if (r->idx != i)
 			bind_row(c, r, i);
 		else if (c->nodes[i].cover) {   /* опрос каждый кадр держит обложку в кэше и подхватывает готовую */
-			const lv_image_dsc_t *cd = cover_get(c->nodes[i].cover, ROW_COVER);
+			const lv_image_dsc_t *cd = cover_get(c->nodes[i].cover, c->big ? BIG_COVER : ROW_COVER);
 			if ((const void *)cd != lv_image_get_src(r->img))
 				lv_image_set_src(r->img, cd);
 		}
@@ -900,16 +967,16 @@ static void layout_column(column_t *c, double x, double fade, double tk, int act
 			r->icon_txt = row_icon(&c->nodes[i]);
 			lv_label_set_text(r->icon, r->icon_txt);
 		}
-		double d = i - c->pos;
+		double d = i - c->pos, rh = c->big ? BIG_ROW : ROW;
 		double y;
 		if (deep)
-			y = DEEP_SEL_Y + d * ROW;
+			y = DEEP_SEL_Y + d * rh;
 		else if (d >= 0)
-			y = ITEM_SEL_Y + d * ROW;
+			y = ITEM_SEL_Y + d * rh;
 		else if (d > -1)
 			y = ITEM_ABOVE_Y + (d + 1) * (ITEM_SEL_Y - ITEM_ABOVE_Y);
 		else
-			y = ITEM_ABOVE_Y + (d + 1) * ROW;
+			y = ITEM_ABOVE_Y + (d + 1) * rh;
 		double near = show_sel ? fmax(0.0, 1.0 - fabs(d)) : 0;
 		double base = d < -0.5 ? 0.45 : 0.62;
 		double k = (active ? base + (1.0 - base) * near : base * 0.75) * fade;
@@ -920,7 +987,7 @@ static void layout_column(column_t *c, double x, double fade, double tk, int act
 		int yy = (int)y;
 		/* у краёв списка строки появляются и уходят плавно, а не за один кадр */
 		int top = deep ? TOP_H + 10 : TOP_H - 14, bot = SCR_H - MINI_H - 12;
-		double edge = clamp01((yy - top) / (ROW * 0.7)) * clamp01((bot - yy) / (ROW * 0.7));
+		double edge = clamp01((yy - top) / (rh * 0.7)) * clamp01((bot - yy) / (rh * 0.7));
 		/* на уровне категорий пункт, уезжающий вверх, пролетает сквозь иконку и название категории — там гаснет */
 		if (!deep && d < 0)
 			edge *= clamp01(fabs((double)(yy - CAT_Y)) / 46.0 - 0.3);
@@ -937,19 +1004,40 @@ static void layout_column(column_t *c, double x, double fade, double tk, int act
 			show_img = 0;
 		set_hidden(r->img, !show_img);
 		set_hidden(r->icon, show_img);
+		/* у списка с обложками обложка крупнее: левый край — тот же, текст — правее на разницу */
+		int cs = c->big && tk > 0.5 ? BIG_COVER : ROW_COVER, cdx = (cs - ROW_COVER) / 2;
 		if (show_img) {
-			set_pos(r->img, (int)x - ROW_COVER / 2, yy - ROW_COVER / 2);
+			if (lv_obj_get_width(r->img) != cs)
+				lv_obj_set_size(r->img, cs, cs);
+			set_pos(r->img, (int)x + cdx - cs / 2, yy - cs / 2);
 			int io = (int)(255 * fmin(1.0, k_icon * 1.15));
 			if (lv_obj_get_style_image_opa(r->img, 0) != io)
 				lv_obj_set_style_image_opa(r->img, (lv_opa_t)io, 0);
 		}
 		set_hidden(r->title, k_text < 0.02);
-		set_hidden(r->sub, !sel || k_text < 0.02);
-		set_pos(r->icon, (int)x - 20, yy - 15);
-		set_pos(r->title, (int)x + TEXT_DX, yy + (sel ? s.dy_title_sel : s.dy_title));
-		set_pos(r->sub, (int)x + TEXT_DX, yy + s.dy_sub);
+		set_hidden(r->sub, !(sel || c->big) || k_text < 0.02);
+		/* список с обложками: у альбома без картинки — пустая обложка того же размера */
+		int tile = c->big && tk > 0.5 && !show_img && r->icon_txt == c->nodes[i].icon;
+		if (tile != (lv_obj_get_width(r->icon) == BIG_COVER))
+			grid_tile(r, tile ? &c->nodes[i] : NULL, BIG_COVER);
+		if (tile) {
+			set_pos(r->icon, (int)x + cdx - BIG_COVER / 2, yy - BIG_COVER / 2);
+			int bo = (int)(255 * fmin(1.0, k_icon * 1.15));
+			if (lv_obj_get_style_bg_opa(r->icon, 0) != bo)
+				lv_obj_set_style_bg_opa(r->icon, (lv_opa_t)bo, 0);
+		} else {
+			set_pos(r->icon, (int)x + cdx - 20, yy - 15);
+		}
+		if (c->big) {   /* три строки текста по высоте обложки */
+			int ty = yy - (s.h_title + 2 * s.h_sub) / 2;
+			set_pos(r->title, (int)x + TEXT_DX + 2 * cdx, ty);
+			set_pos(r->sub, (int)x + TEXT_DX + 2 * cdx, ty + s.h_title);
+		} else {
+			set_pos(r->title, (int)x + TEXT_DX, yy + (sel ? s.dy_title_sel : s.dy_title));
+			set_pos(r->sub, (int)x + TEXT_DX, yy + s.dy_sub);
+		}
 		/* выбранный — icon_sel, остальные — icon, звенья цепочки — 14 */
-		set_icon_px(r->icon, 14 + (sz->icon - 14 + (sz->icon_sel - sz->icon) * near) * tk);
+		set_icon_px(r->icon, tile ? 24 : 14 + (sz->icon - 14 + (sz->icon_sel - sz->icon) * near) * tk);
 		if (sel && active) {
 			s.glow_x = (int)x;
 			s.glow_y = yy;
@@ -1473,9 +1561,6 @@ static void update_np_labels(void)
 	const lib_album_t *al = &s.lib->albums[tr->aidx];
 	lv_label_set_text(s.mini_text, tr->title);
 	lv_label_set_text(s.mini_artist, tx(tr->artist));
-	uint32_t c = player_album_color(al->title);
-	lv_obj_set_style_bg_color(s.mini_thumb, lv_color_hex(c), 0);
-	lv_obj_set_style_bg_grad_color(s.mini_thumb, lv_color_mix(lv_color_hex(c), lv_color_black(), 140), 0);
 	mini_cover();
 	/* соседние альбомы для карусели плеера */
 	int a = s.album_pos[tr->aidx];
@@ -2287,6 +2372,7 @@ static void reveal(int cat, const int *path, int n)
 			break;
 		column_fill(&s.stack[s.depth + 1], nd->kids, nd->nkids);
 		s.stack[s.depth + 1].grid = nd->grid && s.album_view == 0;
+		s.stack[s.depth + 1].big = nd->grid && s.album_view == 2;
 		s.depth++;
 		c = &s.stack[s.depth];
 	}
@@ -2850,7 +2936,9 @@ static void toggle_play(void)
 	last_save_later();
 }
 
-static void next_track(int dir)
+/* by_end — трек доиграл сам: «повтор одного» играет его снова. Кнопкой (свайпом, из меню) — всегда следующий,
+ * режим повтора остаётся */
+static void next_track(int dir, int by_end)
 {
 	if (!s.queue)
 		return;
@@ -2858,11 +2946,13 @@ static void next_track(int dir)
 		play_queue(s.queue, s.qlen, s.next_qi);
 		return;
 	}
-	if (s.repeat == 2) {
+	if (s.repeat == 2 && by_end) {
 		play_queue(s.queue, s.qlen, s.qi);
 		return;
 	}
-	int n = s.shuffle && dir > 0 && s.next_qi >= 0 ? s.next_qi : s.shuffle ? rand() % s.qlen : s.qi + dir;
+	/* заказанный следующий при «повторе одного» — сам текущий трек: для кнопки он не подходит */
+	int planned = s.next_qi >= 0 && s.next_qi != s.qi;
+	int n = s.shuffle && dir > 0 && planned ? s.next_qi : s.shuffle ? rand() % s.qlen : s.qi + dir;
 	if (n < 0 || n >= s.qlen) {
 		if (s.repeat != 1) {   /* конец очереди без повтора — стоп */
 			audio_pause(1);
@@ -3099,7 +3189,7 @@ static void frame_cb(lv_timer_t *t)
 				np_switch(s.queue, s.qlen, s.next_qi);
 		} else if (st.ended && !s.ended_seen) {
 			s.ended_seen = 1;
-			next_track(1);   /* статус этого кадра — ещё от старого трека: не применять */
+			next_track(1, 1);   /* статус этого кадра — ещё от старого трека: не применять */
 		} else {
 			if (st.playing != s.playing) {
 				s.playing = st.playing;
@@ -3498,6 +3588,7 @@ static void select_current(void)
 	} else if (n->kids && s.depth + 1 < MAX_DEPTH) {
 		column_fill(&s.stack[s.depth + 1], n->kids, n->nkids);
 		s.stack[s.depth + 1].grid = n->grid && s.album_view == 0;
+		s.stack[s.depth + 1].big = n->grid && s.album_view == 2;
 		if (n->kids == q_nodes && s.qi < n->nkids)   /* очередь открывается на играющем */
 			s.stack[s.depth + 1].sel = s.stack[s.depth + 1].pos = s.qi;
 		s.depth++;
@@ -3724,7 +3815,7 @@ void xmb_input(xmb_input_t in)
 		return;
 	}
 	if (in == XMB_NEXT_TRACK) {
-		next_track(1);
+		next_track(1, 0);
 		return;
 	}
 	if (in == XMB_PREV_TRACK) {
@@ -4109,7 +4200,7 @@ static void touch_cb(lv_event_t *e)
 		} else if (s.t_mode == T_VLIST && !s.opt_open && drag_column()->grid) {
 			column_t *c = drag_column();
 			int rows = (c->count + GRID_COLS - 1) / GRID_COLS;
-			double v = s.t_start_pos - (double)dy / GRID_CELL;
+			double v = s.t_start_pos - (double)dy / grid_row_h();
 			v = fmax(-0.35, fmin(rows - 1 + 0.35, v));
 			int row = (int)lround(fmax(0, fmin(rows - 1, v)));
 			c->rpos = v;
@@ -4118,7 +4209,7 @@ static void touch_cb(lv_event_t *e)
 				c->sel = c->count - 1;
 		} else if (s.t_mode == T_VLIST) {
 			int n = s.opt_open ? s.opt_count : drag_column()->count;
-			double step = s.opt_open ? OPT_ROW : ROW;
+			double step = s.opt_open ? OPT_ROW : drag_column()->big ? BIG_ROW : ROW;
 			double v = s.t_start_pos - (double)dy / step;
 			v = fmax(-0.35, fmin(n - 1 + 0.35, v));
 			int sel = (int)lround(fmax(0, fmin(n - 1, v)));
@@ -4192,7 +4283,7 @@ static void touch_cb(lv_event_t *e)
 			}
 			double span = (s.t_hist[last].t - s.t_hist[k].t) / 1000.0;
 			double v = span > 0.02 && now - s.t_hist[last].t < 80 ? (s.t_hist[last].y - s.t_hist[k].y) / span : 0;
-			double step = s.opt_open ? OPT_ROW : drag_column()->grid ? GRID_CELL : ROW;
+			double step = s.opt_open ? OPT_ROW : drag_column()->grid ? grid_row_h() : drag_column()->big ? BIG_ROW : ROW;
 			s.kin_v = -v / step;
 			s.kin = fabs(s.kin_v) > 4 ? (s.opt_open ? 2 : 1) : 0;
 			if (s.kin == 1 && fabs(s.kin_v) > 25 && drag_column()->nlet)
@@ -4330,7 +4421,7 @@ static const struct {
 	{ "bright", &s.bright, 9 }, { "bt_off", &s.bt_off, 1 }, { "wifi_off", &s.wifi_off, 1 },
 	{ "codec", &s.codec, 5 }, { "shuffle", &s.shuffle, 1 }, { "repeat", &s.repeat, 2 }, { "eq_on", &s.eq_on, 1 },
 	{ "ui_size", &s.ui_size, 3 }, { "volume", &s.volume, 100 }, { "screen_off", &s.screen_off, 5 },
-	{ "album_view", &s.album_view, 1 }, { "gain", &s.gain, 2 }, { "replaygain", &s.rg_mode, 2 }, { "xfade", &s.xfade, 3 }, { "lang", &s.lang, LANG_COUNT - 1 },
+	{ "album_view", &s.album_view, 2 }, { "gain", &s.gain, 2 }, { "replaygain", &s.rg_mode, 2 }, { "xfade", &s.xfade, 3 }, { "lang", &s.lang, LANG_COUNT - 1 },
 	{ "btn_next_s", &s.btn[0][0], BA_COUNT - 1 }, { "btn_next_l", &s.btn[0][1], BA_COUNT - 1 },
 	{ "btn_next_d", &s.btn[0][2], BA_COUNT - 1 }, { "btn_play_s", &s.btn[1][0], BA_COUNT - 1 },
 	{ "btn_play_l", &s.btn[1][1], BA_COUNT - 1 }, { "btn_play_d", &s.btn[1][2], BA_COUNT - 1 },
@@ -4502,11 +4593,10 @@ void xmb_init(const char *font_dir)
 	s.mini_thumb = plain(np);
 	lv_obj_set_size(s.mini_thumb, 36, 36);
 	lv_obj_set_pos(s.mini_thumb, 10, 9);
-	lv_obj_set_style_radius(s.mini_thumb, 6, 0);
 	lv_obj_set_style_bg_opa(s.mini_thumb, LV_OPA_COVER, 0);
-	lv_obj_set_style_bg_grad_dir(s.mini_thumb, LV_GRAD_DIR_VER, 0);
+	lv_obj_set_style_bg_color(s.mini_thumb, lv_color_hex(EMPTY_BG), 0);
 	lv_obj_t *note = label(s.mini_thumb, &lv_font_montserrat_16, LV_SYMBOL_AUDIO);
-	lv_obj_set_style_text_opa(note, 190, 0);
+	lv_obj_set_style_text_color(note, lv_color_hex(EMPTY_FG), 0);
 	lv_obj_center(note);
 	s.mini_img = lv_image_create(s.mini_thumb);
 	lv_obj_set_size(s.mini_img, 36, 36);

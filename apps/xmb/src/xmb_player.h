@@ -38,6 +38,8 @@ void player_set_neighbors(const char *prev_album, const char *prev_cover, const 
 void player_set_cover(const char *path);   /* обложка вместо кассеты; NULL — кассета */
 void player_drag(int dx);          /* палец тянет карусель */
 void player_release(int dir);      /* dir = ±1 — перешли на соседний альбом, 0 — вернуть на место */
-uint32_t player_album_color(const char *album);   /* цвет «обложки» альбома без картинки */
+/* пустая обложка (альбом без картинки): серый квадрат без скругления и серая нота, как в Apple Music */
+#define EMPTY_BG 0x3a3a3c
+#define EMPTY_FG 0x8e8e93
 
 #endif

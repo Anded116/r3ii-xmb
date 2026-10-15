@@ -85,21 +85,6 @@ static void fmt_time(char *buf, int s)
 	sprintf(buf, "%d:%02d", s / 60, s % 60);
 }
 
-/* ---------- цвет «обложки» ---------- */
-
-uint32_t player_album_color(const char *album)
-{
-	uint32_t h = 2166136261u;
-	for (const char *c = album; c && *c; c++)
-		h = (h ^ (uint8_t)*c) * 16777619u;
-	double hue = (h % 360) / 60.0, sat = 0.55, val = 0.78;
-	double c = val * sat, x = c * (1 - fabs(fmod(hue, 2) - 1)), m = val - c, r = 0, g = 0, b = 0;
-	int i = (int)hue;
-	if (i == 0) { r = c; g = x; } else if (i == 1) { r = x; g = c; } else if (i == 2) { g = c; b = x; }
-	else if (i == 3) { g = x; b = c; } else if (i == 4) { r = x; b = c; } else { r = c; b = x; }
-	return ((uint32_t)((r + m) * 255) << 16) | ((uint32_t)((g + m) * 255) << 8) | (uint32_t)((b + m) * 255);
-}
-
 /* ---------- кассета ---------- */
 
 static void rect(lv_layer_t *l, int x1, int y1, int x2, int y2, uint32_t c, int opa, int r)
@@ -247,26 +232,18 @@ static void card(lv_layer_t *l, int slot, double cx, int top, const char *album,
 		lv_draw_image(l, &id, &a);
 		return;
 	}
-	uint32_t c = player_album_color(album);
+	(void)album;
 	lv_draw_rect_dsc_t d;
 	lv_draw_rect_dsc_init(&d);
-	d.radius = 8;
+	d.bg_color = lv_color_hex(EMPTY_BG);
 	d.bg_opa = (lv_opa_t)opa;
-	d.bg_grad.dir = LV_GRAD_DIR_VER;
-	d.bg_grad.stops[0].color = lv_color_hex(c);
-	d.bg_grad.stops[0].opa = (lv_opa_t)opa;
-	d.bg_grad.stops[0].frac = 0;
-	d.bg_grad.stops[1].color = lv_color_mix(lv_color_hex(c), lv_color_black(), 140);
-	d.bg_grad.stops[1].opa = (lv_opa_t)opa;
-	d.bg_grad.stops[1].frac = 255;
-	d.bg_grad.stops_count = 2;
 	lv_area_t a = { x, y, x + sz - 1, y + sz - 1 };
 	lv_draw_rect(l, &d, &a);
 	lv_draw_label_dsc_t tl;
 	lv_draw_label_dsc_init(&tl);
 	tl.font = &lv_font_montserrat_32;
-	tl.color = lv_color_white();
-	tl.opa = 110;
+	tl.color = lv_color_hex(EMPTY_FG);
+	tl.opa = (lv_opa_t)opa;
 	tl.align = LV_TEXT_ALIGN_CENTER;
 	tl.text = LV_SYMBOL_AUDIO;
 	lv_area_t ta = { x, y + sz / 2 - 18, x + sz - 1, y + sz / 2 + 18 };
@@ -332,9 +309,6 @@ static void cover_refresh(void)
 
 void player_set_cover(const char *path)
 {
-	uint32_t c = player_album_color(p.track ? p.track->album : "");
-	lv_obj_set_style_bg_color(p.pending, lv_color_hex(c), 0);
-	lv_obj_set_style_bg_grad_color(p.pending, lv_color_mix(lv_color_hex(c), lv_color_black(), 140), 0);
 	p.cover_path = path;
 	cover_refresh();
 }
@@ -429,7 +403,7 @@ void player_create(lv_obj_t *parent, const lv_font_t *f_big, const lv_font_t *f_
 	lv_obj_add_event_cb(p.cassette, cassette_draw, LV_EVENT_DRAW_MAIN, NULL);
 	p.pending = box(p.content, COVER_X, COVER_Y, COVER, COVER);
 	lv_obj_set_style_bg_opa(p.pending, LV_OPA_COVER, 0);
-	lv_obj_set_style_bg_grad_dir(p.pending, LV_GRAD_DIR_VER, 0);
+	lv_obj_set_style_bg_color(p.pending, lv_color_hex(EMPTY_BG), 0);
 	lv_obj_set_hidden(p.pending, true);
 	p.cover = lv_image_create(p.content);
 	lv_obj_set_pos(p.cover, COVER_X, COVER_Y);

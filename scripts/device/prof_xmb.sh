@@ -38,6 +38,10 @@ mkdir -p /tmp/prof_save && cp $X/settings.txt $X/last.txt $X/queue.txt /tmp/prof
 cd /tmp/xmb
 env ${WAVE:+XMB_WAVE=$WAVE} XMB_STEP=80 XMB_SCRIPT="${MUSIC:+$(rep wait 40),play,}$SC" ./xmb /tmp/xmb/fonts > /tmp/prof.log 2>&1 &   # WAVE=номер стиля фона
 P=$!
+# оборвалась связь (кабель выдернут, adb закрыт) — всё равно вернуть настройки и обычный XMB: иначе состояние
+# сценария осталось бы в настройках, а следующий замер сохранил бы его как исходное
+trap 'kill $P 2>/dev/null; wait $P 2>/dev/null; cp /tmp/prof_save/* $X/ 2>/dev/null
+	setsid nohup sh /tmp/run_xmb.sh > /dev/null 2>&1 < /dev/null & exit 1' HUP INT TERM
 t=0
 for m in $M; do
 	at=${m%%:*}; name=${m#*:}
@@ -45,6 +49,7 @@ for m in $M; do
 	echo "$name: $(sh /tmp/cpu.sh xmb 4)"; t=$((at + 4))
 done
 wait $P
+trap - HUP INT TERM
 cp /tmp/prof_save/* $X/ 2>/dev/null
 grep -E "fps|suspend|медленно|ввод|кадр логики" /tmp/prof.log
 setsid nohup sh /tmp/run_xmb.sh > /dev/null 2>&1 < /dev/null &

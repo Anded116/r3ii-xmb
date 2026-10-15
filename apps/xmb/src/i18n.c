@@ -24,6 +24,7 @@ static const char *const table[][LANG_COUNT] = {
 	{ "30 секунд", "30 seconds", "30 segundos" }, { "2 минуты", "2 minutes", "2 minutos" }, { "Никогда", "Never", "Nunca" },
 	{ "Через 1 минуту", "After 1 minute", "Tras 1 minuto" }, { "Через 5 минут", "After 5 minutes", "Tras 5 minutos" },
 	{ "Сетка", "Grid", "Cuadrícula" }, { "Список", "List", "Lista" },
+	{ "Список с обложками", "List with covers", "Lista con portadas" },
 	{ "Высокое", "High", "Alta" }, { "Среднее", "Medium", "Media" }, { "Низкое", "Low", "Baja" },
 	{ "По трекам", "Track", "Por pista" }, { "По альбомам", "Album", "Por álbum" },
 	{ "2 с", "2 s", "2 s" }, { "4 с", "4 s", "4 s" }, { "6 с", "6 s", "6 s" },
