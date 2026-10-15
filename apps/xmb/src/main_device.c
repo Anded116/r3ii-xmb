@@ -148,6 +148,7 @@ static void deep_sleep(void)
 #define LUN GADGETS "/android0/functions/mass_storage.0/lun.0/file"
 #define SD_DEV "/dev/mmcblk0p1"
 #define SD_MNT "/usr/data/mnt/sd_0"
+#define SD_OPTS "fmask=0022,dmask=0022,iocharset=utf8,namecase=0"
 #define XMB_RESTART 3
 #define USB_HOLD_MS 1000   /* в режиме накопителя: удержание колеса — вернуть карту */
 
@@ -227,11 +228,23 @@ static int usb_storage_begin(void)
 	return 1;
 }
 
+static int sd_mounted(void)
+{
+	FILE *f = fopen("/proc/mounts", "r");
+	char line[256];
+	int found = 0;
+	while (f && !found && fgets(line, sizeof(line), f))
+		found = strstr(line, " " SD_MNT " ") != NULL;
+	if (f)
+		fclose(f);
+	return found;
+}
+
 static void usb_storage_end(void)
 {
 	write_str(LUN, "");
 	write_str(GADGETS "/android0/UDC", "");
-	if (mount(SD_DEV, SD_MNT, "exfat", MS_RELATIME, "fmask=0022,dmask=0022,iocharset=utf8,namecase=0") < 0)
+	if (mount(SD_DEV, SD_MNT, "exfat", MS_RELATIME, SD_OPTS) < 0)
 		perror("usb: mount");
 	write_str(usb_adb ? GADGETS "/adb_demo/UDC" : GADGETS "/android0/UDC", usb_udc);
 	printf("usb: storage end\n");
@@ -503,6 +516,7 @@ int main(int argc, char **argv)
 	uint32_t auto_cd = 0;   /* начало отсчёта перед автоматическим сном, 0 — нет */
 	uint32_t usb_ms = 0;
 	int host = usb_host(), exit_code = 0;   /* кабель, подключённый до запуска, — без диалога */
+	int sd_heal = 0;   /* попыток вернуть карту, отнятую стоком */
 	xmb_usb_host(host, 0);
 
 	uint32_t prof_tick = 0, prof_poll = 0;
@@ -578,6 +592,18 @@ int main(int argc, char **argv)
 		/* USB: раз в секунду — компьютер подключён или отключён; в режиме накопителя — его конец */
 		if (now - usb_ms >= (usb_storage ? 500u : 1000u)) {
 			usb_ms = now;
+			/* карта пропала не по нашей воле: сток при загрузке с кабелем отдаёт её под накопитель, уже когда XMB
+			 * дождался карты и запустился. Вернуть себе и начать заново — библиотеке нужны файлы */
+			if (!usb_storage && sd_heal < 3 && !sd_mounted()) {
+				sd_heal++;
+				write_str(LUN, "");
+				if (mount(SD_DEV, SD_MNT, "exfat", MS_RELATIME, SD_OPTS) == 0) {
+					printf("карта: была отмонтирована — смонтирована заново\n");
+					exit_code = XMB_RESTART;
+					break;
+				}
+				perror("карта: mount");
+			}
 			int h = usb_host();
 			if (h != host && !usb_storage)
 				xmb_usb_host(h, 1);
