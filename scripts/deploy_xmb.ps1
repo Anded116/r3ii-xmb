@@ -17,3 +17,5 @@ foreach ($f in $fonts) { $files += , @("$r\apps\xmb\res\fonts\$f", "/tmp/xmb/fon
 foreach ($s in $scripts) { $files += , @("$r\scripts\device\$s", "/tmp/"); $files += , @("$r\scripts\device\$s", "$sd/xmb/") }
 foreach ($f in $files) { & $adb push $f[0] $f[1] | Out-Null }
 & $adb shell "chmod +x /tmp/xmb/xmb /tmp/inject; sync; ls /tmp/xmb /tmp/xmb/fonts $sd/xmb"
+# прошивка с xmb_boot.sh запускает XMB из внутренней памяти — обновить и её
+& $adb shell "[ -x /usr/bin/xmb_boot.sh ] && mkdir -p /usr/data/xmb/fonts && cp $sd/xmb/xmb $sd/xmb/inject $sd/xmb/*.sh /usr/data/xmb/ && cp $sd/xmb/fonts/* /usr/data/xmb/fonts/ && chmod +x /usr/data/xmb/xmb /usr/data/xmb/inject && sync && echo 'внутренняя память обновлена'"

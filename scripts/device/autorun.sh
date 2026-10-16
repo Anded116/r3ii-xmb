@@ -62,6 +62,20 @@ if [ -f $DIR/adb ] || [ -f $DIR/adb_keep ]; then
 	ps | grep -v grep | grep adbd
 fi
 
+# прошивка с xmb_boot.sh запускает XMB из внутренней памяти — установить или обновить её с карты
+# (только изменившиеся файлы: флеш не переписывать на каждой загрузке)
+if [ -x /usr/bin/xmb_boot.sh ] && [ -f $DIR/xmb/xmb ]; then
+	mkdir -p /usr/data/xmb/fonts
+	n=0
+	for f in $DIR/xmb/xmb $DIR/xmb/inject $DIR/xmb/*.sh $DIR/xmb/fonts/*; do
+		t=/usr/data/xmb/${f#$DIR/xmb/}
+		cmp -s $f $t || { cp $f $t.new && mv $t.new $t && n=$((n+1)); }
+	done
+	chmod +x /usr/data/xmb/xmb /usr/data/xmb/inject
+	sync
+	echo "== xmb: во внутренней памяти обновлено файлов: $n"
+fi
+
 # XMB вместо стокового плеера (scripts/device/xmb_start.sh в папке установки)
 [ -f /tmp/xmb_start.sh ] && setsid sh /tmp/xmb_start.sh $DIR > /tmp/xmb_start.log 2>&1 < /dev/null &
 echo "== end $(date)"

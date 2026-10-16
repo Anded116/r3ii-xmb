@@ -1,10 +1,14 @@
 # run_xmb.sh — XMB вместо стокового плеера; выход («Настройки → Стоковый плеер») или падение → reboot.
-# Выход — следующая загрузка в сток (xmb_skip_once для autorun.sh). Падение в первую минуту считается в xmb_fails:
-# после двух подряд autorun.sh XMB не запускает. Проработал дольше минуты — счётчик сброшен.
-# Журнал — на карте (hiby_dev/xmb.log, прошлый запуск — xmb.log.prev): /tmp при перезагрузке стирается.
+# Выход — следующая загрузка в сток (xmb_skip_once). Падение в первую минуту считается в xmb_fails: после двух
+# подряд при загрузке XMB не запускается. Проработал дольше минуты — счётчик сброшен. Флаги — во внутренней памяти
+# (/usr/data/xmb, прошивка с xmb_boot.sh), без неё — на карте (hiby_dev, для autorun.sh).
+# Журнал — на карте (hiby_dev/xmb.log, прошлый запуск — xmb.log.prev), без карты — /tmp/xmb.log.
 # Нет строки «xmb exit» в конце — перезагрузилось ядро, а не XMB. Код 3 — перезапуск XMB без перезагрузки.
 D=/data/mnt/sd_0/hiby_dev
+F=$D
+[ -x /usr/bin/xmb_boot.sh ] && F=/usr/data/xmb
 LOG=$D/xmb.log
+[ -d $D ] || LOG=/tmp/xmb.log
 mv -f $LOG $LOG.prev 2>/dev/null
 echo "=== $(date) запуск" > $LOG
 sh /tmp/stop_stock.sh >> $LOG 2>&1
@@ -18,12 +22,12 @@ while :; do
 	echo "=== $(date) перезапуск после USB" >> $LOG
 done
 if [ $rc -eq 0 ]; then
-	rm -f $D/xmb_fails
-	touch $D/xmb_skip_once
+	rm -f $F/xmb_fails
+	touch $F/xmb_skip_once
 elif [ $dt -lt 60 ]; then
-	echo $(( $(cat $D/xmb_fails 2>/dev/null || echo 0) + 1 )) > $D/xmb_fails
+	echo $(( $(cat $F/xmb_fails 2>/dev/null || echo 0) + 1 )) > $F/xmb_fails
 else
-	rm -f $D/xmb_fails
+	rm -f $F/xmb_fails
 fi
 echo "xmb exit $rc after ${dt}s, rebooting" >> $LOG
 dmesg | tail -40 >> $LOG

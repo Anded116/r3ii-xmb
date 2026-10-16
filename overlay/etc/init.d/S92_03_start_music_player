@@ -1,0 +1,23 @@
+#!/bin/sh
+#
+# Плеер: XMB из внутренней памяти, если установлен, иначе стоковый (решает /usr/bin/xmb_boot.sh)
+#
+
+case "$1" in
+  start)
+	echo -n "Starting $0 : begin "
+	( /usr/bin/xmb_boot.sh > /dev/null 2>&1 < /dev/null & )
+	echo -n "Starting $0 : end "
+	;;
+  stop)
+	echo -n "Stopping $0 : "
+	echo "OK"
+	;;
+  restart|reload)
+	;;
+  *)
+	echo "Usage: $0 {start|stop|restart}"
+	exit 1
+esac
+
+exit $?
