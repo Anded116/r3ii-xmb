@@ -658,7 +658,7 @@ static void hide_row(row_t *r)
 }
 
 /* строки создаются один раз на колонку; список любой длины — привязкой к видимым пунктам */
-static void column_fill(column_t *c, const node_t *nodes, int count)
+static void column_pool(column_t *c)
 {
 	if (!c->pool_ready) {
 		for (int i = 0; i < POOL; i++) {
@@ -679,6 +679,11 @@ static void column_fill(column_t *c, const node_t *nodes, int count)
 		}
 		c->pool_ready = 1;
 	}
+}
+
+static void column_fill(column_t *c, const node_t *nodes, int count)
+{
+	column_pool(c);
 	for (int i = 0; i < POOL; i++) {
 		c->rows[i].idx = -1;
 		hide_row(&c->rows[i]);
@@ -4630,6 +4635,12 @@ void xmb_init(const char *font_dir)
 	for (int d = 1; d < MAX_DEPTH; d++) {
 		s.stack[d].cont = plain(s.main);
 		lv_obj_set_size(s.stack[d].cont, SCR_W, SCR_H);
+		/* строки уровней — заранее: создание пула (64 объекта) в кадре первого входа давало рывок; пустая колонка
+		 * скрыта целиком (column_cont_vis), обход дерева их не задевает */
+		column_pool(&s.stack[d]);
+		for (int i = 0; i < POOL; i++)
+			hide_row(&s.stack[d].rows[i]);
+		lv_obj_set_hidden(s.stack[d].cont, true);
 	}
 
 	/* мини-плеер */
