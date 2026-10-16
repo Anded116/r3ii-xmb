@@ -55,7 +55,7 @@ if [ -f $DIR/adb ] || [ -f $DIR/adb_keep ]; then
 	mkdir -p /dev/usb-ffs/adb
 	mount -t functionfs adb /dev/usb-ffs/adb
 	killall adbd 2>/dev/null
-	adbd &
+	adbd > /dev/null 2>&1 < /dev/null &   # не наследовать autorun.log: открытый файл на карте не даёт отдать её USB-накопителю
 	sleep 2
 	ls /sys/class/udc > UDC
 	echo "UDC=$(cat UDC) state=$(cat /sys/class/udc/*/state)"
