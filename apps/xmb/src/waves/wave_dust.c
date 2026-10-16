@@ -1,6 +1,7 @@
 /* Звёздная пыль: светящиеся частицы текут слева направо вдоль невидимой плавной волны (лента), мерцают,
  * у части — гаснущие хвостики вдоль траектории. Басы (spec[0..4]) дают всплеск: частицы ярче, шире
- * разлетаются от линии, хвосты длиннее; спектр по ширине (басы слева) — местная яркость.
+ * разлетаются от линии, хвосты длиннее, ленту качает; спектр по ширине (басы слева) — местная яркость;
+ * верха (spec[20..]) — искры: мелкие частицы вспыхивают.
  *
  * Перерисовка: у каждой частицы своё нарисованное состояние (целый x, y, уровень яркости, хвост).
  * Пересчитывается треть частиц за кадр; если состояние поменялось — старый и новый габарит попадают в
@@ -58,7 +59,7 @@ static par_t par[NP];
 static st_t st[NP];
 static int16_t bx1[NP], by1[NP], bx2[NP], by2[NP];
 static uint32_t flow16, flow_s, rng;
-static int lvs, ebase, burst, started, frame_n;
+static int lvs, ebase, burst, hi, started, frame_n;
 static int spec8[WAVE_BANDS];
 static int amp1, amp2, p1, p2, p3;
 static uint32_t tq;
@@ -123,12 +124,14 @@ static void calc(int i, st_t *s)
 	int c = cy_of(x);
 	int wd = 9 + (((sintab[((x * 640 >> 8) + p3) & (SIN_N - 1)] + 1024) * 11) >> 11);
 	int wob = sintab[((tq * p->wsp >> 5) + p->wph * 4) & (SIN_N - 1)] >> 10;
-	int y = c + ((p->lane * wd) >> 7) + ((p->lane * burst) >> 11) + wob;
+	int y = c + ((p->lane * wd) >> 7) + ((p->lane * burst) >> 10) + wob;
 	y = y < 3 ? 3 : y > WAVE_H - 4 ? WAVE_H - 4 : y;
 	int tw = sintab[((tq * p->tsp >> 4) + p->tph * 4) & (SIN_N - 1)];
 	int a = p->b0 * (176 + (tw >> 4)) >> 8;
-	a = (a * (190 + (spec8[xc * 204 >> 11] * 66 >> 8))) >> 8;
-	a += burst * 96 >> 8;
+	a = (a * (190 + (spec8[xc * 204 >> 11] * 120 >> 8))) >> 8;
+	a += burst * 140 >> 8;
+	if (p->sz == 0 && tw > 0)   /* верха — искры: мелкие частицы вспыхивают на пике мерцания */
+		a += (hi * tw) >> 11;
 	a = a > 255 ? 255 : a;
 	s->ix = (int16_t)x;
 	s->iy = (int16_t)y;
@@ -136,7 +139,7 @@ static void calc(int i, st_t *s)
 	s->tl = 0;
 	s->ts = 0;
 	if (p->tail) {
-		int l = p->tail + (burst >> 6);
+		int l = p->tail + (burst >> 5);
 		s->tl = (uint8_t)(l > 6 ? 6 : l);
 		int ts = c - cy_of(x - 4);
 		s->ts = (int8_t)(ts < -8 ? -8 : ts > 8 ? 8 : ts);
@@ -275,14 +278,18 @@ static void render(uint16_t *dst, const uint16_t *bg, const wave_frame_t *f, wav
 			e += spec8[b];
 	}
 	e /= 5;
-	int k = e - ebase - 20;
+	hi = 0;
+	for (int b = 20; b < WAVE_BANDS; b++)
+		hi += spec8[b];
+	hi /= WAVE_BANDS - 20;
+	int k = e - ebase - 12;
 	ebase += (e - ebase) >> 4;
-	if (k * 3 / 2 > burst)
-		burst = k * 3 / 2 > 200 ? 200 : k * 3 / 2;
+	if (k * 5 / 2 > burst)
+		burst = k * 5 / 2 > 256 ? 256 : k * 5 / 2;
 	else
-		burst = burst * 236 >> 8;
-	amp1 = 26 + (lvs * 14 >> 8);
-	amp2 = 6 + (lvs * 6 >> 8);
+		burst = burst * 228 >> 8;
+	amp1 = 26 + (lvs * 24 >> 8);
+	amp2 = 6 + (lvs * 10 >> 8) + (burst >> 4);
 	p1 = (int)(tq * 4 / 9);
 	p2 = (int)(tq * 4 / 5);
 	p3 = (int)(tq * 4 / 13);

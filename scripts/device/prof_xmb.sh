@@ -1,8 +1,8 @@
-# prof_xmb.sh [list|grid|back|artist|cats|opts|opts2|player|player2|popen|pidle|play] — замер плавности и нагрузки XMB по сценарию (громкость 0).
+# prof_xmb.sh [list|grid|back|artist|cats|opts|opts2|player|player2|popen|shade|pidle|play] — замер плавности и нагрузки XMB по сценарию (громкость 0).
 # list — прокрутка «Всех треков»; grid — сетка альбомов; back — вход в альбом и возврат в сетку (обложки);
 # artist — исполнитель → сетка его альбомов → альбом и обратно, по шести исполнителям;
 # cats — переключение категорий; opts — прокрутка меню выбора (тема, с предпросмотром); opts2 — меню без
-# тяжёлого предпросмотра (яркость); player — смена альбомов в плеере; player2 — туда и обратно; popen — раскрыть и свернуть плеер; pidle — плеер в покое;
+# тяжёлого предпросмотра (яркость); player — смена альбомов в плеере; player2 — туда и обратно; popen — раскрыть и свернуть плеер; shade — шторка; pidle — плеер в покое;
 # play — плеер играет, затем экран гаснет.
 # Переменные: WAVE=номер стиля фона, MUSIC=1 — через 3 с после старта включить музыку, PLAY=1 — нажать «играть/пауза» в начале, ART=номер исполнителя (artist).
 # Медленные кадры (> 30 мс) — строками «медленно»: последнее нажатие, через сколько, отрисовка и ожидание pan.
@@ -29,6 +29,7 @@ player) C=",nextalbum$(rep wait 8)"; SC="wait$W,enter${PLAY:+,play}$(rep wait 15
 player2) C=",nextalbum$(rep wait 8)"; B=",prevalbum$(rep wait 8)"   # туда и обратно: обратно — всё уже в кэшах
 	SC="wait$W,enter${PLAY:+,play}$(rep wait 15)$C$C$C$C$C$C$C$C$B$B$B$B$B$B$B$B$W"; M="7:покой 10:плеер" ;;
 popen) C=",enter$(rep wait 20),esc$(rep wait 20)"; SC="wait$W${PLAY:+,play}$C$C$C$C$C$C$C$C$W"; M="7:покой 10:плеер" ;;   # раскрыть и свернуть плеер
+shade) C=",shade$(rep wait 15),shade$(rep wait 15)"; SC="wait$W${PLAY:+,play}$C$C$C$C$C$C$C$C$W"; M="7:покой 10:шторка" ;;   # открыть и закрыть шторку
 pidle) SC="wait$W,enter${PLAY:+,play}$W$W$W"; M="9:плеер 15:плеер" ;;
 play) SC="wait$W,enter,play$W$W,power$W$W$W,power,play"; M="9:играет 17:экран_погашен 24:экран_погашен" ;;
 esac

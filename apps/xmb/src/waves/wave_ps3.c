@@ -232,8 +232,8 @@ static void render(uint16_t *dst, const uint16_t *bg, const wave_frame_t *f, wav
 		int e = (v * (102400 - 144 * v)) >> 16;
 		e += (lvl * 40) >> 8;
 		e = e > 256 ? 256 : e;
-		gx[x] = 256 + (((gmax - 256) * e) >> 8);
-		int m = 200 + ((v * 200) >> 8) + ((lvl * 50) >> 8);
+		gx[x] = 256 + (((gmax - 256) * e * 160) >> 16);   /* пучок раскрывается умеренно: поверх — текст меню */
+		int m = 135 + ((v * 70) >> 8) + ((lvl * 20) >> 8);
 		mx[x] = (m * fade[x]) >> 8;
 	}
 

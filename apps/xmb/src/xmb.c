@@ -28,6 +28,7 @@
 #include <errno.h>
 #include <ftw.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <stdarg.h>
 #include <unistd.h>
 
@@ -80,13 +81,11 @@ static const ui_size_t *sz = &ui_sizes[1];
 #define MAX_OPTS 16
 #define MINI_H 52
 #define TOP_H 28
-#define SHADE_H 236
-#define NTILE 4
-#define SEG 20         /* сегментов в ползунке шторки */
+#define SHADE_H 304
+#define SEG 30         /* сегментов в ползунке шторки */
 #define ACCENT 0xff7a1a /* оранжевый Walkman */
-#define NSHADE (NTILE + 2)   /* плитки + два ползунка */
 
-enum { A_NONE, A_PLAYER, A_SHADE, A_TRACK, A_EQ, A_BTN_RESET, A_SEARCH, A_STOCK, A_USB };
+enum { A_NONE, A_TRACK, A_EQ, A_BTN_RESET, A_SEARCH, A_STOCK, A_USB, A_NEWPL };
 enum { T_NONE, T_TAP, T_HCAT, T_VLIST, T_SWIPE_UP, T_PLAYER, T_PULL, T_SHADE, T_BACKSWIPE, T_INDEX, T_MINI, T_SEEK, T_EQ };
 
 /* ---------- данные ---------- */
@@ -192,7 +191,7 @@ static const char *const codecs[] = { "Авто", "LDAC", "aptX HD", "aptX", "AA
 static struct {
 	lv_font_t *f_title, *f_item, *f_sub, *f_clock;
 	lv_font_t *m_title, *m_item, *m_sub, *f_letter;   /* шрифты меню — по размеру интерфейса */
-	lv_font_t *f_icons;                               /* Font Awesome 4.7: сердечко */
+	lv_font_t *f_icons, *f_tile;                      /* Font Awesome 4.7: сердечко, плитки шторки */
 	int dy_title, dy_title_sel, dy_sub, h_title, h_sub;
 	lv_obj_t *idx_strip, *bubble, *bubble_lbl;
 	double bubble_t;
@@ -229,8 +228,8 @@ static struct {
 	int opt_open, opt_count, opt_sel, opt_orig, opt_w;
 	double opt_pos, opt_t;
 	/* шторка */
-	lv_obj_t *sh_panel, *sh_icon[NTILE], *sh_label[NTILE], *sh_dot[NTILE], *sh_slider[2], *sh_glow;
-	int sh_open, sh_focus_i, sh_adjust;
+	lv_obj_t *sh_panel, *sh_bg[8], *sh_icon[8], *sh_label[8], *sh_slider[2];
+	int sh_open, sh_drag;   /* sh_drag — палец на ползунке: 1 + номер */
 	double sh_t;
 	/* воспроизведение: очередь — список, из которого запущен трек */
 	int track, playing, volume, ended_seen;
@@ -300,6 +299,7 @@ static void save_flush(void);
 static void last_file(char *out, size_t cap);
 static void last_load(void);
 static void size_metrics(void);
+static void about_fill(void);
 static void slide_tick(double dt);
 static void slide_open(const char *icon, const char *title, const char *sub, const char *hint, int dir,
 		       const char *cancel_text, void (*done)(void), void (*cancelled)(void));
@@ -331,42 +331,68 @@ static const node_t bt_items[] = {
 	DIR(LV_SYMBOL_LIST, "Устройства", NULL, bt_devices),
 	OPT(LV_SYMBOL_AUDIO, "Кодек", codecs, &s.codec, NULL),
 };
-static const node_t set_items[] = {
-	ACT(LV_SYMBOL_DOWN, "Быстрые настройки", "шторка: яркость, беспроводные, режимы", A_SHADE),
-	OPT(LV_SYMBOL_KEYBOARD, "Язык · Language", lang_names, &s.lang, apply_lang),
-	DIR(LV_SYMBOL_BLUETOOTH, "Bluetooth", NULL, bt_items),
-	{ LV_SYMBOL_IMAGE, "Тема оформления", NULL, NULL, 0, theme_names, &s.theme, apply_theme, theme_colors, A_NONE, 0 },
-	OPT(LV_SYMBOL_REFRESH, "Фон", wave_names, &s.wave, apply_wave),
-	OPT(LV_SYMBOL_EDIT, "Размер интерфейса", size_names, &s.ui_size, apply_size),
-	OPT(LV_SYMBOL_IMAGE, "Вид альбомов", album_views, &s.album_view, NULL),
-	OPT(LV_SYMBOL_GPS, "Сенсорное управление", onoff, &s.touch_off, NULL),
-	OPT(LV_SYMBOL_EYE_OPEN, "Яркость", bright_names, &s.bright, apply_bright),
+/* «О системе»: подписи заполняет about_fill при входе */
+static char about_sub[5][64];
+static node_t about_items[] = {
+	{ .icon = LV_SYMBOL_SETTINGS, .title = "XMB", .sub = about_sub[0] },
+	{ .icon = LV_SYMBOL_AUDIO, .title = "Библиотека", .sub = about_sub[1] },
+	{ .icon = LV_SYMBOL_SD_CARD, .title = "Карта памяти", .sub = about_sub[2] },
+	{ .icon = LV_SYMBOL_BATTERY_FULL, .title = "Батарея", .sub = about_sub[3] },
+	{ .icon = LV_SYMBOL_HOME, .title = "Устройство", .sub = "HiBy R3II 2025 · Ingenic X1600E" },
+	{ .icon = LV_SYMBOL_FILE, .title = "Лицензия", .sub = "GPL-3.0 · github.com/Anded116/r3ii-xmb" },
+};
+
+static const node_t sound_items[] = {
 	DIR(LV_SYMBOL_BARS, "Эквалайзер", NULL, eq_items),
 	OPT(LV_SYMBOL_VOLUME_MAX, "Усиление", gain_names, &s.gain, apply_gain),
 	OPT(LV_SYMBOL_SHUFFLE, "ReplayGain", rg_names, &s.rg_mode, apply_rg),
 	OPT(LV_SYMBOL_LOOP, "Кроссфейд", xfade_names, &s.xfade, apply_xfade),
-	DIR(LV_SYMBOL_KEYBOARD, "Кнопки", "что делают кнопки на корпусе", btn_items),
-	OPT(LV_SYMBOL_POWER, "Таймер сна", sleep_names, &s.sleep, sleep_start),
+};
+static const node_t screen_items[] = {
+	{ LV_SYMBOL_IMAGE, "Тема оформления", NULL, NULL, 0, theme_names, &s.theme, apply_theme, theme_colors, A_NONE, 0 },
+	OPT(LV_SYMBOL_REFRESH, "Фон", wave_names, &s.wave, apply_wave),
+	OPT(LV_SYMBOL_EYE_OPEN, "Яркость", bright_names, &s.bright, apply_bright),
+	OPT(LV_SYMBOL_EDIT, "Размер интерфейса", size_names, &s.ui_size, apply_size),
+	OPT(LV_SYMBOL_IMAGE, "Вид альбомов", album_views, &s.album_view, NULL),
 	OPT(LV_SYMBOL_EYE_CLOSE, "Гашение экрана", screen_names, &s.screen_off, NULL),
+};
+static const node_t control_items[] = {
+	DIR(LV_SYMBOL_KEYBOARD, "Кнопки", "что делают кнопки на корпусе", btn_items),
+	OPT(LV_SYMBOL_GPS, "Сенсорное управление", onoff, &s.touch_off, NULL),
+};
+static const node_t power_items[] = {
+	OPT(LV_SYMBOL_POWER, "Таймер сна", sleep_names, &s.sleep, sleep_start),
 	OPT(LV_SYMBOL_POWER, "Сон устройства", dev_sleep_names, &s.dev_sleep, NULL),
-	ACT(LV_SYMBOL_USB, "USB-накопитель", "карта — компьютеру по кабелю", A_USB),
+};
+static const node_t system_items[] = {
 	ACT(LV_SYMBOL_REFRESH, "Стоковый плеер", "обновление прошивки", A_STOCK),
-	ACT(LV_SYMBOL_SETTINGS, "О системе", "HiBy R3II 2025 · XMB-прототип", A_NONE),
+	{ LV_SYMBOL_SETTINGS, "О системе", "HiBy R3II 2025 · XMB", about_items, N(about_items) },
+};
+
+static const node_t set_items[] = {
+	DIR(LV_SYMBOL_AUDIO, "Звук", "эквалайзер, усиление, ReplayGain", sound_items),
+	DIR(LV_SYMBOL_IMAGE, "Экран", "тема, фон, яркость, размер", screen_items),
+	DIR(LV_SYMBOL_BLUETOOTH, "Bluetooth", NULL, bt_items),
+	DIR(LV_SYMBOL_KEYBOARD, "Управление", "кнопки на корпусе, сенсор", control_items),
+	DIR(LV_SYMBOL_POWER, "Питание", "таймер сна, сон устройства", power_items),
+	ACT(LV_SYMBOL_USB, "USB-накопитель", "карта — компьютеру по кабелю", A_USB),
+	OPT(LV_SYMBOL_KEYBOARD, "Язык · Language", lang_names, &s.lang, apply_lang),
+	DIR(LV_SYMBOL_SETTINGS, "Система", "стоковый плеер, о системе", system_items),
 };
 /* «Музыка» и «Папки» строятся из библиотеки после сканирования */
 static char scan_sub[48];
 static const node_t scanning[] = { ACT(LV_SYMBOL_REFRESH, "Сканирование библиотеки…", scan_sub, A_NONE) };
 
 
-/* чаще всего слушают избранное, папки и альбомы: они в шаге от старта («Музыка») */
-enum { CAT_SETTINGS, CAT_MUSIC, CAT_FOLDERS, CAT_PLAYLISTS };
+/* чаще всего слушают альбомы, избранное и папки: они в шаге от старта («Музыка») */
+enum { CAT_SETTINGS, CAT_MUSIC, CAT_PLAYLISTS, CAT_FOLDERS };
 static cat_t cats[] = {
 	{ LV_SYMBOL_SETTINGS, "Настройки", set_items, N(set_items) },
 	{ LV_SYMBOL_AUDIO, "Музыка", scanning, 1 },
-	{ LV_SYMBOL_DIRECTORY, "Папки", scanning, 1 },
 	{ LV_SYMBOL_LIST, "Плейлисты", scanning, 1 },
+	{ LV_SYMBOL_DIRECTORY, "Папки", scanning, 1 },
 };
-enum { MUSIC_NOW, MUSIC_QUEUE, MUSIC_FAV, MUSIC_ALBUMS, MUSIC_ARTISTS, MUSIC_ALL, MUSIC_SEARCH, MUSIC_COUNT };
+enum { MUSIC_QUEUE, MUSIC_ALBUMS, MUSIC_ARTISTS, MUSIC_ALL, MUSIC_SEARCH, MUSIC_COUNT };
 static node_t music[MUSIC_COUNT];
 static node_t *lib_artists, *lib_albums;   /* пункты «Исполнителей» и «Альбомов» — их же показывает поиск */
 #define NCAT N(cats)
@@ -374,15 +400,19 @@ static node_t *lib_artists, *lib_albums;   /* пункты «Исполните�
 /* подписи режимов воспроизведения в плеере */
 static const char *const repeat_names[] = { "Повтор", "Повтор: все", "Повтор: один", NULL };
 
-/* плитки шторки (системное; режимы воспроизведения — в полноэкранном плеере): вкл. при *val == on_val */
+/* плитки шторки: значок Font Awesome (без шрифта — символ LVGL) и подпись; включённая — оранжевым кругом */
+enum { TL_BT, TL_WIFI, TL_EQ, TL_SLEEP, TL_SHUFFLE, TL_REPEAT, TL_TOUCH, TL_USB, NTILE };
 static const struct {
-	const char *icon, *name;
-	int *val, on_val;
+	const char *fa, *sym, *name;
 } tiles[NTILE] = {
-	{ LV_SYMBOL_BLUETOOTH, "Bluetooth", &s.bt_off, 0 },
-	{ LV_SYMBOL_WIFI, "Wi-Fi", &s.wifi_off, 0 },
-	{ LV_SYMBOL_USB, "USB-ЦАП", &s.usb_dac, 1 },
-	{ LV_SYMBOL_GPS, "Тач", &s.touch_off, 0 },
+	{ "\xEF\x8A\x94", LV_SYMBOL_BLUETOOTH, "Bluetooth" },
+	{ "\xEF\x87\xAB", LV_SYMBOL_WIFI, "Wi-Fi" },
+	{ "\xEF\x87\x9E", LV_SYMBOL_BARS, "Эквалайзер" },
+	{ "\xEF\x86\x86", LV_SYMBOL_POWER, "Таймер сна" },
+	{ "\xEF\x81\xB4", LV_SYMBOL_SHUFFLE, "Случайно" },
+	{ "\xEF\x80\x9E", LV_SYMBOL_LOOP, "Повтор" },
+	{ "\xEF\x89\x9A", LV_SYMBOL_GPS, "Сенсор" },
+	{ "\xEF\x8A\x87", LV_SYMBOL_USB, "Отдать карту" },
 };
 
 /* ---------- утилиты ---------- */
@@ -533,12 +563,6 @@ static const char *node_sub(const node_t *n)
 	char *b = buf[k++ & 7];
 	if (n->opts)
 		return tx(n->opts[*n->val]);
-	if (n->action == A_PLAYER) {
-		if (s.track < 0)
-			return tx("ничего не играет");
-		snprintf(b, 64, "%s — %s", tx(s.lib->tracks[s.track].artist), s.lib->tracks[s.track].title);
-		return b;
-	}
 	if (n->action == A_TRACK) {
 		const lib_track_t *tr = &s.lib->tracks[n->track];
 		if (n->cover)
@@ -1080,26 +1104,60 @@ static void layout_options(void)
 	}
 }
 
-#define TILE_X(i) (40 + (i) * 80)
-#define TILE_Y 58
-#define SLIDER_Y(i) (140 + (i) * 50)
+#define TILE_X(i) (40 + (i) % 4 * 80)
+#define TILE_Y(i) (TOP_H + 34 + (i) / 4 * 82)
+#define TILE_R 26
+#define SLIDER_Y(i) (TOP_H + 206 + (i) * 44)
+#define SLIDER_X 56
+#define SLIDER_W 246
+
+static int tile_on(int i)
+{
+	switch (i) {
+	case TL_BT: return !s.bt_off;
+	case TL_WIFI: return !s.wifi_off;
+	case TL_EQ: return s.eq_on;
+	case TL_SLEEP: return s.sleep_end != 0;
+	case TL_SHUFFLE: return s.shuffle;
+	case TL_REPEAT: return s.repeat != 0;
+	case TL_TOUCH: return !s.touch_off;
+	default: return 0;
+	}
+}
+
+static const char *tile_label(int i)
+{
+	static char left[24];
+	if (i == TL_SLEEP && s.sleep_end) {
+		int sec = (int)((int32_t)(s.sleep_end - lv_tick_get()) / 1000);
+		sec = sec < 0 ? 0 : sec;
+		snprintf(left, sizeof(left), "%d:%02d", sec / 60, sec % 60);
+		return left;
+	}
+	if (i == TL_REPEAT)
+		return tx(s.repeat == 2 ? "Один" : s.repeat == 1 ? "Все" : "Повтор");
+	return tx(tiles[i].name);
+}
 
 static void layout_shade(void)
 {
 	set_hidden(s.sh_panel, s.sh_t < 0.01);
 	set_pos(s.sh_panel, 0, (int)(-SHADE_H + SHADE_H * s.sh_t));
+	if (s.sh_t < 0.01)
+		return;
 	for (int i = 0; i < NTILE; i++) {
-		int on = *tiles[i].val == tiles[i].on_val, foc = s.sh_focus_i == i;
-		set_opa(s.sh_icon[i], on ? 255 : 95);
-		set_opa(s.sh_label[i], foc ? 255 : on ? 200 : 95);
-		set_hidden(s.sh_dot[i], !on);
+		int on = tile_on(i);
+		lv_color_t bg = on ? lv_color_hex(ACCENT) : lv_color_white();
+		if (!lv_color_eq(lv_obj_get_style_bg_color(s.sh_bg[i], 0), bg)) {
+			lv_obj_set_style_bg_color(s.sh_bg[i], bg, 0);
+			lv_obj_set_style_bg_opa(s.sh_bg[i], on ? 235 : 34, 0);
+		}
+		set_opa(s.sh_icon[i], on ? 255 : 170);
+		set_opa(s.sh_label[i], on ? 235 : 150);
+		const char *t = tile_label(i);
+		if (strcmp(lv_label_get_text(s.sh_label[i]), t))
+			lv_label_set_text(s.sh_label[i], t);
 	}
-	/* фокус — свечение под плиткой или под значком ползунка, без рамок */
-	int f = s.sh_focus_i;
-	int gx = f < NTILE ? TILE_X(f) : 26, gy = f < NTILE ? TILE_Y : SLIDER_Y(f - NTILE);
-	set_pos(s.sh_glow, gx - 36, gy - 36);
-	for (int i = 0; i < 2; i++)
-		lv_obj_invalidate(s.sh_slider[i]);
 }
 
 /* полоса указателя: по центру области списка, шаг букв не больше 16 px */
@@ -1241,8 +1299,6 @@ static void layout(void)
 	if (lv_obj_get_style_image_opa(s.glow, 0) != gk)
 		lv_obj_set_style_image_opa(s.glow, (lv_opa_t)gk, 0);
 	set_hidden(s.glow, gk < 4);
-	if (s.sh_t > 0 || s.sh_open)
-		layout_shade();
 	layout_index();
 	for (int c = 0; c < NCAT; c++)
 		column_cont_vis(&s.cat_col[c]);
@@ -1465,9 +1521,7 @@ static void library_build(void)
 		all[i].cover = L->albums[L->tracks[L->by_title[i]].aidx].cover;
 	}
 	if (L->ntracks) {
-		music[MUSIC_NOW] = (node_t){ .icon = LV_SYMBOL_PLAY, .title = "Сейчас играет", .action = A_PLAYER };
 		music[MUSIC_QUEUE] = (node_t){ .icon = LV_SYMBOL_NEXT, .title = "Очередь", .sub = "пусто" };   /* q_changed */
-		music[MUSIC_FAV] = (node_t){ .icon = LV_SYMBOL_OK, .title = "Избранное" };   /* треки — из плейлиста */
 		music[MUSIC_ALBUMS] = (node_t){ .icon = LV_SYMBOL_IMAGE, .title = "Альбомы", .kids = albums, .nkids = na, .grid = 1 };
 		music[MUSIC_ARTISTS] = (node_t){ .icon = LV_SYMBOL_AUDIO, .title = "Исполнители", .kids = artists, .nkids = L->nartists };
 		music[MUSIC_ALL] = (node_t){ .icon = LV_SYMBOL_LIST, .title = "Все треки", .kids = all,
@@ -1488,6 +1542,8 @@ static void library_build(void)
 		cats[CAT_MUSIC].count = cats[CAT_FOLDERS].count = 1;
 	}
 	column_fill(&s.cat_col[CAT_MUSIC], cats[CAT_MUSIC].items, cats[CAT_MUSIC].count);
+	if (cats[CAT_MUSIC].items == music)
+		s.cat_col[CAT_MUSIC].sel = s.cat_col[CAT_MUSIC].pos = MUSIC_ALBUMS;
 	column_fill(&s.cat_col[CAT_FOLDERS], cats[CAT_FOLDERS].items, cats[CAT_FOLDERS].count);
 	const char *root = music_root();
 	snprintf(s.pl_dir, sizeof(s.pl_dir), "%s/Playlists", root ? root : ".");
@@ -1514,7 +1570,9 @@ static void nav_save(void)
 
 static void reveal(int cat, const int *path, int n);
 
-static void nav_restore(void)
+/* early — при запуске, библиотеки ещё нет: настройки раскрываются сразу, остальные категории только выбираются,
+ * курсор в них — после сканирования */
+static void nav_restore(int early)
 {
 	FILE *f = fopen(NAV_FILE, "r");
 	int cat, depth, path[MAX_DEPTH], n = 0;
@@ -1524,9 +1582,17 @@ static void nav_restore(void)
 		while (n <= depth && n < MAX_DEPTH && fscanf(f, "%d", &path[n]) == 1)
 			n++;
 	fclose(f);
+	if (!n || cat < 0 || cat >= NCAT) {
+		unlink(NAV_FILE);
+		return;
+	}
+	if (early && cat != CAT_SETTINGS) {
+		s.cat = cat;
+		s.cat_pos = cat;
+		return;
+	}
 	unlink(NAV_FILE);
-	if (n && cat >= 0 && cat < NCAT)
-		reveal(cat, path, n);
+	reveal(cat, path, n);
 }
 
 void xmb_restart_prepare(void)
@@ -1550,7 +1616,7 @@ static void library_poll(void)
 	}
 	s.lib = scan.result ? scan.result : calloc(1, sizeof(library_t));
 	library_build();
-	nav_restore();
+	nav_restore(0);
 }
 
 static void mini_cover(void)
@@ -1642,21 +1708,17 @@ static void toast(const char *fmt, ...)
 	set_hidden(s.toast, false);
 }
 
-/* какой плейлист открыт списком на первом уровне: в «Плейлистах» или «Избранное» в «Музыке»; −1 — никакой */
+/* какой плейлист открыт списком на первом уровне; −1 — никакой (или «Новый плейлист») */
 static int open_pl(void)
 {
-	if (s.cat == CAT_PLAYLISTS)
-		return s.cat_col[CAT_PLAYLISTS].sel;
-	if (s.cat == CAT_MUSIC && cats[CAT_MUSIC].items == music && s.cat_col[CAT_MUSIC].sel == MUSIC_FAV)
-		return PL_FAVORITES;
-	return -1;
+	return s.cat == CAT_PLAYLISTS && s.cat_col[CAT_PLAYLISTS].sel < s.npl ? s.cat_col[CAT_PLAYLISTS].sel : -1;
 }
 
 /* пункты категории «Плейлисты»: у треков — обложки их альбомов (список из разных альбомов).
  * Если открыт плейлист — его список обновляется на месте */
 static void playlists_build(void)
 {
-	node_t *v = calloc(s.npl, sizeof(node_t));
+	node_t *v = calloc(s.npl + 1, sizeof(node_t));
 	for (int i = 0; i < s.npl; i++) {
 		const playlist_t *p = &s.pls[i];
 		v[i].icon = i == PL_FAVORITES ? LV_SYMBOL_OK : LV_SYMBOL_LIST;
@@ -1671,19 +1733,14 @@ static void playlists_build(void)
 			v[i].sub = i == PL_FAVORITES ? "пусто — сердечко в плеере" : "пусто";
 		}
 	}
+	v[s.npl] = (node_t){ .icon = LV_SYMBOL_PLUS, .title = "Новый плейлист", .action = A_NEWPL };
 	cats[CAT_PLAYLISTS].items = v;
-	cats[CAT_PLAYLISTS].count = s.npl;
+	cats[CAT_PLAYLISTS].count = s.npl + 1;
 	column_t *c = &s.cat_col[CAT_PLAYLISTS];
 	int sel = c->sel;
-	column_fill(c, v, s.npl);
-	c->sel = sel < s.npl ? sel : s.npl - 1;
+	column_fill(c, v, s.npl + 1);
+	c->sel = sel <= s.npl ? sel : s.npl;
 	c->pos = c->sel;
-	if (cats[CAT_MUSIC].items == music) {
-		music[MUSIC_FAV].kids = v[PL_FAVORITES].kids;
-		music[MUSIC_FAV].nkids = v[PL_FAVORITES].nkids;
-		music[MUSIC_FAV].sub = v[PL_FAVORITES].sub;
-		refresh_subs();
-	}
 	int open = open_pl();
 	if (open >= 0 && s.depth >= 1) {
 		const node_t *n = &v[open];
@@ -1993,13 +2050,23 @@ static void kb_done(void)
 		toast("%s", "Пустое имя");
 		return;
 	}
+	int fresh = s.kb_pl >= s.npl;
+	if (fresh)
+		s.kb_pl = pl_create(&s.pls, &s.npl, s.pl_dir);
 	if (pl_rename(s.pls, s.npl, s.kb_pl, s.pl_dir, name)) {
+		if (fresh)
+			pl_delete(&s.pls, &s.npl, s.kb_pl);
 		toast("Имя «%s» уже занято", name);
 		return;
 	}
 	kb_close();
+	if (fresh) {
+		pl_save(s.lib, &s.pls[s.kb_pl], s.pl_dir);
+		s.cat_col[CAT_PLAYLISTS].sel = s.kb_pl;
+	}
 	playlists_build();
-	toast("Теперь «%s»", name);
+	s.cat_col[CAT_PLAYLISTS].pos = s.cat_col[CAT_PLAYLISTS].sel;
+	toast(fresh ? "Создан «%s»" : "Теперь «%s»", name);
 }
 
 static void kb_event(lv_event_t *e)
@@ -2032,7 +2099,7 @@ static void kb_event(lv_event_t *e)
 	}
 }
 
-/* pl — переименовать плейлист, pl < 0 — поиск */
+/* pl — переименовать плейлист (s.npl — создать новый), pl < 0 — поиск */
 static void kb_open(int pl, const char *title, const char *text)
 {
 	kb_close();
@@ -2231,6 +2298,8 @@ static void ctx_open(void)
 	cx.n = 0;
 	if (s.cat == CAT_PLAYLISTS && s.depth == 0) {
 		cx.pl = c->sel;
+		if (cx.pl >= s.npl)
+			return;
 		if (cx.pl == PL_FAVORITES) {
 			toast("%s", "«Избранное» не переименовывается и не удаляется");
 			return;
@@ -2774,6 +2843,22 @@ static int q_load(void)
 	return q_len;
 }
 
+/* трек s.track выбран, но не открыт: играть начнёт toggle_play с позиции pos; формат — пока по расширению */
+static void np_select(double pos)
+{
+	const lib_track_t *tr = &s.lib->tracks[s.track];
+	s.dur = tr->dur;
+	s.pos = s.resume_pos = pos;
+	s.resume = 1;
+	s.playing = 0;
+	const char *e = strrchr(tr->path, '.');
+	snprintf(s.np_format, sizeof(s.np_format), "%s", e ? e + 1 : "");
+	for (char *c = s.np_format; *c; c++)
+		*c = (char)(*c >= 'a' && *c <= 'z' ? *c - 32 : *c);
+	update_np_labels();
+	player_set_state(0, s.pos, s.volume);
+}
+
 static void last_load(void)
 {
 	char f[320], line[1100], path[1024] = "";
@@ -2812,15 +2897,7 @@ static void last_load(void)
 				k++;
 			q_set(s.album_nodes[tr->aidx], al->ntracks, k);
 		}
-		s.dur = tr->dur;
-		s.pos = s.resume_pos = pos < tr->dur ? pos : 0;
-		s.resume = 1;
-		const char *e = strrchr(tr->path, '.');
-		snprintf(s.np_format, sizeof(s.np_format), "%s", e ? e + 1 : "");
-		for (char *c = s.np_format; *c; c++)
-			*c = (char)(*c >= 'a' && *c <= 'z' ? *c - 32 : *c);
-		update_np_labels();
-		player_set_state(0, s.pos, s.volume);
+		np_select(pos < tr->dur ? pos : 0);
 		return;
 	}
 }
@@ -2962,10 +3039,16 @@ static void next_track(int dir, int by_end)
 	int planned = s.next_qi >= 0 && s.next_qi != s.qi;
 	int n = s.shuffle && dir > 0 && planned ? s.next_qi : s.shuffle ? rand() % s.qlen : s.qi + dir;
 	if (n < 0 || n >= s.qlen) {
-		if (s.repeat != 1) {   /* конец очереди без повтора — стоп */
+		if (s.repeat != 1) {   /* конец очереди без повтора — стоп на первом треке, «играть» — с начала */
 			audio_pause(1);
-			s.playing = 0;
-			update_np_labels();
+			s.up_next = 0;
+			s.qi = 0;
+			s.track = s.queue[0].track;
+			ab_reset();
+			np_select(0);
+			plan_next();
+			last_save_later();
+			toast("%s", "Конец очереди");
 			return;
 		}
 		n = (n + s.qlen) % s.qlen;
@@ -3115,6 +3198,8 @@ static void frame_cb(lv_timer_t *t)
 		options_preview(s.opt_sel);   /* предпросмотр и при листании пальцем */
 	if (s.t_mode != T_PULL && s.t_mode != T_SHADE)
 		s.sh_t = approach(s.sh_t, s.sh_open, dt, 14);
+	if (s.sh_t > 0 || s.sh_open)
+		layout_shade();   /* поверх и меню, и плеера */
 
 	slide_tick(dt);
 	if (s.bhint_t > 0) {   /* подсказка кнопки: уходит вверх, к своему краю, как боковые — к своим, и гаснет */
@@ -3443,47 +3528,72 @@ static void show_btn_hint(const char *glyph, const lv_font_t *f)
 	lv_point_t sz;
 	lv_text_get_size(&sz, glyph, f, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
 	lv_obj_set_width(s.bhint, sz.x + 26 > 44 ? sz.x + 26 : 44);
-	lv_obj_center(s.bhint_lbl);
+	/* треугольник «играть» выровнен по рамке знака, а глаз центрирует его по массе — она левее на треть */
+	lv_obj_align(s.bhint_lbl, LV_ALIGN_CENTER, !strcmp(glyph, LV_SYMBOL_PLAY) ? 3 : 0, 0);
 	s.bhint_t = 1.0;
 }
 
 static void shade_set(int open)
 {
 	s.sh_open = open;
-	s.sh_adjust = 0;
-	if (open)
-		s.sh_focus_i = 0;
+	s.sh_drag = 0;
+	if (open && s.opt_open)
+		options_cancel();
 }
 
-static void shade_activate(void)
+static void usb_menu(void);
+
+static void tile_tap(int i)
 {
-	int f = s.sh_focus_i;
-	if (f >= NTILE) {
-		s.sh_adjust = !s.sh_adjust;
-		return;
+	switch (i) {
+	case TL_BT: s.bt_off = !s.bt_off; break;
+	case TL_WIFI: s.wifi_off = !s.wifi_off; break;
+	case TL_EQ:
+		s.eq_on = !s.eq_on;
+		eq_apply();
+		break;
+	case TL_SLEEP:   /* выключен → 10 → 30 минут → выключен */
+		s.sleep = s.sleep == SLEEP_OFF ? 2 : s.sleep == 2 ? 3 : SLEEP_OFF;
+		sleep_start();
+		if (s.sleep != SLEEP_OFF)
+			toast("Сон через %d мин", sleep_min[s.sleep]);
+		break;
+	case TL_SHUFFLE: toggle_mode(PM_SHUFFLE); break;
+	case TL_REPEAT: toggle_mode(PM_REPEAT); break;
+	case TL_TOUCH: s.touch_off = !s.touch_off; break;
+	case TL_USB:
+		shade_set(0);
+		usb_menu();
+		break;
 	}
-	*tiles[f].val = *tiles[f].val == tiles[f].on_val ? !tiles[f].on_val : tiles[f].on_val;
 	refresh_subs();
 }
 
 /* громкость колесом — по делениям шкалы: щелчок — ровно одно деление (к следующему, даже если стоит между ними) */
 static int volume_seg(int v, int dir)
 {
-	int step = 100 / SEG;
-	v = dir > 0 ? (v / step + 1) * step : ((v + step - 1) / step - 1) * step;
-	return v < 0 ? 0 : v > 100 ? 100 : v;
+	for (int k = dir > 0 ? 0 : SEG; k >= 0 && k <= SEG; k += dir > 0 ? 1 : -1) {
+		int kv = (k * 100 + SEG / 2) / SEG;
+		if (dir > 0 ? kv > v : kv < v)
+			return kv;
+	}
+	return dir > 0 ? 100 : 0;
 }
 
-static void shade_adjust(int i, int d)
+/* ползунок шторки по касанию: x — точка на дорожке; громкость — по делениям, как колесом */
+static void shade_slider(int i, int x)
 {
+	int k = ((x - SLIDER_X) * (i ? SEG : 10) + SLIDER_W / 2) / SLIDER_W;
 	if (i == 0) {
-		s.bright = s.bright + d < 0 ? 0 : s.bright + d > 9 ? 9 : s.bright + d;
+		s.bright = k - 1 < 0 ? 0 : k - 1 > 9 ? 9 : k - 1;
 		apply_bright();
 	} else {
-		s.volume = volume_seg(s.volume, d);
+		k = k < 0 ? 0 : k > SEG ? SEG : k;
+		s.volume = (k * 100 + SEG / 2) / SEG;
 		audio_set_volume(s.volume);
 		player_set_state(s.playing, s.pos, s.volume);
 	}
+	lv_obj_invalidate(s.sh_slider[i]);
 	refresh_subs();
 }
 
@@ -3696,6 +3806,14 @@ static void usb_commit(void)
 static const node_t usb_node = { .icon = LV_SYMBOL_USB, .title = "USB", .opts = usb_opts, .val = &usb.choice,
 				 .commit = usb_commit };
 
+static void usb_menu(void)
+{
+	if (usb.host)
+		xmb_usb_host(1, 1);   /* тот же выбор, что при подключении кабеля */
+	else
+		toast("%s", "Подключите кабель к компьютеру");
+}
+
 static void usb_return(void)
 {
 	usb.end = 1;
@@ -3781,13 +3899,8 @@ static void select_current(void)
 	if (!c->count)
 		return;
 	const node_t *n = &c->nodes[c->sel];
-	if (n->action == A_PLAYER) {
-		player_show(1);
-	} else if (n->action == A_USB) {
-		if (usb.host)
-			xmb_usb_host(1, 1);   /* тот же экран, что при подключении кабеля */
-		else
-			toast("%s", "Подключите кабель к компьютеру");
+	if (n->action == A_USB) {
+		usb_menu();
 	} else if (n->action == A_STOCK) {
 		slide_open(LV_SYMBOL_REFRESH, "Перезагрузить в сток?",
 			   tx("Один раз загрузится стоковый плеер HiBy, следующая загрузка — снова XMB"), "перезагрузить", 1,
@@ -3798,23 +3911,47 @@ static void select_current(void)
 		toast("%s", "Кнопки — как по умолчанию");
 	} else if (n->action == A_EQ) {
 		eq_open();
-	} else if (n->action == A_SHADE) {
-		shade_set(1);
 	} else if (n->action == A_SEARCH) {
 		kb_open(-1, "Поиск", search_q);
+	} else if (n->action == A_NEWPL) {
+		kb_open(s.npl, "Новый плейлист", "");
 	} else if (n->action == A_TRACK) {
 		play_queue(c->nodes, c->count, c->sel);
 	} else if (n->opts) {
 		options_open(n);
 	} else if (n->kids && s.depth + 1 < MAX_DEPTH) {
-		column_fill(&s.stack[s.depth + 1], n->kids, n->nkids);
-		s.stack[s.depth + 1].grid = n->grid && s.album_view == 0;
-		s.stack[s.depth + 1].big = n->grid && s.album_view == 2;
+		if (n->kids == about_items)
+			about_fill();
+		column_t *k = &s.stack[s.depth + 1];
+		int same = k->nodes == n->kids && k->count == n->nkids, sel = k->sel;   /* вернулись в тот же список */
+		column_fill(k, n->kids, n->nkids);
+		k->grid = n->grid && s.album_view == 0;
+		k->big = n->grid && s.album_view == 2;
 		if (n->kids == q_nodes && s.qi < n->nkids)   /* очередь открывается на играющем */
-			s.stack[s.depth + 1].sel = s.stack[s.depth + 1].pos = s.qi;
+			k->sel = k->pos = s.qi;
+		else if (same) {
+			k->sel = k->pos = sel;
+			k->rpos = k->grid ? sel / GRID_COLS : 0;
+		}
 		s.depth++;
 		layout();
 	}
+}
+
+static void about_fill(void)
+{
+	snprintf(about_sub[0], 64, tx("сборка %s"), __DATE__);
+	if (s.lib)
+		snprintf(about_sub[1], 64, tx("%d треков · %d альбомов · %d исполнителей"), s.lib->ntracks, s.lib->nalbums,
+			 s.lib->nartists);
+	struct statvfs v;
+	const char *root = music_root();
+	if (root && !statvfs(root, &v) && v.f_blocks)
+		snprintf(about_sub[2], 64, tx("свободно %.1f ГБ из %.1f ГБ"), (double)v.f_bavail * v.f_frsize / 1e9,
+			 (double)v.f_blocks * v.f_frsize / 1e9);
+	else
+		snprintf(about_sub[2], 64, "%s", tx("нет карты"));
+	snprintf(about_sub[3], 64, s.bat_chg ? tx("%d%% · заряжается") : "%d%%", s.bat);
 }
 
 static void go_back(void)
@@ -4028,7 +4165,11 @@ void xmb_input(xmb_input_t in)
 		next_group();
 		return;
 	}
-	if (s.kb_panel) {   /* клавиатура — только пальцем; кнопки ничего не делают */
+	if (s.kb_panel) {   /* клавиатура — пальцем, колесо двигает курсор по буквам */
+		if (in == XMB_WHEEL_UP)
+			lv_textarea_cursor_left(s.kb_ta);
+		else if (in == XMB_WHEEL_DOWN)
+			lv_textarea_cursor_right(s.kb_ta);
 		return;
 	}
 	if (in == XMB_MENU) {
@@ -4078,18 +4219,15 @@ void xmb_input(xmb_input_t in)
 		return;
 	}
 
-	if (s.sh_open) {
-		int d = in == XMB_WHEEL_DOWN ? 1 : in == XMB_WHEEL_UP ? -1 : 0;
-		if (d && s.sh_adjust)
-			shade_adjust(s.sh_focus_i - NTILE, d);
-		else if (d)
-			s.sh_focus_i = s.sh_focus_i + d < 0 ? 0 : s.sh_focus_i + d >= NSHADE ? NSHADE - 1 : s.sh_focus_i + d;
-		else if (in == XMB_SELECT)
-			shade_activate();
-		else if (in == XMB_BACK && s.sh_adjust)
-			s.sh_adjust = 0;
-		else if (in == XMB_BACK)
+	if (s.sh_open) {   /* шторка — пальцем; колесо — громкость, клик и «назад» закрывают */
+		if (in == XMB_WHEEL_DOWN || in == XMB_WHEEL_UP) {
+			s.volume = volume_seg(s.volume, in == XMB_WHEEL_UP ? -1 : 1);
+			audio_set_volume(s.volume);
+			player_set_state(s.playing, s.pos, s.volume);
+			lv_obj_invalidate(s.sh_slider[1]);
+		} else if (in == XMB_SELECT || in == XMB_BACK) {
 			shade_set(0);
+		}
 		return;
 	}
 
@@ -4276,44 +4414,31 @@ static column_t *drag_column(void)
 	return s.at_cats ? NULL : cur_col();
 }
 
-/* тач внутри шторки: плитки, ползунки, свайп вверх — закрыть; ниже шторки — обычные тап-зоны */
+/* тач в шторке: тап по плитке — переключить, ползунок — тянуть пальцем, свайп вверх или тап ниже — закрыть */
 static void shade_touch(lv_event_code_t code, lv_point_t p, int dx, int dy)
 {
-	int py = p.y - (int)(-SHADE_H + SHADE_H * s.sh_t);
+	int top = (int)(-SHADE_H + SHADE_H * s.sh_t), py = p.y - top, sy = s.t_start.y - top;
 	if (code == LV_EVENT_PRESSING) {
-		if (dy < -10 && abs(dy) > abs(dx)) {
+		for (int i = 0; i < 2 && !s.sh_drag; i++)
+			if (abs(sy - SLIDER_Y(i)) < 22 && s.t_start.x > SLIDER_X - 16)
+				s.sh_drag = 1 + i;
+		if (s.sh_drag)
+			shade_slider(s.sh_drag - 1, p.x);
+		else if (dy < -10 && abs(dy) > abs(dx))
 			s.sh_t = clamp01(1.0 + dy / (double)SHADE_H);
-			return;
-		}
-		for (int i = 0; i < 2; i++)
-			if (s.t_start.y - (int)(-SHADE_H + SHADE_H * s.sh_t) > SLIDER_Y(i) - 22 &&
-			    s.t_start.y - (int)(-SHADE_H + SHADE_H * s.sh_t) < SLIDER_Y(i) + 22 && p.x > 44) {
-				int v = (p.x - 56) * (i ? 100 : 10) / 250;
-				if (i == 0) {
-					s.bright = v < 0 ? 0 : v > 9 ? 9 : v;
-					apply_bright();
-				} else {
-					s.volume = v < 0 ? 0 : v > 100 ? 100 : v;
-					audio_set_volume(s.volume);
-				}
-				s.sh_focus_i = NTILE + i;
-			}
-	} else if (code == LV_EVENT_RELEASED) {
-		int tap = abs(dx) < 10 && abs(dy) < 10;
-		if (dy < -60) {
-			shade_set(0);
-		} else if (tap && py > SHADE_H) {
-			int right = p.x >= SCR_W / 2;
-			show_hint(right);
-			xmb_input(right ? XMB_SELECT : XMB_BACK);
-		} else if (tap && py < TILE_Y + 50) {
-			int i = (p.x - 0) / 80;
-			if (i >= 0 && i < NTILE) {
-				s.sh_focus_i = i;
-				shade_activate();
-			}
-		}
+		return;
 	}
+	if (code != LV_EVENT_RELEASED)
+		return;
+	int tap = abs(dx) < 10 && abs(dy) < 10;
+	if (s.sh_drag)
+		s.sh_drag = 0;
+	else if (dy < -60 || (tap && py > SHADE_H))
+		shade_set(0);
+	else if (tap)
+		for (int i = 0; i < NTILE; i++)
+			if (abs(p.x - TILE_X(i)) < 38 && py > TILE_Y(i) - TILE_R - 8 && py < TILE_Y(i) + TILE_R + 26)
+				tile_tap(i);
 }
 
 static void touch_cb(lv_event_t *e)
@@ -4408,6 +4533,8 @@ static void touch_cb(lv_event_t *e)
 			if (s.t_menu_off && !(s.t_start.y < TOP_H + 16 && !horiz && dy > 0) && !(in_mini && dy < 0 && !horiz) &&
 			    !(in_mini && horiz))
 				s.t_mode = T_NONE;
+			else if (s.t_start.y < TOP_H + 16 && !horiz && dy > 0 && !s.eq_edit)
+				s.t_mode = T_PULL;   /* шторка — свайпом от верхней панели отовсюду, и из плеера */
 			else if (s.opt_open && !horiz) {
 				s.t_mode = T_VLIST;
 				s.t_start_pos = s.opt_sel;
@@ -4415,8 +4542,6 @@ static void touch_cb(lv_event_t *e)
 				s.t_mode = T_PLAYER;
 			else if (in_mini && horiz)
 				s.t_mode = T_MINI;
-			else if (s.t_start.y < TOP_H + 16 && !horiz && dy > 0)
-				s.t_mode = T_PULL;
 			else if (s.t_start.y > SCR_H - MINI_H && !horiz && dy < 0)
 				s.t_mode = T_SWIPE_UP;
 			else if (horiz && !s.opt_open && s.depth > 0)
@@ -4570,13 +4695,13 @@ static void slider_draw(lv_event_t *e)
 	lv_area_t a;
 	lv_obj_get_coords(o, &a);
 	int lit = idx == 0 ? (s.bright + 1) * SEG / 10 : (s.volume * SEG + 50) / 100;
-	int adj = s.sh_adjust && s.sh_focus_i == NTILE + idx;
+	int adj = s.sh_drag == 1 + idx;
 	lv_draw_rect_dsc_t d;
 	lv_draw_rect_dsc_init(&d);
 	d.radius = 1;
 	int w = lv_area_get_width(&a), sw = w / SEG;
 	for (int i = 0; i < SEG; i++) {
-		lv_area_t sa = { a.x1 + i * sw, a.y1, a.x1 + i * sw + sw - 4, a.y2 };
+		lv_area_t sa = { a.x1 + i * sw, a.y1, a.x1 + i * sw + sw - 3, a.y2 };
 		d.bg_color = i < lit && adj ? lv_color_hex(ACCENT) : lv_color_white();
 		d.bg_opa = i < lit ? 255 : 45;
 		lv_draw_rect(l, &d, &sa);
@@ -4595,26 +4720,20 @@ static void shade_create(lv_obj_t *parent)
 	lv_obj_set_style_opa(s.sh_panel, 235, 0);
 	lv_obj_set_hidden(s.sh_panel, true);
 
-	s.sh_glow = lv_image_create(s.sh_panel);
-	lv_image_set_src(s.sh_glow, bg_glow(GLOW));
-	lv_obj_set_style_image_opa(s.sh_glow, 120, 0);
-
 	for (int i = 0; i < NTILE; i++) {
-		s.sh_icon[i] = label(s.sh_panel, &lv_font_montserrat_28, tiles[i].icon);
-		lv_obj_set_size(s.sh_icon[i], 56, 34);
-		lv_obj_set_style_text_align(s.sh_icon[i], LV_TEXT_ALIGN_CENTER, 0);
-		lv_obj_set_pos(s.sh_icon[i], TILE_X(i) - 28, TILE_Y - 17);
+		s.sh_bg[i] = plain(s.sh_panel);
+		lv_obj_set_size(s.sh_bg[i], TILE_R * 2, TILE_R * 2);
+		lv_obj_set_pos(s.sh_bg[i], TILE_X(i) - TILE_R, TILE_Y(i) - TILE_R);
+		lv_obj_set_style_radius(s.sh_bg[i], LV_RADIUS_CIRCLE, 0);
+		lv_obj_set_style_bg_color(s.sh_bg[i], lv_color_black(), 0);   /* цвет — в layout_shade */
+		s.sh_icon[i] = label(s.sh_bg[i], s.f_tile ? s.f_tile : &lv_font_montserrat_20,
+				     s.f_tile ? tiles[i].fa : tiles[i].sym);
+		lv_obj_center(s.sh_icon[i]);
 		s.sh_label[i] = label(s.sh_panel, s.f_sub, tx(tiles[i].name));
-		lv_obj_set_size(s.sh_label[i], 80, 16);
+		lv_obj_set_size(s.sh_label[i], 80, lv_font_get_line_height(s.f_sub));
 		lv_obj_set_style_text_align(s.sh_label[i], LV_TEXT_ALIGN_CENTER, 0);
 		lv_label_set_long_mode(s.sh_label[i], LV_LABEL_LONG_MODE_DOTS);
-		lv_obj_set_pos(s.sh_label[i], TILE_X(i) - 40, TILE_Y + 22);
-		s.sh_dot[i] = plain(s.sh_panel);
-		lv_obj_set_size(s.sh_dot[i], 16, 3);
-		lv_obj_set_pos(s.sh_dot[i], TILE_X(i) - 8, TILE_Y + 44);
-		lv_obj_set_style_radius(s.sh_dot[i], 1, 0);
-		lv_obj_set_style_bg_color(s.sh_dot[i], lv_color_hex(ACCENT), 0);
-		lv_obj_set_style_bg_opa(s.sh_dot[i], LV_OPA_COVER, 0);
+		lv_obj_set_pos(s.sh_label[i], TILE_X(i) - 40, TILE_Y(i) + TILE_R + 5);
 	}
 
 	const char *icons[2] = { LV_SYMBOL_EYE_OPEN, LV_SYMBOL_VOLUME_MAX };
@@ -4622,12 +4741,18 @@ static void shade_create(lv_obj_t *parent)
 		lv_obj_t *ic = label(s.sh_panel, &lv_font_montserrat_20, icons[i]);
 		lv_obj_set_size(ic, 32, 24);
 		lv_obj_set_style_text_align(ic, LV_TEXT_ALIGN_CENTER, 0);
-		lv_obj_set_pos(ic, 10, SLIDER_Y(i) - 12);
+		lv_obj_set_pos(ic, 12, SLIDER_Y(i) - 12);
 		s.sh_slider[i] = plain(s.sh_panel);
-		lv_obj_set_size(s.sh_slider[i], 250, 12);
-		lv_obj_set_pos(s.sh_slider[i], 56, SLIDER_Y(i) - 6);
+		lv_obj_set_size(s.sh_slider[i], SLIDER_W, 14);
+		lv_obj_set_pos(s.sh_slider[i], SLIDER_X, SLIDER_Y(i) - 7);
 		lv_obj_add_event_cb(s.sh_slider[i], slider_draw, LV_EVENT_DRAW_MAIN, (void *)(intptr_t)i);
 	}
+	lv_obj_t *grip = plain(s.sh_panel);   /* язычок: шторку тянут вверх */
+	lv_obj_set_size(grip, 36, 4);
+	lv_obj_set_pos(grip, (SCR_W - 36) / 2, SHADE_H - 12);
+	lv_obj_set_style_radius(grip, 2, 0);
+	lv_obj_set_style_bg_color(grip, lv_color_white(), 0);
+	lv_obj_set_style_bg_opa(grip, 90, 0);
 }
 
 /* смещения строк от центра пункта по высоте шрифтов меню */
@@ -4766,6 +4891,7 @@ void xmb_init(const char *font_dir)
 	s.m_sub = load_font(font_dir, "NotoSans-Regular.ttf", 12);
 	s.f_letter = load_font(font_dir, "NotoSans-SemiBold.ttf", 40);
 	s.f_icons = load_font(font_dir, "FontAwesome4.ttf", 20);
+	s.f_tile = load_font(font_dir, "FontAwesome4.ttf", 22);
 	if (!s.f_title || !s.f_item || !s.f_sub || !s.f_clock || !s.f_bat || !s.m_title || !s.m_item || !s.m_sub || !s.f_letter)
 		s.f_title = s.f_item = s.f_sub = s.f_clock = s.f_bat = s.m_title = s.m_item = s.m_sub = s.f_letter =
 			(lv_font_t *)&lv_font_montserrat_14;
@@ -4988,6 +5114,7 @@ void xmb_init(const char *font_dir)
 	library_start();
 	for (int c = 0; c < NCAT; c++)
 		column_fill(&s.cat_col[c], cats[c].items, cats[c].count);
+	nav_restore(1);
 	lv_label_set_text(s.cat_title, tx(cats[s.cat].title));
 	apply_size();
 	update_np_labels();

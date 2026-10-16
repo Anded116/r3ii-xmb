@@ -18,17 +18,17 @@
 #define BAR_X0 1
 #define BASE 102                  /* строка центральной линии: столбик над ней, отражение под ней */
 #define HMIN 16                   /* высота в тишине, 1/16 px */
-#define HMAX 1344                 /* 84 px */
+#define HMAX 960                  /* 60 px */
 #define KROWS 96
 #define MROWS 48
 #define REFL_N 7                  /* высота отражения = h * 7 / 16 */
 #define REFL_D 44                 /* строк, за которые отражение гаснет полностью */
-#define A_BOT 56                  /* яркость столбика (0..256) у основания и у верха */
-#define A_TOP 190
-#define A_REFL 58                 /* яркость отражения у основания */
+#define A_BOT 22                  /* яркость столбика (0..256) у основания и у верха: под ним текст меню */
+#define A_TOP 72
+#define A_REFL 22                 /* яркость отражения у основания */
 #define PK_GAP 32                 /* пик над столбиком, 1/16 px */
 #define PK_T 24
-#define PK_A 215
+#define PK_A 95
 #define HOLD_US 300000
 #define VEL0 40960                /* пиксели в Q12: 10 px/с, ускорение 100 px/с² */
 #define ACC 409600

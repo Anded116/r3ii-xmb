@@ -34,7 +34,7 @@
 #define FA_MORE "\xEF\x85\x81"   /* U+F141, многоточие — меню «Ещё» */
 #define ACT_Y (BAR_Y - 24)        /* сердечко и «+» над шкалой времени, по краям */
 #define ACT_X 38
-#define VOL_SEG 20
+#define VOL_SEG 30
 #define MINI_H 52             /* высота мини-плеера: с него начинается раскрытие */
 #define MINI_OPA 77           /* его затемнение (чёрный 30%) */
 #define FULL_OPA PLAYER_DIM
@@ -493,9 +493,9 @@ void player_create(lv_obj_t *parent, const lv_font_t *f_big, const lv_font_t *f_
 	lv_obj_set_style_text_color(vi, lv_color_white(), 0);
 	lv_label_set_text(vi, LV_SYMBOL_VOLUME_MAX);
 	lv_obj_set_pos(vi, 14, 8);
-	p.vol_bar = box(p.vol, 44, 11, VOL_SEG * 9, 12);
+	p.vol_bar = box(p.vol, 44, 11, VOL_SEG * 6, 12);
 	for (int i = 0; i < VOL_SEG; i++) {
-		lv_obj_t *sgm = box(p.vol_bar, i * 9, 0, 6, 12);
+		lv_obj_t *sgm = box(p.vol_bar, i * 6, 0, 4, 12);
 		lv_obj_set_style_radius(sgm, 1, 0);
 		lv_obj_set_style_bg_color(sgm, lv_color_white(), 0);
 		lv_obj_set_style_bg_opa(sgm, 50, 0);
