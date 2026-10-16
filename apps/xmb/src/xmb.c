@@ -301,6 +301,8 @@ static void last_file(char *out, size_t cap);
 static void last_load(void);
 static void size_metrics(void);
 static void slide_tick(double dt);
+static void slide_open(const char *icon, const char *title, const char *sub, const char *hint, int dir,
+		       const char *cancel_text, void (*done)(void), void (*cancelled)(void));
 
 static const node_t bt_devices[] = {
 	ACT(LV_SYMBOL_BLUETOOTH, "Sony WH-1000XM5", "подключено", A_NONE),
@@ -1527,6 +1529,12 @@ static void nav_restore(void)
 		reveal(cat, path, n);
 }
 
+void xmb_restart_prepare(void)
+{
+	if (s.lib)
+		nav_save();
+}
+
 static void library_poll(void)
 {
 	static int last = -1;
@@ -2086,8 +2094,7 @@ static void kb_open(int pl, const char *title, const char *text)
 
 /* ---------- действия с пунктом: долгий клик колесом или долгое касание ---------- */
 
-enum { CA_FAV, CA_ADDPL, CA_REMOVE, CA_UP, CA_DOWN, CA_RENAME, CA_DELETE, CA_DELETE_YES, CA_CANCEL, CA_QNEXT, CA_QEND,
-       CA_QREMOVE, CA_ERASE, CA_ERASE_YES };
+enum { CA_FAV, CA_ADDPL, CA_REMOVE, CA_UP, CA_DOWN, CA_RENAME, CA_DELETE, CA_QNEXT, CA_QEND, CA_QREMOVE, CA_ERASE };
 
 static struct {
 	int pl, pos, track, choice, n, act[8];
@@ -2276,6 +2283,17 @@ static void ctx_open(void)
 	ctx_show();
 }
 
+static void pl_delete_do(void)
+{
+	if (cx.pl < 0 || cx.pl >= s.npl)
+		return;
+	char name[64];
+	snprintf(name, sizeof(name), "%s", s.pls[cx.pl].name);
+	pl_delete(&s.pls, &s.npl, cx.pl);
+	playlists_build();
+	toast("Удалён «%s»", name);
+}
+
 static void ctx_commit(void)
 {
 	playlist_t *p = cx.pl >= 0 && cx.pl < s.npl ? &s.pls[cx.pl] : NULL;
@@ -2298,14 +2316,9 @@ static void ctx_commit(void)
 			toast("%s", "Трек внутри образа — удалите альбом целиком");
 			break;
 		}
-		snprintf(cx.label, sizeof(cx.label), tx("Удалить «%s»"), cx.erase + (strrchr(cx.erase, '/') ? strrchr(cx.erase, '/') - cx.erase + 1 : 0));
-		cx.n = 0;
-		ctx_add(CA_CANCEL, "Отмена");
-		ctx_add(CA_ERASE_YES, cx.label);
-		ctx_show();
-		break;
-	case CA_ERASE_YES:
-		erase_commit();
+		snprintf(cx.label, sizeof(cx.label), tx("«%s» удалится с карты насовсем"),
+			 cx.erase + (strrchr(cx.erase, '/') ? strrchr(cx.erase, '/') - cx.erase + 1 : 0));
+		slide_open(LV_SYMBOL_TRASH, "Удалить с карты?", cx.label, "удалить", 1, "Отмена", erase_commit, NULL);
 		break;
 	case CA_ADDPL:
 		if (cx.track >= 0)
@@ -2332,20 +2345,9 @@ static void ctx_commit(void)
 		kb_open(cx.pl, "Название плейлиста", s.pls[cx.pl].name);
 		break;
 	case CA_DELETE:   /* подтверждение */
-		snprintf(cx.label, sizeof(cx.label), tx("Удалить «%s»"), tx(p->name));
-		cx.n = 0;
-		ctx_add(CA_CANCEL, "Отмена");
-		ctx_add(CA_DELETE_YES, cx.label);
-		ctx_show();
+		snprintf(cx.label, sizeof(cx.label), tx("«%s» — треки останутся на карте"), tx(p->name));
+		slide_open(LV_SYMBOL_TRASH, "Удалить плейлист?", cx.label, "удалить", 1, "Отмена", pl_delete_do, NULL);
 		break;
-	case CA_DELETE_YES: {
-		char name[64];
-		snprintf(name, sizeof(name), "%s", p->name);
-		pl_delete(&s.pls, &s.npl, cx.pl);
-		playlists_build();
-		toast("Удалён «%s»", name);
-		break;
-	}
 	default:
 		break;
 	}
@@ -3489,7 +3491,7 @@ static void shade_adjust(int i, int d)
  * Для редких действий, которые меняют режим или необратимы: щелчки колеса в одну сторону двигают ползунок по
  * дорожке, дошёл до конца — действие; перестали крутить — пружиной обратно; пальцем — тянуть ползунок. Случайное
  * нажатие в кармане так не сработает, а прогресс виден */
-#define SL_STEPS 7       /* щелчков колеса до конца: около полуоборота */
+#define SL_STEPS 5       /* щелчков колеса до конца */
 #define SL_W 60          /* дорожка */
 #define SL_H 196
 #define SL_KNOB 50
@@ -3568,10 +3570,10 @@ static void slide_open(const char *icon, const char *title, const char *sub, con
 	lv_obj_set_width(t1, SCR_W - 24);
 	lv_obj_set_style_text_align(t1, LV_TEXT_ALIGN_CENTER, 0);
 	lv_obj_align(t1, LV_ALIGN_TOP_MID, 0, 84);
-	lv_obj_t *t2 = label(sl.panel, s.f_sub, tx(sub));
+	lv_obj_t *t2 = label(sl.panel, s.f_item, sub);   /* sub — уже переведённый: в нём бывает название */
 	lv_obj_set_width(t2, SCR_W - 32);
 	lv_obj_set_style_text_align(t2, LV_TEXT_ALIGN_CENTER, 0);
-	lv_obj_set_style_text_opa(t2, 170, 0);
+	lv_obj_set_style_text_opa(t2, 180, 0);
 	lv_obj_align(t2, LV_ALIGN_TOP_MID, 0, 118);
 
 	sl.track = plain(sl.panel);
@@ -3595,9 +3597,12 @@ static void slide_open(const char *icon, const char *title, const char *sub, con
 	lv_obj_set_style_text_color(sl.knob_icon, lv_color_hex(0x30323a), 0);
 	lv_obj_center(sl.knob_icon);
 
-	/* подсказка с бегущим бликом: тусклая надпись и яркая её копия в узком окне, окно едет по строке */
+	/* подсказка с бегущим бликом: тусклая надпись и яркая её копия в узком окне, окно едет по строке.
+	 * «Прокрутите вниз — удалить»: направление и действие */
+	char hb[96];
+	snprintf(hb, sizeof(hb), "%s — %s", tx(dir > 0 ? "Прокрутите вниз" : "Прокрутите вверх"), tx(hint));
 	int hy = SL_TOP + SL_H + 16;
-	sl.hint = label(sl.panel, s.f_item, tx(hint));
+	sl.hint = label(sl.panel, s.f_item, hb);
 	lv_obj_set_width(sl.hint, SCR_W);
 	lv_obj_set_style_text_align(sl.hint, LV_TEXT_ALIGN_CENTER, 0);
 	lv_obj_set_style_text_opa(sl.hint, 120, 0);
@@ -3605,13 +3610,13 @@ static void slide_open(const char *icon, const char *title, const char *sub, con
 	sl.shine = plain(sl.panel);
 	lv_obj_set_size(sl.shine, 46, lv_font_get_line_height(s.f_item) + 4);
 	lv_obj_set_pos(sl.shine, -46, hy);
-	sl.shine_lbl = label(sl.shine, s.f_item, tx(hint));
+	sl.shine_lbl = label(sl.shine, s.f_item, hb);
 	lv_obj_set_width(sl.shine_lbl, SCR_W);
 	lv_obj_set_style_text_align(sl.shine_lbl, LV_TEXT_ALIGN_CENTER, 0);
 
 	if (cancel_text) {   /* отмена — тап по строке внизу (клик колесом — тоже) */
-		sl.cancel = label(sl.panel, s.f_sub, tx(cancel_text));
-		lv_obj_set_style_text_opa(sl.cancel, 150, 0);
+		sl.cancel = label(sl.panel, s.f_item, tx(cancel_text));
+		lv_obj_set_style_text_opa(sl.cancel, 170, 0);
 		lv_obj_set_style_pad_all(sl.cancel, 10, 0);
 		lv_obj_align(sl.cancel, LV_ALIGN_BOTTOM_MID, 0, -6);
 		lv_obj_set_clickable(sl.cancel, true);
@@ -3678,38 +3683,36 @@ static void slide_tick(double dt)
 /* ---------- USB-накопитель: карта отдаётся компьютеру, плеер ждёт на экране «USB» ---------- */
 
 static struct {
-	int host, req, end, storage, offer;
+	int host, req, end, storage, choice;
 } usb;
+static const char *const usb_opts[] = { "Отдать карту", "Только зарядка", NULL };
 
-static void usb_give(void)
+static void usb_commit(void)
 {
-	usb.offer = 0;
-	usb.req = 1;
+	if (usb.choice == 0)
+		usb.req = 1;
 }
 
-static void usb_keep(void)
-{
-	usb.offer = 0;
-}
+static const node_t usb_node = { .icon = LV_SYMBOL_USB, .title = "USB", .opts = usb_opts, .val = &usb.choice,
+				 .commit = usb_commit };
 
 static void usb_return(void)
 {
 	usb.end = 1;
 }
 
-/* кабель к компьютеру: отдать карту — прокруткой вниз, иначе только зарядка */
+/* кабель к компьютеру: отдать карту или только заряжаться — обычным выбором (вход безопасен: вернуть карту
+ * можно в любой момент); возврат карты — ползунком */
 void xmb_usb_host(int connected, int offer)
 {
 	usb.host = connected;
 	if (connected && offer && !usb.storage && s.screen_on && !s.kb_panel) {
 		if (s.opt_open)
 			options_cancel();
-		usb.offer = 1;
-		slide_open(LV_SYMBOL_USB, "Отдать карту компьютеру", "Музыка встанет на паузу",
-			   "Прокрутите вниз", 1, "Только зарядка", usb_give, usb_keep);
-	} else if (!connected && usb.offer) {
-		usb.offer = 0;
-		slide_close();
+		usb.choice = 0;
+		options_open(&usb_node);
+	} else if (!connected && s.opt_open && s.opt_item == &usb_node) {
+		options_cancel();
 	}
 }
 
@@ -3749,25 +3752,19 @@ void xmb_storage_prepare(void)
 		screen(1);
 	topbar_dark(1);
 	/* вернуть карту — прокруткой вверх (или «Извлечь» на компьютере, или выдернуть кабель); отмены нет */
-	slide_open(LV_SYMBOL_USB, "Карта у компьютера", "Можно извлечь её на компьютере", "Прокрутите вверх", -1,
-		   NULL, usb_return, NULL);
+	slide_open(LV_SYMBOL_USB, "Карта у компьютера", tx("Чтобы вернуть её плееру, прокрутите колесо вверх"),
+		   "вернуть карту", -1, NULL, usb_return, NULL);
 	lv_refr_now(NULL);
 }
 
-/* «Стоковый плеер»: перезагрузка в сток на одну загрузку (обновление прошивки, режим накопителя — там) */
-static int quit_req, stock_choice;
-static const char *const stock_opts[] = { "Перезагрузить в сток", "Отмена", NULL };
+/* «Стоковый плеер»: перезагрузка в сток на одну загрузку (обновление прошивки — там) */
+static int quit_req;
 
-static void stock_commit(void)
+static void stock_do(void)
 {
-	if (stock_choice == 0) {
-		save_flush();
-		quit_req = 1;
-	}
+	save_flush();
+	quit_req = 1;
 }
-
-static const node_t stock_node = { .icon = LV_SYMBOL_REFRESH, .title = "Стоковый плеер", .opts = stock_opts,
-				   .val = &stock_choice, .commit = stock_commit };
 
 bool xmb_quit_requested(void)
 {
@@ -3792,8 +3789,9 @@ static void select_current(void)
 		else
 			toast("%s", "Подключите кабель к компьютеру");
 	} else if (n->action == A_STOCK) {
-		stock_choice = 0;
-		options_open(&stock_node);
+		slide_open(LV_SYMBOL_REFRESH, "Перезагрузить в сток?",
+			   tx("Один раз загрузится стоковый плеер HiBy, следующая загрузка — снова XMB"), "перезагрузить", 1,
+			   "Отмена", stock_do, NULL);
 	} else if (n->action == A_BTN_RESET) {
 		memcpy(s.btn, btn_default, sizeof(s.btn));
 		refresh_subs();

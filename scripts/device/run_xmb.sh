@@ -13,13 +13,16 @@ mv -f $LOG $LOG.prev 2>/dev/null
 echo "=== $(date) запуск" > $LOG
 sh /tmp/stop_stock.sh >> $LOG 2>&1
 chmod +x /tmp/xmb/xmb
+warm=
 while :; do
 	t0=$(date +%s)
-	XMB_LOG=$LOG /tmp/xmb/xmb /tmp/xmb/fonts > /dev/null 2>&1   # журнал XMB открывает сам: «>> $LOG» держал бы карту
+	# журнал XMB открывает сам: «>> $LOG» держал бы карту; XMB_WARM — перезапуск: панель уже работает, не гасить
+	XMB_WARM=$warm XMB_LOG=$LOG /tmp/xmb/xmb /tmp/xmb/fonts > /dev/null 2>&1
 	rc=$?
 	dt=$(( $(date +%s) - t0 ))
-	[ $rc -eq 3 ] || break   # 3 — после режима USB-накопителя: перезапуск, библиотека перечитывается
-	echo "=== $(date) перезапуск после USB" >> $LOG
+	[ $rc -eq 3 ] || break   # 3 — после режима USB-накопителя или удаления: перезапуск, библиотека перечитывается
+	echo "=== $(date) перезапуск" >> $LOG
+	warm=1
 done
 if [ $rc -eq 0 ]; then
 	rm -f $F/xmb_fails

@@ -479,7 +479,13 @@ int main(int argc, char **argv)
 	lv_evdev_create(LV_INDEV_TYPE_POINTER, "/dev/input/event1");
 
 	xmb_init(argc > 1 ? argv[1] : "/tmp/xmb/fonts");
-	panel_restart();
+	const char *warm = getenv("XMB_WARM");
+	if (warm && *warm) {   /* перезапуск из run_xmb.sh: панель уже работает — не гасить, кадр прошлого процесса */
+		panel_on = 1;            /* остаётся на экране, пока не нарисуется новый */
+		full_copy = 2;
+	} else {
+		panel_restart();
+	}
 	{
 		char lun[64];
 		if (read_line(LUN, lun, sizeof(lun)))
@@ -698,6 +704,8 @@ int main(int argc, char **argv)
 			t_fps = now;
 		}
 	}
+	if (exit_code == XMB_RESTART)
+		xmb_restart_prepare();   /* новый процесс раскроет меню там же */
 	fsave_flush();   /* заказанные записи настроек и очереди — до выхода */
 	screen_set(1);
 	return exit_code;
