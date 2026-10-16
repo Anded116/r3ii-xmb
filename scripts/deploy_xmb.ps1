@@ -5,7 +5,7 @@ $r = "$PSScriptRoot\.."
 $sd = "/data/mnt/sd_0/hiby_dev"
 & $adb shell "mkdir -p /tmp/xmb/fonts $sd/xmb/fonts"
 $fonts = @("NotoSans-Regular.ttf", "NotoSans-SemiBold.ttf", "FontAwesome4.ttf")
-$scripts = @("cpu.sh", "bench_xmb.sh", "prof_xmb.sh", "run_xmb.sh", "stop_xmb.sh", "stop_stock.sh", "xmb_start.sh")
+$scripts = @("adb_restart.sh", "cpu.sh", "bench_xmb.sh", "prof_xmb.sh", "run_xmb.sh", "stop_xmb.sh", "stop_stock.sh", "xmb_start.sh")
 $files = @(
 	@("$r\apps\xmb\build\xmb.stripped", "/tmp/xmb/xmb"),
 	@("$r\apps\xmb\build\xmb.stripped", "$sd/xmb/xmb"),

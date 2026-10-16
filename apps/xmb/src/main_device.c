@@ -136,6 +136,8 @@ static void deep_sleep(void)
 	fb_reprogram = 1;
 	xmb_wake();
 	printf("resume\n");
+	if (system("setsid sh /tmp/adb_restart.sh > /dev/null 2>&1 < /dev/null &") != 0)   /* adbd после сна — заново */
+		perror("adb_restart");
 }
 
 /* ---------- USB-накопитель ----------

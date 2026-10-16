@@ -173,7 +173,7 @@ static const char *const table[][LANG_COUNT] = {
 	{ "Повтор A-B: отметить A", "A-B repeat: set A", "Repetir A-B: marcar A" },
 	{ "Повтор A-B: отметить B", "A-B repeat: set B", "Repetir A-B: marcar B" },
 	{ "Выключить повтор A-B", "Turn A-B repeat off", "Desactivar repetir A-B" }, { "Усиление: %s", "Gain: %s", "Ganancia: %s" },
-	{ "подключено", "connected", "conectado" }, { "Поиск устройств…", "Search for devices…", "Buscar dispositivos…" },
+	{ "подключено", "connected", "conectado" }, 
 	{ "Удалить с карты…", "Delete from card…", "Eliminar de la tarjeta…" },
 	{ "Удалить «%s» с карты", "Delete \"%s\" from card", "Eliminar «%s» de la tarjeta" },
 	{ "Трек внутри образа — удалите альбом целиком", "Track inside an image — delete the whole album",
