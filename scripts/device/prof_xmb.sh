@@ -21,9 +21,9 @@ artist) N=${ART:+$(rep down $ART)}   # ART=номер исполнителя —
 	SC="wait$W${PLAY:+,play}$(rep down 4),enter$(rep wait 20)$N$(rep wait 10)$C$C$C$C$C$C$W"; M="7:покой 10:исполнитель" ;;   # PLAY=1 — с музыкой
 cats) C=",left$(rep wait 5),left$(rep wait 5),right$(rep wait 5),right$(rep wait 5),right$(rep wait 5),left$(rep wait 5)"
 	SC="wait$W$C$C$C$C$C$C$W"; M="7:покой 10:категории" ;;
-opts) SC="wait$W,left$(rep wait 5)$(rep down 3),enter$(rep wait 10)$(rep down 11)$(rep up 11)$(rep down 11)$(rep up 11)$(rep down 11)$(rep up 11),esc$W"
+opts) SC="wait$W,left$(rep wait 5),down,enter$(rep wait 10),enter$(rep wait 10)$(rep down 11)$(rep up 11)$(rep down 11)$(rep up 11)$(rep down 11)$(rep up 11),esc$W"
 	M="7:покой 10:меню" ;;
-opts2) SC="wait$W,left$(rep wait 5)$(rep down 8),enter$(rep wait 10)$(rep down 9)$(rep up 9)$(rep down 9)$(rep up 9)$(rep down 9)$(rep up 9),esc$W"
+opts2) SC="wait$W,left$(rep wait 5),down,enter$(rep wait 10),down,down,enter$(rep wait 10)$(rep down 9)$(rep up 9)$(rep down 9)$(rep up 9)$(rep down 9)$(rep up 9),esc$W"
 	M="7:покой 10:меню" ;;
 player) C=",nextalbum$(rep wait 8)"; SC="wait$W,enter${PLAY:+,play}$(rep wait 15)$C$C$C$C$C$C$C$C$C$C$C$C$W"; M="7:покой 10:плеер" ;;
 player2) C=",nextalbum$(rep wait 8)"; B=",prevalbum$(rep wait 8)"   # туда и обратно: обратно — всё уже в кэшах
