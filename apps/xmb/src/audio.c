@@ -34,6 +34,8 @@
 #include "neaacdec.h"
 
 #if XMB_DEVICE
+#include <errno.h>
+#include <signal.h>
 #include <tinyalsa/asoundlib.h>
 #define PORT_PHONES 1
 #define PORT_OFF 5
@@ -102,6 +104,12 @@ static struct {
 	struct mixer *mixer;
 	int port;
 	double idle;
+	/* Bluetooth: канал в «bluealsa-cli open» (pipe — открыт), частота и формат кодека, заявка интерфейса */
+	FILE *bt_pipe;
+	char bt_path[160], bt_rq_path[160];
+	int bt_rate, bt_bits, bt_rq, bt_rq_rate, bt_rq_bits, bt_gain;   /* bt_gain — Q15 */
+	uint32_t rs_ph;
+	int16_t rs_last[2];
 #else
 	SDL_AudioDeviceID dev;
 #endif
@@ -552,6 +560,7 @@ static void apply_volume(void)
 	int att = vol_curve[gain_mode][a.volume < 0 ? 0 : a.volume > 100 ? 100 : a.volume];
 	mixer_set("Left Playback Volume", att);
 	mixer_set("Right Playback Volume", att);
+	a.bt_gain = att == 255 ? 0 : (int)(32768 * pow(10, -att * 0.5 / 20));   /* та же кривая — программно */
 }
 
 static void out_close(void)
@@ -559,11 +568,84 @@ static void out_close(void)
 	if (a.pcm)
 		pcm_close(a.pcm);
 	a.pcm = NULL;
+	if (a.bt_pipe)
+		pclose(a.bt_pipe);
+	a.bt_pipe = NULL;
 	a.out_rate = 0;
+}
+
+/* Bluetooth: «bluealsa-cli open» берёт сырой PCM со стандартного входа; пишем — поток тормозится, как на PCM */
+static int bt_open(int rate)
+{
+	if (a.bt_pipe) {
+		a.out_rate = rate;
+		return 0;
+	}
+	char cmd[220];
+	snprintf(cmd, sizeof(cmd), "exec bluealsa-cli -q open %s", a.bt_path);
+	a.bt_pipe = popen(cmd, "w");
+	if (!a.bt_pipe)
+		return -1;
+	a.rs_ph = 0;
+	a.rs_last[0] = a.rs_last[1] = 0;
+	a.out_rate = rate;
+	return 0;
+}
+
+/* частота файла → частота кодека: линейно, фаза Q16 переносится между кусками (кадр 0 — последний прошлого) */
+static unsigned resample(const int16_t *in, unsigned n, int16_t *out, unsigned max, int from, int to)
+{
+	uint32_t step = (uint32_t)(((uint64_t)from << 16) / to);
+	unsigned k = 0;
+	while ((a.rs_ph >> 16) < n && k < max) {
+		unsigned i = a.rs_ph >> 16;
+		int f = a.rs_ph & 0xffff;
+		const int16_t *p = i ? in + (i - 1) * 2 : a.rs_last, *q = in + i * 2;
+		out[k * 2] = (int16_t)(p[0] + (((q[0] - p[0]) * f) >> 16));
+		out[k * 2 + 1] = (int16_t)(p[1] + (((q[1] - p[1]) * f) >> 16));
+		k++;
+		a.rs_ph += step;
+	}
+	a.rs_ph -= n << 16;
+	a.rs_last[0] = in[(n - 1) * 2];
+	a.rs_last[1] = in[(n - 1) * 2 + 1];
+	return k;
+}
+
+static void bt_write(const int16_t *buf, unsigned frames)
+{
+	static int16_t rs[CHUNK * 2 * 12 + 8];
+	static int32_t w32[CHUNK * 2 * 12 + 8];
+	unsigned n = frames;
+	const int16_t *src = buf;
+	if (a.out_rate != a.bt_rate) {
+		n = resample(buf, frames, rs, CHUNK * 12, a.out_rate, a.bt_rate);
+		src = rs;
+	}
+	const void *out = src;
+	size_t bytes = n * 4;
+	if (a.bt_bits == 16) {
+		for (unsigned i = 0; i < n * 2; i++)
+			rs[i] = (int16_t)((src[i] * a.bt_gain) >> 15);
+		out = rs;
+	} else {   /* 24 бита — в младших трёх байтах, 32 — во всех */
+		int sh = a.bt_bits == 24 ? 8 : 16;
+		for (unsigned i = 0; i < n * 2; i++)
+			w32[i] = ((src[i] * a.bt_gain) >> 15) * (1 << sh);
+		out = w32;
+		bytes = n * 8;
+	}
+	if (fwrite(out, 1, bytes, a.bt_pipe) != bytes || fflush(a.bt_pipe)) {   /* наушники ушли — назад в разъём */
+		fprintf(stderr, "audio: bluetooth: запись не прошла (%s)\n", strerror(errno));
+		out_close();
+		a.bt_path[0] = 0;
+	}
 }
 
 static int out_open(int rate)
 {
+	if (a.bt_path[0])
+		return bt_open(rate);
 	if (a.pcm && a.out_rate == rate)
 		return 0;
 	out_close();
@@ -587,8 +669,35 @@ static int out_open(int rate)
 
 static void out_write(const int16_t *buf, unsigned frames)
 {
-	if (pcm_writei(a.pcm, buf, frames) < 0)
+	if (a.bt_pipe)
+		bt_write(buf, frames);
+	else if (a.pcm && pcm_writei(a.pcm, buf, frames) < 0)
 		pcm_prepare(a.pcm);
+}
+
+/* заявка интерфейса на смену выхода (под a.mu): закрыть текущий, следующая запись откроет новый */
+static void bt_take(void)
+{
+	if (!a.bt_rq)
+		return;
+	a.bt_rq = 0;
+	if (!strcmp(a.bt_rq_path, a.bt_path) && a.bt_rq_rate == a.bt_rate && a.bt_rq_bits == a.bt_bits)
+		return;
+	out_close();
+	snprintf(a.bt_path, sizeof(a.bt_path), "%s", a.bt_rq_path);
+	a.bt_rate = a.bt_rq_rate;
+	a.bt_bits = a.bt_rq_bits;
+	fprintf(stderr, "audio: вывод — %s\n", a.bt_path[0] ? a.bt_path : "разъём");
+}
+
+void audio_set_bt(const char *path, int rate, int bits)
+{
+	pthread_mutex_lock(&a.mu);
+	snprintf(a.bt_rq_path, sizeof(a.bt_rq_path), "%s", path ? path : "");
+	a.bt_rq_rate = rate > 0 ? rate : 44100;
+	a.bt_rq_bits = bits == 24 || bits == 32 ? bits : 16;
+	a.bt_rq = 1;
+	pthread_mutex_unlock(&a.mu);
 }
 
 static void out_power_off(void)
@@ -629,6 +738,14 @@ static void out_write(int16_t *buf, unsigned frames)
 
 static void apply_volume(void) {}
 static void out_power_off(void) {}
+static void bt_take(void) {}
+
+void audio_set_bt(const char *path, int rate, int bits)
+{
+	(void)path;
+	(void)rate;
+	(void)bits;
+}
 #endif
 
 /* ---------- спектр для визуализатора ---------- */
@@ -867,6 +984,7 @@ static void *audio_thread(void *arg)
 	for (;;) {
 		pthread_mutex_lock(&a.mu);
 		take_cmds();
+		bt_take();
 		if (a.rq)
 			open_request();
 		dec_t *c = &a.d[a.cur], *n = &a.d[!a.cur];
@@ -953,13 +1071,13 @@ static void *audio_thread(void *arg)
 		memset(a.spec, 0, sizeof(a.spec));
 #if XMB_DEVICE
 		/* пауза: поток держим тишиной (иначе на продолжении теряется секунда), потом гасим тракт */
-		if (a.pcm && a.idle < IDLE_POWER_OFF) {
+		if ((a.pcm || a.bt_pipe) && a.idle < IDLE_POWER_OFF) {
 			memset(buf, 0, sizeof(buf));
 			out_write(buf, CHUNK);
 			a.idle += (double)CHUNK / a.out_rate;
 			continue;
 		}
-		if (a.pcm)
+		if (a.pcm || a.bt_pipe)
 			out_power_off();
 #endif
 		usleep(20000);
@@ -977,6 +1095,7 @@ int audio_init(void)
 	a.d[0].rg = a.d[1].rg = a.rg_pend = a.nx_rg = 1;
 #if XMB_DEVICE
 	a.port = -1;
+	signal(SIGPIPE, SIG_IGN);   /* Bluetooth: «bluealsa-cli» закрылся — ошибка записи, а не смерть процесса */
 #else
 	SDL_InitSubSystem(SDL_INIT_AUDIO);
 #endif

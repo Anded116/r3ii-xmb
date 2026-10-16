@@ -41,6 +41,9 @@ void audio_set_next(const char *path, double start, double end, double dur_hint,
 void audio_set_crossfade(int ms);   /* 0 — выкл */
 void audio_set_spectrum(int on);    /* считать спектр (при погашенном экране и фону без спектра не нужен) */
 void audio_get_status(audio_status_t *st);
+/* вывод в Bluetooth: PCM BlueALSA (путь D-Bus), его частота и бит на отсчёт (16, 24 или 32); path = NULL — снова
+ * в разъём. Частота файла пересчитывается под частоту кодека, громкость — программно */
+void audio_set_bt(const char *path, int rate, int bits);
 int audio_supported(const char *path);   /* по расширению */
 
 #define EQ_BANDS 10   /* 31, 62, 125, 250, 500 Гц, 1, 2, 4, 8, 16 кГц */

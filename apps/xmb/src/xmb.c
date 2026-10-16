@@ -23,6 +23,7 @@
 #include "playlist.h"
 #include "xmb_bg.h"
 #include "xmb_player.h"
+#include "bt.h"
 #include <pthread.h>
 #include <strings.h>
 #include <errno.h>
@@ -85,7 +86,7 @@ static const ui_size_t *sz = &ui_sizes[1];
 #define SEG 30         /* сегментов в ползунке шторки */
 #define ACCENT 0xff7a1a /* оранжевый Walkman */
 
-enum { A_NONE, A_TRACK, A_EQ, A_BTN_RESET, A_SEARCH, A_STOCK, A_USB, A_NEWPL };
+enum { A_NONE, A_TRACK, A_EQ, A_BTN_RESET, A_SEARCH, A_STOCK, A_USB, A_NEWPL, A_BTDEV, A_BTSCAN };
 enum { T_NONE, T_TAP, T_HCAT, T_VLIST, T_SWIPE_UP, T_PLAYER, T_PULL, T_SHADE, T_BACKSWIPE, T_INDEX, T_MINI, T_SEEK, T_EQ };
 
 /* ---------- данные ---------- */
@@ -304,11 +305,13 @@ static void slide_tick(double dt);
 static void slide_open(const char *icon, const char *title, const char *sub, const char *hint, int dir,
 		       const char *cancel_text, void (*done)(void), void (*cancelled)(void));
 
-static const node_t bt_devices[] = {
-	ACT(LV_SYMBOL_BLUETOOTH, "Sony WH-1000XM5", "подключено", A_NONE),
-	ACT(LV_SYMBOL_BLUETOOTH, "FiiO BTR15", NULL, A_NONE),
-	ACT(LV_SYMBOL_REFRESH, "Поиск устройств…", NULL, A_NONE),
-};
+/* устройства Bluetooth: строит bt_build из снимка bt.c, последний пункт — поиск */
+static node_t bt_nodes[BT_MAX + 1];
+static bt_dev_t bt_list[BT_MAX];
+static char bt_dev_sub[48];
+static const char *const codec_bt[] = { NULL, "LDAC", "aptX-HD", "aptX", "AAC", "SBC" };   /* как в codecs */
+static void bt_apply(void);
+static void bt_codec_apply(void);
 
 static const node_t eq_items[] = {
 	OPT(LV_SYMBOL_POWER, "Эквалайзер", eq_onoff, &s.eq_on, eq_apply),
@@ -326,10 +329,10 @@ static const node_t btn_items[] = {
 	OPT(LV_SYMBOL_PREV, "«Пред. трек»: два нажатия", btn_act_names, &s.btn[XMB_BTN_SCREEN][XMB_G_DOUBLE], NULL),
 	ACT(LV_SYMBOL_REFRESH, "Как было", "вернуть назначения по умолчанию", A_BTN_RESET),
 };
-static const node_t bt_items[] = {
-	OPT(LV_SYMBOL_BLUETOOTH, "Bluetooth", bt_onoff, &s.bt_off, NULL),
-	DIR(LV_SYMBOL_LIST, "Устройства", NULL, bt_devices),
-	OPT(LV_SYMBOL_AUDIO, "Кодек", codecs, &s.codec, NULL),
+static node_t bt_items[] = {
+	OPT(LV_SYMBOL_BLUETOOTH, "Bluetooth", bt_onoff, &s.bt_off, bt_apply),
+	{ LV_SYMBOL_LIST, "Устройства", bt_dev_sub, bt_nodes, 1 },
+	OPT(LV_SYMBOL_AUDIO, "Кодек", codecs, &s.codec, bt_codec_apply),
 };
 /* «О системе»: подписи заполняет about_fill при входе */
 static char about_sub[5][64];
@@ -3162,6 +3165,67 @@ static void kinetic(double dt)
 		s.kin = 0;   /* дальше — подтягивание к пункту */
 }
 
+static void bt_apply(void)
+{
+	bt_power(!s.bt_off);
+	if (!s.bt_off)
+		bt_scan();
+}
+
+static void bt_codec_apply(void)
+{
+	bt_set_codec(codec_bt[s.codec]);
+}
+
+/* пункты «Устройств» из снимка bt.c; открытый список обновляется на месте */
+static void bt_build(void)
+{
+	int n = s.bt_off ? 0 : bt_devices(bt_list, BT_MAX), conn = -1;
+	for (int i = 0; i < n; i++) {
+		bt_nodes[i] = (node_t){ .icon = LV_SYMBOL_BLUETOOTH, .title = bt_list[i].name, .action = A_BTDEV, .track = i,
+					.sub = bt_list[i].connected ? "подключено — клик отключит"
+					       : bt_list[i].paired ? "сопряжено" : NULL };
+		if (bt_list[i].connected && conn < 0)
+			conn = i;
+	}
+	const char *st = bt_status();
+	if (s.bt_off)
+		bt_nodes[n] = (node_t){ .icon = LV_SYMBOL_BLUETOOTH, .title = "Bluetooth выключен", .sub = "включите его выше" };
+	else
+		bt_nodes[n] = (node_t){ .icon = LV_SYMBOL_REFRESH, .title = st[0] ? st : "Искать устройства",
+					.sub = "наушники — в режим сопряжения", .action = A_BTSCAN };
+	bt_items[1].nkids = n + 1;
+	if (conn >= 0)
+		snprintf(bt_dev_sub, sizeof(bt_dev_sub), "%s", bt_list[conn].name);
+	else
+		snprintf(bt_dev_sub, sizeof(bt_dev_sub), "%s", tx(n ? "не подключено" : "нет устройств"));
+	for (int d = 1; d <= s.depth; d++) {
+		column_t *c = &s.stack[d];
+		if (c->nodes != bt_nodes)
+			continue;
+		int sel = c->sel;
+		column_fill(c, bt_nodes, n + 1);
+		c->sel = c->pos = sel <= n ? sel : n;
+		layout();
+	}
+	refresh_subs();
+}
+
+static void bt_poll(void)
+{
+	static unsigned gen = ~0u, mseq;
+	if (bt_gen() != gen) {
+		gen = bt_gen();
+		bt_build();
+	}
+	unsigned seq;
+	const char *m = bt_message(&seq);
+	if (seq != mseq) {
+		mseq = seq;
+		toast("%s", m);
+	}
+}
+
 static void frame_cb(lv_timer_t *t)
 {
 	(void)t;
@@ -3221,6 +3285,7 @@ static void frame_cb(lv_timer_t *t)
 
 	library_poll();
 	settings_poll();
+	bt_poll();
 	/* гашение экрана без касаний и кнопок; пока тянут шторку или ползунок — не гаснет */
 	if (s.screen_on && screen_sec[s.screen_off] && s.t_mode == T_NONE &&
 	    now - s.input_ms > (uint32_t)screen_sec[s.screen_off] * 1000u)
@@ -3546,7 +3611,10 @@ static void usb_menu(void);
 static void tile_tap(int i)
 {
 	switch (i) {
-	case TL_BT: s.bt_off = !s.bt_off; break;
+	case TL_BT:
+		s.bt_off = !s.bt_off;
+		bt_apply();
+		break;
 	case TL_WIFI: s.wifi_off = !s.wifi_off; break;
 	case TL_EQ:
 		s.eq_on = !s.eq_on;
@@ -3913,6 +3981,16 @@ static void select_current(void)
 		eq_open();
 	} else if (n->action == A_SEARCH) {
 		kb_open(-1, "Поиск", search_q);
+	} else if (n->action == A_BTDEV) {
+		const bt_dev_t *d = &bt_list[n->track];
+		if (d->connected) {
+			bt_disconnect(d->mac);
+		} else {
+			bt_connect(d->mac);
+			toast("Подключение к «%s»…", d->name);
+		}
+	} else if (n->action == A_BTSCAN) {
+		bt_scan();
 	} else if (n->action == A_NEWPL) {
 		kb_open(s.npl, "Новый плейлист", "");
 	} else if (n->action == A_TRACK) {
@@ -3922,6 +4000,8 @@ static void select_current(void)
 	} else if (n->kids && s.depth + 1 < MAX_DEPTH) {
 		if (n->kids == about_items)
 			about_fill();
+		if (n->kids == bt_nodes && !s.bt_off)
+			bt_scan();   /* список — сразу с поиском: рядом могут быть новые наушники */
 		column_t *k = &s.stack[s.depth + 1];
 		int same = k->nodes == n->kids && k->count == n->nkids, sel = k->sel;   /* вернулись в тот же список */
 		column_fill(k, n->kids, n->nkids);
@@ -4913,6 +4993,7 @@ void xmb_init(const char *font_dir)
 	s.ui_size = 1;
 	s.seek_preview = -1;
 	settings_load();
+	bt_init(!s.bt_off);
 	i18n_set(s.lang);
 	sz = &ui_sizes[s.ui_size];
 	size_metrics();
