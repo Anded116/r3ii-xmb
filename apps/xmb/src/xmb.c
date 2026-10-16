@@ -300,6 +300,7 @@ static void save_flush(void);
 static void last_file(char *out, size_t cap);
 static void last_load(void);
 static void size_metrics(void);
+static void slide_tick(double dt);
 
 static const node_t bt_devices[] = {
 	ACT(LV_SYMBOL_BLUETOOTH, "Sony WH-1000XM5", "подключено", A_NONE),
@@ -3113,6 +3114,7 @@ static void frame_cb(lv_timer_t *t)
 	if (s.t_mode != T_PULL && s.t_mode != T_SHADE)
 		s.sh_t = approach(s.sh_t, s.sh_open, dt, 14);
 
+	slide_tick(dt);
 	if (s.bhint_t > 0) {   /* подсказка кнопки: уходит вверх, к своему краю, как боковые — к своим, и гаснет */
 		s.bhint_t = fmax(0, s.bhint_t - dt / 0.7);
 		int w = lv_obj_get_width(s.bhint);
@@ -3483,33 +3485,231 @@ static void shade_adjust(int i, int d)
 	refresh_subs();
 }
 
+/* ---------- «прокрутите, чтобы…»: подтверждение колесом, как slide to unlock, но вертикально ----------
+ * Для редких действий, которые меняют режим или необратимы: щелчки колеса в одну сторону двигают ползунок по
+ * дорожке, дошёл до конца — действие; перестали крутить — пружиной обратно; пальцем — тянуть ползунок. Случайное
+ * нажатие в кармане так не сработает, а прогресс виден */
+#define SL_STEPS 7       /* щелчков колеса до конца: около полуоборота */
+#define SL_W 60          /* дорожка */
+#define SL_H 196
+#define SL_KNOB 50
+#define SL_PAD 5
+#define SL_TOP 168       /* верх дорожки в панели */
+
+static struct {
+	lv_obj_t *panel, *track, *fill, *knob, *knob_icon, *hint, *shine, *shine_lbl, *cancel;
+	int steps, dir, dragging, finishing;
+	double pos, shine_t;
+	uint32_t last_ms;
+	void (*done)(void), (*cancelled)(void);
+} sl;
+
+static void slide_close(void)
+{
+	if (!sl.panel)
+		return;
+	lv_obj_delete(sl.panel);
+	memset(&sl, 0, sizeof(sl));
+	topbar_dark(0);
+}
+
+static void slide_cancel(void)
+{
+	void (*cb)(void) = sl.cancelled;
+	slide_close();
+	if (cb)
+		cb();
+}
+
+static void slide_cancel_cb(lv_event_t *e)
+{
+	(void)e;
+	slide_cancel();
+}
+
+/* палец на дорожке: ползунок — под пальцем */
+static void slide_drag_cb(lv_event_t *e)
+{
+	lv_event_code_t code = lv_event_get_code(e);
+	if (code == LV_EVENT_PRESSING) {
+		lv_point_t p;
+		lv_indev_get_point(lv_indev_active(), &p);
+		lv_area_t a;
+		lv_obj_get_coords(sl.track, &a);
+		double k = clamp01((p.y - a.y1 - SL_PAD - SL_KNOB / 2.0) / (SL_H - 2 * SL_PAD - SL_KNOB));
+		sl.steps = (int)lround((sl.dir > 0 ? k : 1 - k) * SL_STEPS);
+		sl.dragging = 1;
+		sl.last_ms = lv_tick_get();
+	} else if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) {
+		sl.dragging = 0;
+		sl.last_ms = 0;   /* не дотянул — сразу обратно */
+	}
+}
+
+/* dir: 1 — крутить вниз (ползунок сверху вниз), −1 — вверх. cancel_text — NULL: отмены нет */
+static void slide_open(const char *icon, const char *title, const char *sub, const char *hint, int dir,
+		       const char *cancel_text, void (*done)(void), void (*cancelled)(void))
+{
+	slide_close();
+	sl.dir = dir;
+	sl.done = done;
+	sl.cancelled = cancelled;
+	topbar_dark(1);   /* полноэкранное тёмное окно — строка состояния чёрная */
+	sl.panel = plain(lv_layer_top());
+	lv_obj_set_size(sl.panel, SCR_W, SCR_H - TOP_H);
+	lv_obj_set_pos(sl.panel, 0, TOP_H);
+	lv_obj_set_style_bg_color(sl.panel, lv_color_hex(0x101114), 0);   /* глухой: меню под ним не просвечивает */
+	lv_obj_set_style_bg_opa(sl.panel, LV_OPA_COVER, 0);
+	lv_obj_set_clickable(sl.panel, true);   /* касания не проходят в меню под панелью */
+
+	lv_obj_t *ic = label(sl.panel, &lv_font_montserrat_40, icon);
+	lv_obj_align(ic, LV_ALIGN_TOP_MID, 0, 26);
+	lv_obj_t *t1 = label(sl.panel, s.f_title, tx(title));
+	lv_obj_set_width(t1, SCR_W - 24);
+	lv_obj_set_style_text_align(t1, LV_TEXT_ALIGN_CENTER, 0);
+	lv_obj_align(t1, LV_ALIGN_TOP_MID, 0, 84);
+	lv_obj_t *t2 = label(sl.panel, s.f_sub, tx(sub));
+	lv_obj_set_width(t2, SCR_W - 32);
+	lv_obj_set_style_text_align(t2, LV_TEXT_ALIGN_CENTER, 0);
+	lv_obj_set_style_text_opa(t2, 170, 0);
+	lv_obj_align(t2, LV_ALIGN_TOP_MID, 0, 118);
+
+	sl.track = plain(sl.panel);
+	lv_obj_set_size(sl.track, SL_W, SL_H);
+	lv_obj_set_pos(sl.track, (SCR_W - SL_W) / 2, SL_TOP);
+	lv_obj_set_style_radius(sl.track, LV_RADIUS_CIRCLE, 0);
+	lv_obj_set_style_bg_color(sl.track, lv_color_white(), 0);
+	lv_obj_set_style_bg_opa(sl.track, 40, 0);
+	lv_obj_set_clickable(sl.track, true);
+	lv_obj_add_event_cb(sl.track, slide_drag_cb, LV_EVENT_ALL, NULL);
+	sl.fill = plain(sl.track);   /* пройденная часть дорожки */
+	lv_obj_set_style_radius(sl.fill, LV_RADIUS_CIRCLE, 0);
+	lv_obj_set_style_bg_color(sl.fill, lv_color_hex(ACCENT), 0);
+	lv_obj_set_style_bg_opa(sl.fill, 170, 0);
+	sl.knob = plain(sl.track);
+	lv_obj_set_size(sl.knob, SL_KNOB, SL_KNOB);
+	lv_obj_set_style_radius(sl.knob, LV_RADIUS_CIRCLE, 0);
+	lv_obj_set_style_bg_color(sl.knob, lv_color_white(), 0);
+	lv_obj_set_style_bg_opa(sl.knob, LV_OPA_COVER, 0);
+	sl.knob_icon = label(sl.knob, &lv_font_montserrat_20, dir > 0 ? LV_SYMBOL_DOWN : LV_SYMBOL_UP);
+	lv_obj_set_style_text_color(sl.knob_icon, lv_color_hex(0x30323a), 0);
+	lv_obj_center(sl.knob_icon);
+
+	/* подсказка с бегущим бликом: тусклая надпись и яркая её копия в узком окне, окно едет по строке */
+	int hy = SL_TOP + SL_H + 16;
+	sl.hint = label(sl.panel, s.f_item, tx(hint));
+	lv_obj_set_width(sl.hint, SCR_W);
+	lv_obj_set_style_text_align(sl.hint, LV_TEXT_ALIGN_CENTER, 0);
+	lv_obj_set_style_text_opa(sl.hint, 120, 0);
+	lv_obj_set_pos(sl.hint, 0, hy);
+	sl.shine = plain(sl.panel);
+	lv_obj_set_size(sl.shine, 46, lv_font_get_line_height(s.f_item) + 4);
+	lv_obj_set_pos(sl.shine, -46, hy);
+	sl.shine_lbl = label(sl.shine, s.f_item, tx(hint));
+	lv_obj_set_width(sl.shine_lbl, SCR_W);
+	lv_obj_set_style_text_align(sl.shine_lbl, LV_TEXT_ALIGN_CENTER, 0);
+
+	if (cancel_text) {   /* отмена — тап по строке внизу (клик колесом — тоже) */
+		sl.cancel = label(sl.panel, s.f_sub, tx(cancel_text));
+		lv_obj_set_style_text_opa(sl.cancel, 150, 0);
+		lv_obj_set_style_pad_all(sl.cancel, 10, 0);
+		lv_obj_align(sl.cancel, LV_ALIGN_BOTTOM_MID, 0, -6);
+		lv_obj_set_clickable(sl.cancel, true);
+		lv_obj_add_event_cb(sl.cancel, slide_cancel_cb, LV_EVENT_CLICKED, NULL);
+	}
+	sl.last_ms = lv_tick_get();
+}
+
+/* колесо и кнопки, пока открыт ползунок; 1 — ввод его */
+static int slide_input(xmb_input_t in)
+{
+	if (!sl.panel)
+		return 0;
+	if (in == XMB_WHEEL_DOWN || in == XMB_WHEEL_UP) {
+		int d = in == XMB_WHEEL_DOWN ? 1 : -1;
+		if (!sl.finishing) {
+			sl.steps += d == sl.dir ? 1 : -1;
+			sl.steps = sl.steps < 0 ? 0 : sl.steps > SL_STEPS ? SL_STEPS : sl.steps;
+		}
+		sl.last_ms = lv_tick_get();
+		return 1;
+	}
+	if ((in == XMB_SELECT || in == XMB_BACK) && sl.cancel) {
+		slide_cancel();
+		return 1;
+	}
+	/* кнопки воспроизведения работают как обычно, остальное под панелью не трогаем */
+	return in != XMB_PLAY && in != XMB_NEXT_TRACK && in != XMB_PREV_TRACK;
+}
+
+static void slide_tick(double dt)
+{
+	if (!sl.panel)
+		return;
+	uint32_t now = lv_tick_get();
+	if (sl.steps >= SL_STEPS)
+		sl.finishing = 1;
+	else if (!sl.dragging && sl.steps > 0 && now - sl.last_ms > 1000)
+		sl.steps = 0;   /* перестали крутить — пружиной в начало */
+	sl.pos = approach(sl.pos, (double)sl.steps / SL_STEPS, dt, sl.dragging ? 30 : 14);
+	int travel = SL_H - 2 * SL_PAD - SL_KNOB;
+	int ky = SL_PAD + (int)((sl.dir > 0 ? sl.pos : 1 - sl.pos) * travel);
+	set_pos(sl.knob, (SL_W - SL_KNOB) / 2, ky);
+	/* заливка — от начала дорожки до ползунка */
+	int f0 = sl.dir > 0 ? SL_PAD : ky, f1 = sl.dir > 0 ? ky + SL_KNOB : SL_H - SL_PAD;
+	if (lv_obj_get_y(sl.fill) != f0 || lv_obj_get_height(sl.fill) != f1 - f0) {
+		lv_obj_set_pos(sl.fill, SL_PAD, f0);
+		lv_obj_set_size(sl.fill, SL_W - 2 * SL_PAD, f1 - f0);
+	}
+	set_hidden(sl.fill, sl.pos < 0.02);
+	/* блик: проход по строке за 1.6 с, пауза 0.6 с */
+	sl.shine_t = fmod(sl.shine_t + dt, 2.2);
+	int sx = (int)(-46 + (SCR_W + 46) * fmin(1.0, sl.shine_t / 1.6));
+	set_pos(sl.shine, sx, lv_obj_get_y(sl.hint));
+	set_pos(sl.shine_lbl, -sx, 0);
+	if (sl.finishing && sl.pos > 0.98) {
+		void (*cb)(void) = sl.done;
+		slide_close();
+		if (cb)
+			cb();
+	}
+}
+
 /* ---------- USB-накопитель: карта отдаётся компьютеру, плеер ждёт на экране «USB» ---------- */
 
 static struct {
-	int host, req, end, storage, choice;
-	lv_obj_t *panel;
+	int host, req, end, storage, offer;
 } usb;
-static const char *const usb_opts[] = { "USB-накопитель", "Только зарядка", NULL };
 
-static void usb_commit(void)
+static void usb_give(void)
 {
-	if (usb.choice == 0)
-		usb.req = 1;
+	usb.offer = 0;
+	usb.req = 1;
 }
 
-static const node_t usb_node = { .icon = LV_SYMBOL_USB, .title = "USB", .opts = usb_opts, .val = &usb.choice,
-				 .commit = usb_commit };
+static void usb_keep(void)
+{
+	usb.offer = 0;
+}
 
+static void usb_return(void)
+{
+	usb.end = 1;
+}
+
+/* кабель к компьютеру: отдать карту — прокруткой вниз, иначе только зарядка */
 void xmb_usb_host(int connected, int offer)
 {
 	usb.host = connected;
-	if (connected && offer && !usb.storage && s.screen_on && !s.kb_panel) {   /* кабель к компьютеру: что делать */
+	if (connected && offer && !usb.storage && s.screen_on && !s.kb_panel) {
 		if (s.opt_open)
 			options_cancel();
-		usb.choice = 0;
-		options_open(&usb_node);
-	} else if (!connected && s.opt_open && s.opt_item == &usb_node) {
-		options_cancel();
+		usb.offer = 1;
+		slide_open(LV_SYMBOL_USB, "Отдать карту компьютеру", "Музыка встанет на паузу",
+			   "Прокрутите вниз", 1, "Только зарядка", usb_give, usb_keep);
+	} else if (!connected && usb.offer) {
+		usb.offer = 0;
+		slide_close();
 	}
 }
 
@@ -3548,23 +3748,9 @@ void xmb_storage_prepare(void)
 	if (!s.screen_on)
 		screen(1);
 	topbar_dark(1);
-	usb.panel = plain(lv_layer_top());
-	lv_obj_set_size(usb.panel, SCR_W, SCR_H - TOP_H);
-	lv_obj_set_pos(usb.panel, 0, TOP_H);
-	lv_obj_set_style_bg_color(usb.panel, lv_color_black(), 0);
-	lv_obj_set_style_bg_opa(usb.panel, 235, 0);
-	lv_obj_set_clickable(usb.panel, true);   /* касания не проходят в меню; вернуть карту — только удержанием колеса */
-	lv_obj_t *ic = label(usb.panel, &lv_font_montserrat_40, LV_SYMBOL_USB);
-	lv_obj_align(ic, LV_ALIGN_CENTER, 0, -70);
-	lv_obj_t *t1 = label(usb.panel, s.f_title, tx("USB-накопитель"));
-	lv_obj_set_width(t1, SCR_W);
-	lv_obj_set_style_text_align(t1, LV_TEXT_ALIGN_CENTER, 0);
-	lv_obj_align(t1, LV_ALIGN_CENTER, 0, 0);
-	lv_obj_t *t2 = label(usb.panel, s.f_sub, tx("карта у компьютера — извлеките её там\nили удерживайте колесо, чтобы вернуть"));
-	lv_obj_set_width(t2, SCR_W - 32);
-	lv_obj_set_style_text_align(t2, LV_TEXT_ALIGN_CENTER, 0);
-	lv_obj_set_style_text_opa(t2, 170, 0);
-	lv_obj_align(t2, LV_ALIGN_CENTER, 0, 44);
+	/* вернуть карту — прокруткой вверх (или «Извлечь» на компьютере, или выдернуть кабель); отмены нет */
+	slide_open(LV_SYMBOL_USB, "Карта у компьютера", "Можно извлечь её на компьютере", "Прокрутите вверх", -1,
+		   NULL, usb_return, NULL);
 	lv_refr_now(NULL);
 }
 
@@ -3602,7 +3788,7 @@ static void select_current(void)
 		player_show(1);
 	} else if (n->action == A_USB) {
 		if (usb.host)
-			usb.req = 1;
+			xmb_usb_host(1, 1);   /* тот же экран, что при подключении кабеля */
 		else
 			toast("%s", "Подключите кабель к компьютеру");
 	} else if (n->action == A_STOCK) {
@@ -3783,6 +3969,14 @@ int xmb_input_name(const char *name)
 		lv_textarea_set_text(s.kb_ta, name + 5);
 		return 1;
 	}
+	if (!strcmp(name, "usb:on") || !strcmp(name, "usb:off")) {   /* кабель к компьютеру — для проверки экранов */
+		xmb_usb_host(name[5] == 'n', 1);
+		return 1;
+	}
+	if (!strcmp(name, "usb:storage")) {
+		xmb_storage_prepare();
+		return 1;
+	}
 	if (!strncmp(name, "btn:", 4) && name[4] && name[5]) {   /* кнопка на корпусе: btn:<кнопка><жест>, как в настройках */
 		xmb_button(name[4] - '0', name[5] - '0');
 		return 1;
@@ -3829,6 +4023,8 @@ void xmb_input(xmb_input_t in)
 	}
 	/* погашенный экран: работают кнопки воспроизведения, меню — нет */
 	if (!s.screen_on && in != XMB_PLAY && in != XMB_NEXT_TRACK && in != XMB_PREV_TRACK && in != XMB_NEXT_ALBUM)
+		return;
+	if (slide_input(in))
 		return;
 	if (in == XMB_NEXT_ALBUM) {
 		next_group();

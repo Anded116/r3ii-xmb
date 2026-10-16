@@ -540,8 +540,8 @@ int main(int argc, char **argv)
 			while (pfd[i].fd >= 0 && read(pfd[i].fd, &ev, sizeof(ev)) == sizeof(ev)) {
 				if (ev.type != EV_KEY)
 					continue;
-				if (usb_storage && ev.code != KEY_POWER)
-					continue;   /* в режиме накопителя кнопки, кроме клика колесом, ничего не делают */
+				if (usb_storage && ev.code != KEY_POWER && ev.code != KEY_LEFT && ev.code != KEY_RIGHT)
+					continue;   /* в режиме накопителя работает только колесо: прокрутка возвращает карту */
 				if (wake_until) {   /* после сна: разбудившее нажатие только включает экран — глотаем до отпускания */
 					if (ev.value == 0 || now > wake_until)
 						wake_until = 0;
@@ -568,7 +568,9 @@ int main(int argc, char **argv)
 						sel_down = now;
 						sel_long = 0;
 					} else if (ev.value == 0 && sel_down && usb_storage) {
-						sel_down = 0;   /* в режиме накопителя клик не действует — только удержание */
+						sel_down = 0;   /* в режиме накопителя клик только будит экран; карта — прокруткой (или удержанием) */
+						if (!xmb_screen_on())
+							xmb_input(XMB_SELECT);
 					} else if (ev.value == 0 && sel_down) {
 						if (now - sel_down >= SLEEP_HOLD_MS)
 							xmb_sleep_countdown(-1, NULL);   /* отпустили до конца отсчёта — не спим */
