@@ -135,6 +135,7 @@ static struct {
 	uint32_t rs_ph;
 	int16_t rs_last[2];
 	int out_bits, s24_bad;   /* формат открытого PCM; s24_bad — драйвер 24 бита не принял, дальше только 16 */
+	int out_period;          /* кадров в периоде открытого PCM */
 	/* USB-ЦАП: /dev/uac_sa (−1 — нет), заявка интерфейса, частота потока с компьютера (0 — не идёт) */
 	int usb_fd, usb_rq_fd, usb_rq, usb_rate;
 	uint32_t usb_last_ms;   /* когда пришёл последний пакет */
@@ -684,7 +685,10 @@ static int out_open(int rate)
 {
 	if (a.bt_path[0])
 		return bt_open(rate);
-	if (a.pcm && a.out_rate == rate)
+	/* файлы — буфер поглубже (~170 мс на 48 кГц: декодер бывает задерживается на обложках); USB-ЦАП — ~50 мс на
+	 * любой частоте: звук к видео и играм не должен заметно отставать, а пакеты с компьютера идут ровно */
+	int period = a.usb_fd >= 0 ? rate / 80 : CHUNK * 2;
+	if (a.pcm && a.out_rate == rate && a.out_period == period)
 		return 0;
 	out_close();
 	if (a.port != PORT_PHONES) {
@@ -695,7 +699,7 @@ static int out_open(int rate)
 	/* 24 бита (контейнер 32, S24_LE — его AIC принимает; S32 через преобразование у Sonix роняло ядро); не открылся —
 	 * 16 бит с дизерингом */
 	struct pcm_config cfg = {
-		.channels = 2, .rate = rate, .period_size = CHUNK * 2, .period_count = 4, .format = PCM_FORMAT_S24_LE,
+		.channels = 2, .rate = rate, .period_size = period, .period_count = 4, .format = PCM_FORMAT_S24_LE,
 	};
 	a.pcm = a.s24_bad ? NULL : pcm_open(0, 0, PCM_OUT, &cfg);
 	a.out_bits = 24;
@@ -721,6 +725,7 @@ static int out_open(int rate)
 		return -1;
 	}
 	a.out_rate = rate;
+	a.out_period = period;
 	return 0;
 }
 
