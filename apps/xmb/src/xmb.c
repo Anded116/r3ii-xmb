@@ -1817,8 +1817,13 @@ static void toast(const char *fmt, ...)
 	else
 		vsnprintf(buf, sizeof(buf), tx(fmt), ap);
 	va_end(ap);
+	lv_point_t sz;   /* длинное — в несколько строк: ширина по тексту, но не шире экрана */
+	lv_text_get_size(&sz, buf, s.f_item, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+	lv_obj_set_width(s.toast_lbl, sz.x < SCR_W - 64 ? sz.x + 1 : SCR_W - 64);
 	lv_label_set_text(s.toast_lbl, buf);
 	s.toast_t = 1.0;
+	s.bhint_t = 0;   /* место сверху одно: уведомление вместо значка кнопки */
+	set_hidden(s.bhint, true);
 	set_hidden(s.toast, false);
 }
 
@@ -3497,9 +3502,11 @@ static void frame_cb(lv_timer_t *t)
 			audio_set_volume(s.volume * left / SLEEP_FADE_MS);
 		}
 	}
-	if (s.toast_t > 0) {
+	if (s.toast_t > 0) {   /* уведомление — как значок кнопки: сверху по центру, в конце уходит вверх и гаснет */
 		s.toast_t = fmax(0, s.toast_t - dt / 1.8);
-		lv_obj_set_style_opa(s.toast, (lv_opa_t)(255 * fmin(1.0, s.toast_t * 4)), 0);
+		double out = clamp01((0.25 - s.toast_t) / 0.25);
+		lv_obj_align(s.toast, LV_ALIGN_TOP_MID, 0, TOP_H + 14 - (int)(out * 14));
+		lv_obj_set_style_opa(s.toast, (lv_opa_t)(230 * (1.0 - out)), 0);
 		set_hidden(s.toast, s.toast_t == 0);
 	}
 	if (s.bubble_t > 0) {   /* буква указателя: держится, затем гаснет */
@@ -3771,8 +3778,10 @@ static void show_hint(int i)
 /* что сделала кнопка на корпусе — значком сверху по центру (как «назад» и «выбрать» у тапа) */
 static void show_btn_hint(const char *glyph, const lv_font_t *f)
 {
-	if (!s.screen_on || !glyph)
+	if (!s.screen_on || !glyph || s.toast_t > 0.97)   /* нажатие уже ответило текстом (повтор, случайно) */
 		return;
+	s.toast_t = 0;   /* место сверху одно: показано последнее */
+	set_hidden(s.toast, true);
 	lv_obj_set_style_text_font(s.bhint_lbl, f, 0);
 	lv_label_set_text(s.bhint_lbl, glyph);
 	lv_point_t sz;
@@ -4881,7 +4890,9 @@ static void touch_cb(lv_event_t *e)
 			else if (s.opt_open && !horiz) {
 				s.t_mode = T_VLIST;
 				s.t_start_pos = s.opt_sel;
-			} else if (player_shown())
+			} else if (s.opt_open)
+				s.t_mode = T_BACKSWIPE;   /* боковое меню: свайп влево — назад, как в списках */
+			else if (player_shown())
 				s.t_mode = T_PLAYER;
 			else if (in_mini && horiz)
 				s.t_mode = T_MINI;
@@ -4998,9 +5009,13 @@ static void touch_cb(lv_event_t *e)
 			set_cat(s.cat + (dx < 0 ? 1 : -1));
 		} else if (mode == T_BACKSWIPE && dx < -50) {
 			show_hint(0);
-			go_back();
+			if (s.opt_open)
+				options_cancel();
+			else
+				go_back();
 		} else if (mode == T_MINI && abs(dx) > 50) {
 			xmb_input(dx < 0 ? XMB_NEXT_TRACK : XMB_PREV_TRACK);   /* как карусель: влево — следующий */
+			show_btn_hint(dx < 0 ? LV_SYMBOL_NEXT : LV_SYMBOL_PREV, &lv_font_montserrat_20);
 		} else if (mode == T_SWIPE_UP && dy < -50) {
 			player_show(1);
 		} else if (mode == T_PLAYER) {
@@ -5359,16 +5374,7 @@ void xmb_init(const char *font_dir)
 	lv_obj_set_pos(s.idx_strip, SCR_W - IDX_W, 0);
 	lv_obj_add_event_cb(s.idx_strip, index_draw, LV_EVENT_DRAW_MAIN, NULL);
 	lv_obj_set_hidden(s.idx_strip, true);
-	s.toast = plain(scr);
-	lv_obj_set_size(s.toast, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-	lv_obj_set_style_pad_hor(s.toast, 14, 0);
-	lv_obj_set_style_pad_ver(s.toast, 8, 0);
-	lv_obj_set_style_radius(s.toast, 14, 0);
-	lv_obj_set_style_bg_color(s.toast, lv_color_black(), 0);
-	lv_obj_set_style_bg_opa(s.toast, 200, 0);
-	lv_obj_align(s.toast, LV_ALIGN_TOP_MID, 0, 200);
-	s.toast_lbl = label(s.toast, s.f_sub, "");
-	lv_obj_set_hidden(s.toast, true);
+
 	s.eq_panel = plain(scr);
 	lv_obj_set_size(s.eq_panel, SCR_W, SCR_H);
 	lv_obj_set_style_bg_color(s.eq_panel, lv_color_black(), 0);
@@ -5420,6 +5426,20 @@ void xmb_init(const char *font_dir)
 	lv_obj_set_style_bg_opa(s.bhint, 120, 0);
 	s.bhint_lbl = label(s.bhint, &lv_font_montserrat_20, "");
 	lv_obj_set_hidden(s.bhint, true);
+
+	/* короткие уведомления — в том же стиле, шире, со средним текстом; поверх плеера, шторки и клавиатуры */
+	s.toast = plain(top);
+	lv_obj_set_size(s.toast, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+	lv_obj_set_style_min_height(s.toast, 44, 0);
+	lv_obj_set_style_pad_hor(s.toast, 18, 0);
+	lv_obj_set_style_pad_ver(s.toast, 11, 0);
+	lv_obj_set_style_radius(s.toast, 22, 0);
+	lv_obj_set_style_bg_color(s.toast, lv_color_black(), 0);
+	lv_obj_set_style_bg_opa(s.toast, 150, 0);
+	s.toast_lbl = label(s.toast, s.f_item, "");
+	lv_label_set_long_mode(s.toast_lbl, LV_LABEL_LONG_MODE_WRAP);
+	lv_obj_set_style_text_align(s.toast_lbl, LV_TEXT_ALIGN_CENTER, 0);
+	lv_obj_set_hidden(s.toast, true);
 
 	/* подсказки тапа: назад / выбрать */
 	const char *hint_icons[2] = { LV_SYMBOL_LEFT, LV_SYMBOL_OK };
