@@ -115,6 +115,13 @@ static unsigned long irq_count(const char *name)
  * кнопки на АЦП — нет. Будит только колесо, как кнопка питания: от «след. трек» (карман) — сразу обратно в сон.
  * Запись в /sys/power/state возвращается после сна */
 static int usb_host(void);
+static int key_fd = -1;   /* event0: колесо */
+
+static int wheel_held(void)
+{
+	unsigned char k[KEY_MAX / 8 + 1] = { 0 };
+	return key_fd >= 0 && ioctl(key_fd, EVIOCGKEY(sizeof(k)), k) >= 0 && (k[KEY_POWER / 8] >> (KEY_POWER % 8) & 1);
+}
 
 static int deep_sleep(void)
 {
@@ -128,6 +135,9 @@ static int deep_sleep(void)
 	}
 	audio_power_down();
 	sync();
+	/* отсчёт идёт под удержанием колеса: отпускание во сне тут же будит — сначала дождаться его */
+	for (int i = 0; i < 100 && wheel_held(); i++)
+		usleep(100000);
 	for (int i = 0; i < 100; i++) {
 		unsigned long wheel = irq_count("KEY_POWER"), next = irq_count("KEY_PREVIOUSSONG");
 		printf("suspend\n");
@@ -562,6 +572,7 @@ int main(int argc, char **argv)
 		pfd[i].fd = open(keys[i], O_RDONLY | O_NONBLOCK);
 		pfd[i].events = POLLIN;
 	}
+	key_fd = pfd[0].fd;
 
 	uint32_t sel_down = 0;
 	int sel_long = 0;
