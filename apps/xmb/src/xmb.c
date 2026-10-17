@@ -4897,11 +4897,12 @@ void xmb_sleep_countdown(int left, const char *hint)
 	set_hidden(sleep_ov, false);
 }
 
-void xmb_sleep_prepare(void)
+void xmb_sleep_prepare(int radio_off)
 {
 	if (s.playing)
 		toggle_play();
-	wifi_park(1);
+	if (radio_off)
+		wifi_park(1);
 	save_flush();
 	xmb_sleep_countdown(-1, NULL);
 	screen(0);

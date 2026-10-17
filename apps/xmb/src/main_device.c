@@ -114,11 +114,18 @@ static unsigned long irq_count(const char *name)
 /* глубокий сон (suspend to RAM): пауза, экран гаснет. Железо будит клик колесом и «след. трек» (md-gpio-keys),
  * кнопки на АЦП — нет. Будит только колесо, как кнопка питания: от «след. трек» (карман) — сразу обратно в сон.
  * Запись в /sys/power/state возвращается после сна */
+static int usb_host(void);
+
 static int deep_sleep(void)
 {
-	int slept = 0;
-	xmb_sleep_prepare();
+	int slept = 0, host = usb_host();
+	xmb_sleep_prepare(!host);
 	screen_set(0);
+	/* компьютер на кабеле будит сразу же, а переподключение USB после пробуждения рвёт adb — только гасим экран */
+	if (host) {
+		printf("на кабеле компьютера — без сна, экран погашен\n");
+		return 1;
+	}
 	audio_power_down();
 	sync();
 	for (int i = 0; i < 100; i++) {
