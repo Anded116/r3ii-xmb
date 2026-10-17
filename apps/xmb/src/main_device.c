@@ -377,8 +377,10 @@ static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px)
 		cur_y2 = -1;
 		vi.yoffset = fb_page * vi.yres;
 		uint32_t t0 = tick_ms();
-		prof_slow += t0 - frame_t0 > 20;
-		prof_max = t0 - frame_t0 > prof_max ? t0 - frame_t0 : prof_max;
+		if (frame_t0) {   /* 0 — кадр включения экрана (с паузой на запуск панели), не в счёт */
+			prof_slow += t0 - frame_t0 > 20;
+			prof_max = t0 - frame_t0 > prof_max ? t0 - frame_t0 : prof_max;
+		}
 		ioctl(fb_fd, FBIOPAN_DISPLAY, &vi);
 		pan_ms = tick_ms() - t0;
 		prof_pan += pan_ms;
@@ -417,6 +419,7 @@ static void backlight(int on)
 static void screen_set(int on)
 {
 	if (on) {
+		frame_t0 = 0;
 		ioctl(fb_fd, FBIOBLANK, FB_BLANK_UNBLANK);
 		if (fb_reprogram) {   /* исходный режим (с двумя страницами): после сна драйвер может сбросить виртуальную высоту */
 			struct fb_var_screeninfo v = vi;

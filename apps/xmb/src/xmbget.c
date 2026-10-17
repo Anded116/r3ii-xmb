@@ -339,10 +339,11 @@ static int get(const char *u, const char *out)
 			got = body(&c, f, clen);
 			ok = got >= 0 && (clen < 0 || got == clen);
 		}
+		long long size = ftell(f);   /* сколько пришло — и при обрыве, когда body() вернула -1 */
 		ok &= fclose(f) == 0;
 		c_close(&c);
 		if (!ok) {
-			fprintf(stderr, "xmbget: оборвалось на %lld байтах\n", got);
+			fprintf(stderr, "xmbget: оборвалось на %lld байтах\n", size);
 			unlink(out);
 			return 1;
 		}

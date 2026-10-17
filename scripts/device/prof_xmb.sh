@@ -11,14 +11,14 @@
 rep() { s=""; i=0; while [ $i -lt $2 ]; do s="$s,$1"; i=$((i+1)); done; echo "$s"; }
 W=$(rep wait 70)   # 70 шагов по 80 мс — 5.6 с
 case ${1:-list} in
-list) SC="wait$W$(rep down 5),enter$W$(rep down 70)$(rep up 70)$W"; M="7:покой 10:прокрутка" ;;
-grid) SC="wait$W$(rep down 3),enter$W$(rep down 70)$(rep up 70)$W"; M="7:покой 10:сетка" ;;
-back) C=",enter$(rep wait 10),esc$(rep wait 10)"; SC="wait$W$(rep down 3),enter$(rep wait 20)$(rep down 4)$C$C$C$C$C$C$C$C$C$C$W"
+list) SC="wait$W$(rep down 2),enter$W$(rep down 70)$(rep up 70)$W"; M="7:покой 10:прокрутка" ;;
+grid) SC="wait$W,enter$W$(rep down 70)$(rep up 70)$W"; M="7:покой 10:сетка" ;;
+back) C=",enter$(rep wait 10),esc$(rep wait 10)"; SC="wait$W,enter$(rep wait 20)$(rep down 4)$C$C$C$C$C$C$C$C$C$C$W"
 	M="7:покой 10:вход-возврат" ;;
 artist) N=${ART:+$(rep down $ART)}   # ART=номер исполнителя — все круги по нему
 	C=",enter$(rep wait 15),enter$(rep wait 15),esc$(rep wait 15),esc$(rep wait 15)"
 	[ -z "$ART" ] && C="$C,down$(rep wait 4)"
-	SC="wait$W${PLAY:+,play}$(rep down 4),enter$(rep wait 20)$N$(rep wait 10)$C$C$C$C$C$C$W"; M="7:покой 10:исполнитель" ;;   # PLAY=1 — с музыкой
+	SC="wait$W${PLAY:+,play},down,enter$(rep wait 20)$N$(rep wait 10)$C$C$C$C$C$C$W"; M="7:покой 10:исполнитель" ;;   # PLAY=1 — с музыкой
 cats) C=",left$(rep wait 5),left$(rep wait 5),right$(rep wait 5),right$(rep wait 5),right$(rep wait 5),left$(rep wait 5)"
 	SC="wait$W$C$C$C$C$C$C$W"; M="7:покой 10:категории" ;;
 opts) SC="wait$W,left$(rep wait 5),down,enter$(rep wait 10),enter$(rep wait 10)$(rep down 11)$(rep up 11)$(rep down 11)$(rep up 11)$(rep down 11)$(rep up 11),esc$W"
@@ -36,6 +36,7 @@ esac
 sh /tmp/stop_xmb.sh > /dev/null
 X=/data/mnt/sd_0/.xmb
 mkdir -p /tmp/prof_save && cp $X/settings.txt $X/last.txt $X/queue.txt /tmp/prof_save/ 2>/dev/null   # сценарий меняет — вернуть
+rm -f /tmp/xmb_nav   # место в меню после перезапуска: сценарии считают от «Музыка → Альбомы»
 cd /tmp/xmb
 env ${WAVE:+XMB_WAVE=$WAVE} XMB_STEP=80 XMB_SCRIPT="${MUSIC:+$(rep wait 40),play,}$SC" ./xmb /tmp/xmb/fonts > /tmp/prof.log 2>&1 &   # WAVE=номер стиля фона
 P=$!
