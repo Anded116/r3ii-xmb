@@ -3276,7 +3276,8 @@ static int q_load(void)
 	return q_len;
 }
 
-/* трек s.track выбран, но не открыт: играть начнёт toggle_play с позиции pos; формат — пока по расширению */
+/* трек s.track выбран, но не открыт: играть начнёт toggle_play с позиции pos; формат — по заголовку файла (не
+ * вышло — по расширению) */
 static void np_select(double pos)
 {
 	const lib_track_t *tr = &s.lib->tracks[s.track];
@@ -3284,10 +3285,16 @@ static void np_select(double pos)
 	s.pos = s.resume_pos = pos;
 	s.resume = 1;
 	s.playing = 0;
-	const char *e = strrchr(tr->path, '.');
-	snprintf(s.np_format, sizeof(s.np_format), "%s", e ? e + 1 : "");
-	for (char *c = s.np_format; *c; c++)
-		*c = (char)(*c >= 'a' && *c <= 'z' ? *c - 32 : *c);
+	char codec[8];
+	int rate, bits;
+	if (!audio_probe(tr->path, codec, &rate, &bits) && rate && bits) {
+		snprintf(s.np_format, sizeof(s.np_format), "%s · %d bit / %g kHz", codec, bits, rate / 1000.0);
+	} else {
+		const char *e = strrchr(tr->path, '.');
+		snprintf(s.np_format, sizeof(s.np_format), "%s", e ? e + 1 : "");
+		for (char *c = s.np_format; *c; c++)
+			*c = (char)(*c >= 'a' && *c <= 'z' ? *c - 32 : *c);
+	}
 	update_np_labels();
 	player_set_state(0, s.pos, s.volume);
 }

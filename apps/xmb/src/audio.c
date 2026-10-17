@@ -1314,6 +1314,20 @@ void audio_set_volume(int percent)
 	apply_volume();
 }
 
+int audio_probe(const char *path, char codec[8], int *rate, int *bits)
+{
+	dec_t d;
+	memset(&d, 0, sizeof(d));
+	if (dec_open(&d, path))
+		return -1;
+	snprintf(codec, 8, "%s", d.codec == C_FLAC ? "FLAC" : d.codec == C_MP3 ? "MP3" : d.codec == C_WAV ? "WAV"
+				 : d.codec == C_ALAC ? "ALAC" : d.codec == C_AAC ? "AAC" : "");
+	*rate = d.rate;
+	*bits = d.bits;
+	dec_close(&d);
+	return 0;
+}
+
 void audio_get_status(audio_status_t *st)
 {
 	static audio_status_t last;

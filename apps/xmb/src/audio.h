@@ -45,6 +45,8 @@ void audio_get_status(audio_status_t *st);
  * в разъём. Частота файла пересчитывается под частоту кодека, громкость — программно */
 void audio_set_bt(const char *path, int rate, int bits);
 int audio_supported(const char *path);   /* по расширению */
+/* формат файла по заголовку, без воспроизведения: кодек (как в audio_status_t), частота, бит; 0 — прочитан */
+int audio_probe(const char *path, char codec[8], int *rate, int *bits);
 
 #define EQ_BANDS 10   /* 31, 62, 125, 250, 500 Гц, 1, 2, 4, 8, 16 кГц */
 extern const int eq_freq[EQ_BANDS];
