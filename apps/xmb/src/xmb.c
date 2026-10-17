@@ -261,9 +261,9 @@ static struct {
 	node_t **album_nodes;           /* треки каждого альбома — очередь при переходе по карусели */
 	/* тач */
 	int t_mode, t_menu_off;
-	lv_point_t t_start, t_last;
-	uint32_t t_ms, t_last_ms;
-	double t_start_pos, t_vel;
+	lv_point_t t_start;
+	uint32_t t_ms;
+	double t_start_pos;
 	/* бросок: скорость — по движению пальца за последние ~100 мс (тач 33 Гц — по двум точкам скачет);
 	 * после отпускания список едет сам и тормозит трением, затем докатывается до пункта */
 	struct { uint32_t t; int y; } t_hist[8];
@@ -1031,7 +1031,7 @@ static void layout_column(column_t *c, double x, double fade, double tk, int act
 		else
 			y = ITEM_ABOVE_Y + (d + 1) * rh;
 		double near = show_sel ? fmax(0.0, 1.0 - fabs(d)) : 0;
-		double base = d < -0.5 ? 0.45 : 0.62;
+		double base = c->big ? (d < -0.5 ? 0.32 : 0.45) : d < -0.5 ? 0.45 : 0.62;   /* у обложек — контрастнее */
 		double k = (active ? base + (1.0 - base) * near : base * 0.75) * fade;
 		int sel = show_sel && near > 0.5;
 		/* у родителя остаётся только иконка выбранного пункта — звено цепочки */
@@ -1088,6 +1088,20 @@ static void layout_column(column_t *c, double x, double fade, double tk, int act
 		} else {
 			set_pos(r->title, (int)x + TEXT_DX, yy + (sel ? s.dy_title_sel : s.dy_title));
 			set_pos(r->sub, (int)x + TEXT_DX, yy + s.dy_sub);
+		}
+		/* список с обложками: выбранная — в светлой рамке (свечение под крупной обложкой не видно); строки общие
+		 * для всех списков — в остальных рамку снять */
+		{
+			lv_obj_t *frame = show_img ? r->img : r->icon, *other = show_img ? r->icon : r->img;
+			int ow = c->big && sel && active && tk > 0.5 ? 2 : 0;
+			if (lv_obj_get_style_outline_width(frame, 0) != ow) {
+				lv_obj_set_style_outline_width(frame, ow, 0);
+				lv_obj_set_style_outline_color(frame, lv_color_white(), 0);
+				lv_obj_set_style_outline_opa(frame, 210, 0);
+				lv_obj_set_style_outline_pad(frame, 2, 0);
+			}
+			if (lv_obj_get_style_outline_width(other, 0))
+				lv_obj_set_style_outline_width(other, 0, 0);
 		}
 		/* выбранный — icon_sel, остальные — icon, звенья цепочки — 14 */
 		set_icon_px(r->icon, tile ? 24 : 14 + (sz->icon - 14 + (sz->icon_sel - sz->icon) * near) * tk);
@@ -2192,6 +2206,8 @@ static void kb_event(lv_event_t *e)
 					 : mode == LV_KEYBOARD_MODE_USER_2 ? LV_KEYBOARD_MODE_USER_1
 					 : mode == LV_KEYBOARD_MODE_USER_3 ? LV_KEYBOARD_MODE_USER_4
 									   : LV_KEYBOARD_MODE_USER_3);
+	else if (!strcmp(txt, LV_SYMBOL_OK) && !lv_textarea_get_text(s.kb_ta)[0])
+		kb_close();   /* пусто — значит передумали: выйти, а не ругаться */
 	else if (!strcmp(txt, LV_SYMBOL_OK) && s.kb_pl == -1)
 		search_done();
 	else if (!strcmp(txt, LV_SYMBOL_OK))
@@ -2256,6 +2272,7 @@ static void kb_open(int pl, const char *title, const char *text)
 	lv_obj_set_style_bg_color(s.kb_ta, lv_color_hex(0x2c3038), 0);
 	lv_obj_set_style_text_color(s.kb_ta, lv_color_white(), 0);
 	lv_obj_set_style_border_color(s.kb_ta, lv_color_hex(ACCENT), 0);
+	lv_obj_set_style_border_color(s.kb_ta, lv_color_white(), LV_PART_CURSOR);   /* курсор — светлый на тёмном поле */
 	lv_keyboard_set_map(kb, LV_KEYBOARD_MODE_USER_1, kb_ru, kb_ctrl_ru);
 	lv_keyboard_set_map(kb, LV_KEYBOARD_MODE_USER_2, kb_RU, kb_ctrl_ru);
 	lv_keyboard_set_map(kb, LV_KEYBOARD_MODE_USER_3, kb_en, kb_ctrl_en);
@@ -4490,11 +4507,13 @@ void xmb_input(xmb_input_t in)
 		next_group();
 		return;
 	}
-	if (s.kb_panel) {   /* клавиатура — пальцем, колесо двигает курсор по буквам */
+	if (s.kb_panel) {   /* клавиатура — пальцем, колесо двигает курсор по буквам, «назад» закрывает */
 		if (in == XMB_WHEEL_UP)
 			lv_textarea_cursor_left(s.kb_ta);
 		else if (in == XMB_WHEEL_DOWN)
 			lv_textarea_cursor_right(s.kb_ta);
+		else if (in == XMB_BACK)
+			kb_close();
 		return;
 	}
 	if (in == XMB_MENU) {
@@ -4781,10 +4800,9 @@ static void touch_cb(lv_event_t *e)
 	if (code == LV_EVENT_PRESSED) {
 		s.kin = 0;   /* касание останавливает бросок */
 		s.t_nhist = 0;
-		s.t_start = s.t_last = p;
-		s.t_ms = s.t_last_ms = now;
+		s.t_start = p;
+		s.t_ms = now;
 		s.t_mode = s.sh_open ? T_SHADE : T_TAP;
-		s.t_vel = 0;
 		/* «тач выключен» отключает только навигацию по меню: шторка и плеер доступны всегда */
 		s.t_menu_off = s.touch_off && !s.sh_open && !player_shown();
 		double f;
@@ -4922,14 +4940,6 @@ static void touch_cb(lv_event_t *e)
 		s.t_hist[s.t_nhist % 8].t = now;
 		s.t_hist[s.t_nhist % 8].y = p.y;
 		s.t_nhist++;
-		double dtm = (now - s.t_last_ms) / 1000.0;
-		if (dtm > 0.005) {
-			s.t_vel = s.t_vel * 0.5 + 0.5 * (p.y - s.t_last.y) / dtm;
-			s.t_last = p;
-			s.t_last_ms = now;
-		}
-		if (s.t_mode == T_VLIST && !s.opt_open && fabs(s.t_vel) > 1400 && drag_column()->nlet)
-			show_bubble(drag_column());   /* очень быстрая прокрутка пальцем — видно, где мы по алфавиту */
 	} else if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST) {
 		int mode = s.t_mode;
 		s.t_mode = T_NONE;
@@ -4984,8 +4994,6 @@ static void touch_cb(lv_event_t *e)
 			double step = s.opt_open ? OPT_ROW : drag_column()->grid ? grid_row_h() : drag_column()->big ? BIG_ROW : ROW;
 			s.kin_v = -v / step;
 			s.kin = fabs(s.kin_v) > 4 ? (s.opt_open ? 2 : 1) : 0;
-			if (s.kin == 1 && fabs(s.kin_v) > 25 && drag_column()->nlet)
-				show_bubble(drag_column());
 		} else if (mode == T_HCAT && abs(dx) > CAT_STEP * 0.4) {
 			set_cat(s.cat + (dx < 0 ? 1 : -1));
 		} else if (mode == T_BACKSWIPE && dx < -50) {
