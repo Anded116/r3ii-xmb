@@ -3829,9 +3829,24 @@ static void frame_cb(lv_timer_t *t)
 			printf("кадр логики: раскладка %u мс, волна и верх %u мс\n", t1 - t0, t2 - t1);
 	}
 	set_hidden(s.main, player_covers());
-	/* под плеером — затемнение или цвет обложки (гуще: краска вместо черноты) */
+	/* под плеером — затемнение или цвет обложки (гуще: краска вместо черноты). Смена обложки — плавно, но фон
+	 * пересчитывается целиком (весь экран), поэтому шаг — не чаще раза в 60 мс */
 	uint32_t tint = s.player_bg ? player_tint() : 0;
-	bg_set_dim(player_covers() ? (tint ? 215 : PLAYER_DIM) : 0, tint);
+	double want[4] = { (tint >> 16) & 255, (tint >> 8) & 255, tint & 255, tint ? 215 : PLAYER_DIM };
+	static double cur[4];
+	static uint32_t tint_ms;
+	if (!player_covers()) {
+		memcpy(cur, want, sizeof(cur));   /* плеер открывается сразу в своём цвете */
+		bg_set_dim(0, tint);
+	} else if (lv_tick_get() - tint_ms >= 60) {
+		double k = 1.0 - exp(-(double)(lv_tick_get() - tint_ms) / 1000.0 / 0.18);
+		tint_ms = lv_tick_get();
+		for (int i = 0; i < 4; i++)
+			cur[i] = fabs(want[i] - cur[i]) < 3 ? want[i] : cur[i] + (want[i] - cur[i]) * fmin(1.0, k);
+		/* RGB565: младшие биты цвета не видны — без них не пересчитывать фон зря */
+		uint32_t c = ((uint32_t)cur[0] << 16 | (uint32_t)cur[1] << 8 | (uint32_t)cur[2]) & 0xF8FCF8;
+		bg_set_dim((int)cur[3], c);
+	}
 	set_hidden(s.mini, player_progress() > 0);
 	/* плеер свернулся — содержимое мини-плеера проявляется, а не возникает за кадр. Фон мини-плеера не трогаем:
 	 * он такой же, как у свернувшегося плеера */
