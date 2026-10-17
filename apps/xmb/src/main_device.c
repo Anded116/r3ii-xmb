@@ -13,6 +13,7 @@
 #include <linux/input.h>
 #include <poll.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -85,6 +86,13 @@ static struct fb_var_screeninfo vi;
 static struct fb_fix_screeninfo fi;
 static int fb_page;
 static uint16_t frame[W * H];
+static volatile sig_atomic_t shot_req;   /* kill -USR1: текущий кадр — в /tmp/xmb_shot.raw (RGB565 320×480) */
+
+static void shot_sig(int sig)
+{
+	(void)sig;
+	shot_req = 1;
+}
 static int frames;
 
 #define SLEEP_HOLD_MS 2000    /* удержание колеса (кнопка питания): с HOLD_PREV_MS — меню, отсюда — отсчёт до сна */
@@ -573,6 +581,7 @@ int main(int argc, char **argv)
 		pfd[i].events = POLLIN;
 	}
 	key_fd = pfd[0].fd;
+	signal(SIGUSR1, shot_sig);
 
 	uint32_t sel_down = 0;
 	int sel_long = 0;
@@ -767,6 +776,14 @@ int main(int argc, char **argv)
 				xmb_screen_broken();
 		}
 
+		if (shot_req) {
+			shot_req = 0;
+			FILE *f = fopen("/tmp/xmb_shot.raw", "wb");
+			if (f) {
+				fwrite(frame, sizeof(frame), 1, f);
+				fclose(f);
+			}
+		}
 		if (now - t_fps >= 5000) {
 			/* на кадр: lvgl (рисование, с копированием и pan внутри), копирование, ожидание pan, сон в poll */
 			int f = frames ? frames : 1;

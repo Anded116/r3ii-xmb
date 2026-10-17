@@ -5,6 +5,7 @@
  *
  * Без окна (проверка без рабочего стола): XMB_HEADLESS=1 XMB_SCRIPT="esc,up,enter,shot:a.ppm,..."
  * — сценарий выполняется по шагу раз в 300 мс, shot:<файл> сохраняет кадр в PPM, в конце выход.
+ * Касание: drag:x0:y0:x1:y1[:мс] — палец от точки до точки (150 мс), tap:x:y — тап.
  */
 #include <SDL2/SDL.h>
 #include <stdio.h>
@@ -22,6 +23,7 @@
 
 static uint16_t frame[W * H];
 static char *script, *script_pos;
+static struct { int on, x0, y0, x1, y1; uint32_t t0, ms; } drag;   /* касание из сценария */
 
 static uint32_t tick_ms(void)
 {
@@ -109,6 +111,19 @@ static void save_ppm(const char *path)
 	printf("shot %s\n", path);
 }
 
+/* палец идёт от начала к концу за drag.ms, ещё 50 мс лежит на месте и отпускается */
+static void touch_read(lv_indev_t *indev, lv_indev_data_t *data)
+{
+	(void)indev;
+	uint32_t t = tick_ms() - drag.t0;
+	double f = !drag.ms || t >= drag.ms ? 1.0 : t / (double)drag.ms;
+	data->point.x = (int32_t)(drag.x0 + (drag.x1 - drag.x0) * f);
+	data->point.y = (int32_t)(drag.y0 + (drag.y1 - drag.y0) * f);
+	data->state = drag.on && t < drag.ms + 50 ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
+	if (data->state == LV_INDEV_STATE_RELEASED)
+		drag.on = 0;
+}
+
 static void script_step(lv_timer_t *t)
 {
 	(void)t;
@@ -125,6 +140,19 @@ static void script_step(lv_timer_t *t)
 		save_ppm(tok + 5);
 		return;
 	}
+	if (!strncmp(tok, "drag:", 5) || !strncmp(tok, "tap:", 4)) {
+		int v[5] = { 0, 0, 0, 0, 150 };
+		int n = sscanf(strchr(tok, ':') + 1, "%d:%d:%d:%d:%d", &v[0], &v[1], &v[2], &v[3], &v[4]);
+		if (n == 2) {   /* тап */
+			v[2] = v[0];
+			v[3] = v[1];
+			v[4] = 60;
+		}
+		drag.x0 = v[0], drag.y0 = v[1], drag.x1 = v[2], drag.y1 = v[3], drag.ms = (uint32_t)v[4];
+		drag.t0 = tick_ms();
+		drag.on = 1;
+		return;
+	}
 	xmb_input_name(tok);
 }
 
@@ -138,6 +166,9 @@ int main(int argc, char **argv)
 		lv_display_set_color_format(disp, LV_COLOR_FORMAT_RGB565);
 		lv_display_set_buffers(disp, frame, NULL, sizeof(frame), LV_DISPLAY_RENDER_MODE_DIRECT);
 		lv_display_set_flush_cb(disp, headless_flush);
+		lv_indev_t *touch = lv_indev_create();
+		lv_indev_set_type(touch, LV_INDEV_TYPE_POINTER);
+		lv_indev_set_read_cb(touch, touch_read);
 	} else {
 		lv_display_t *disp = lv_sdl_window_create(W, H);
 		lv_sdl_window_set_zoom(disp, zoom ? (float)atof(zoom) : 2.0f);
