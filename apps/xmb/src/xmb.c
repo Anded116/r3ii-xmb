@@ -220,7 +220,7 @@ static struct {
 	double cat_pos, depth_t, focus_t, hint_t[2], bhint_t, slide;
 	/* настройки */
 	int theme, wave, touch_off, bright, sleep, bt_off, wifi_off, codec, shuffle, repeat, usb_dac, eq_on, ui_size;
-	int screen_off, album_view, dev_sleep, gain, rg_mode, xfade, lang, player_bg;
+	int screen_off, album_view, dev_sleep, gain, rg_mode, xfade, lang, player_bg, kb_start, kb_langs;
 	int btn[XMB_BTN_COUNT][XMB_G_COUNT];   /* действие кнопки на жест */
 	/* эквалайзер: пресет, свои полосы (дБ + 12, чтобы хранить в файле настроек), редактор */
 	int eq_preset, eq_custom[EQ_BANDS], eq_edit, eq_band, eq_adjust;
@@ -386,8 +386,15 @@ static const node_t screen_items[] = {
 	OPT(LV_SYMBOL_EYE_CLOSE, "Гашение экрана", screen_names, &s.screen_off, NULL),
 	OPT(LV_SYMBOL_AUDIO, "Фон плеера", player_bg_names, &s.player_bg, NULL),
 };
+static const char *const kb_start_names[] = { "Английская", "Русская", "Последняя", NULL };
+static const char *const kb_langs_names[] = { "Английская и русская", "Только английская", NULL };
+static const node_t kb_items[] = {
+	OPT(LV_SYMBOL_KEYBOARD, "Раскладка при открытии", kb_start_names, &s.kb_start, NULL),
+	OPT(LV_SYMBOL_KEYBOARD, "Раскладки", kb_langs_names, &s.kb_langs, NULL),
+};
 static const node_t control_items[] = {
 	DIR(LV_SYMBOL_KEYBOARD, "Кнопки", "что делают кнопки на корпусе", btn_items),
+	DIR(LV_SYMBOL_KEYBOARD, "Клавиатура", "раскладка при открытии", kb_items),
 	OPT(LV_SYMBOL_GPS, "Сенсорное управление", onoff, &s.touch_off, NULL),
 };
 static const node_t power_items[] = {
@@ -404,7 +411,7 @@ static const node_t set_items[] = {
 	DIR(LV_SYMBOL_IMAGE, "Экран", "тема, фон, яркость, размер", screen_items),
 	DIR(LV_SYMBOL_BLUETOOTH, "Bluetooth", NULL, bt_items),
 	DIR(LV_SYMBOL_WIFI, "Wi-Fi", wifi_items_sub, wifi_items),
-	DIR(LV_SYMBOL_KEYBOARD, "Управление", "кнопки на корпусе, сенсор", control_items),
+	DIR(LV_SYMBOL_KEYBOARD, "Управление", "кнопки, клавиатура, сенсор", control_items),
 	DIR(LV_SYMBOL_POWER, "Питание", "таймер сна, сон устройства", power_items),
 	ACT(LV_SYMBOL_USB, "USB-накопитель", "карта — компьютеру по кабелю", A_USB),
 	OPT(LV_SYMBOL_KEYBOARD, "Язык · Language", lang_names, &s.lang, apply_lang),
@@ -2024,6 +2031,20 @@ static const char *const kb_EN[] = {
 	LV_SYMBOL_UP, "Z", "X", "C", "V", "B", "N", "M", LV_SYMBOL_BACKSPACE, "\n",
 	KB_ROW4("РУС"),
 };
+/* «Только английская»: без клавиши языка */
+#define KB_ROW4_EN "1#", LV_SYMBOL_CLOSE, " ", LV_SYMBOL_OK, ""
+static const char *const kb_en1[] = {
+	"q", "w", "e", "r", "t", "y", "u", "i", "o", "p", "\n",
+	"a", "s", "d", "f", "g", "h", "j", "k", "l", "\n",
+	LV_SYMBOL_UP, "z", "x", "c", "v", "b", "n", "m", LV_SYMBOL_BACKSPACE, "\n",
+	KB_ROW4_EN,
+};
+static const char *const kb_EN1[] = {
+	"Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P", "\n",
+	"A", "S", "D", "F", "G", "H", "J", "K", "L", "\n",
+	LV_SYMBOL_UP, "Z", "X", "C", "V", "B", "N", "M", LV_SYMBOL_BACKSPACE, "\n",
+	KB_ROW4_EN,
+};
 #define KB_SPECIAL (LV_BUTTONMATRIX_CTRL_CHECKED | LV_BUTTONMATRIX_CTRL_NO_REPEAT | LV_BUTTONMATRIX_CTRL_CLICK_TRIG)
 #define KB_CTRL4 KB_SPECIAL | 3, KB_SPECIAL | 3, KB_SPECIAL | 3, 8, KB_SPECIAL | 4
 static const lv_buttonmatrix_ctrl_t kb_ctrl_ru[] = {
@@ -2038,7 +2059,13 @@ static const lv_buttonmatrix_ctrl_t kb_ctrl_en[] = {
 	KB_SPECIAL | 6, 4, 4, 4, 4, 4, 4, 4, KB_SPECIAL | 6,
 	KB_CTRL4,
 };
-static lv_keyboard_mode_t kb_lang = LV_KEYBOARD_MODE_USER_1;   /* последний язык: русский или латиница */
+static const lv_buttonmatrix_ctrl_t kb_ctrl_en1[] = {
+	4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+	4, 4, 4, 4, 4, 4, 4, 4, 4,
+	KB_SPECIAL | 6, 4, 4, 4, 4, 4, 4, 4, KB_SPECIAL | 6,
+	KB_SPECIAL | 3, KB_SPECIAL | 3, 11, KB_SPECIAL | 4,
+};
+static lv_keyboard_mode_t kb_lang = LV_KEYBOARD_MODE_USER_3;   /* последний язык: русский или латиница */
 
 static void kb_close(void)
 {
@@ -2321,8 +2348,12 @@ static void kb_open(int pl, const char *title, const char *text)
 	lv_obj_set_style_border_color(s.kb_ta, lv_color_white(), LV_PART_CURSOR);   /* курсор — светлый на тёмном поле */
 	lv_keyboard_set_map(kb, LV_KEYBOARD_MODE_USER_1, kb_ru, kb_ctrl_ru);
 	lv_keyboard_set_map(kb, LV_KEYBOARD_MODE_USER_2, kb_RU, kb_ctrl_ru);
-	lv_keyboard_set_map(kb, LV_KEYBOARD_MODE_USER_3, kb_en, kb_ctrl_en);
-	lv_keyboard_set_map(kb, LV_KEYBOARD_MODE_USER_4, kb_EN, kb_ctrl_en);
+	lv_keyboard_set_map(kb, LV_KEYBOARD_MODE_USER_3, s.kb_langs ? kb_en1 : kb_en, s.kb_langs ? kb_ctrl_en1 : kb_ctrl_en);
+	lv_keyboard_set_map(kb, LV_KEYBOARD_MODE_USER_4, s.kb_langs ? kb_EN1 : kb_EN, s.kb_langs ? kb_ctrl_en1 : kb_ctrl_en);
+	if (s.kb_langs || s.kb_start == 0)
+		kb_lang = LV_KEYBOARD_MODE_USER_3;
+	else if (s.kb_start == 1)
+		kb_lang = LV_KEYBOARD_MODE_USER_1;
 	lv_keyboard_set_mode(kb, kb_lang);
 	lv_keyboard_set_textarea(kb, s.kb_ta);
 	lv_obj_remove_event_cb(kb, lv_keyboard_def_event_cb);
@@ -5341,6 +5372,7 @@ static const struct {
 	{ "codec", &s.codec, 5 }, { "shuffle", &s.shuffle, 1 }, { "repeat", &s.repeat, 2 }, { "eq_on", &s.eq_on, 1 },
 	{ "ui_size", &s.ui_size, 3 }, { "volume", &s.volume, 100 }, { "screen_off", &s.screen_off, 5 },
 	{ "album_view", &s.album_view, 2 }, { "gain", &s.gain, 2 }, { "replaygain", &s.rg_mode, 2 }, { "xfade", &s.xfade, 3 }, { "lang", &s.lang, LANG_COUNT - 1 },
+	{ "kb_start", &s.kb_start, 2 }, { "kb_langs", &s.kb_langs, 1 },
 	{ "btn_next_s", &s.btn[0][0], BA_COUNT - 1 }, { "btn_next_l", &s.btn[0][1], BA_COUNT - 1 },
 	{ "btn_next_d", &s.btn[0][2], BA_COUNT - 1 }, { "btn_play_s", &s.btn[1][0], BA_COUNT - 1 },
 	{ "btn_play_l", &s.btn[1][1], BA_COUNT - 1 }, { "btn_play_d", &s.btn[1][2], BA_COUNT - 1 },
