@@ -5,7 +5,7 @@ N=${1:-100}
 LOG=/data/mnt/sd_0/hiby_dev/stress.log
 I=/tmp/inject
 echo "=== $(date) старт, шагов $N" >> $LOG
-$I /dev/input/event1 drag 160 455 160 455 60   # открыть плеер с мини-плеера
+$I /dev/input/event1 drag 160 465 160 300 250   # открыть плеер свайпом вверх с мини-плеера (тап по открытому плееру попал бы в кнопки)
 sleep 2
 i=0
 while [ $i -lt $N ]; do
@@ -15,7 +15,7 @@ while [ $i -lt $N ]; do
 	2) a="альбом вперёд"; $I /dev/input/event1 drag 250 150 60 150 250 ;;
 	3) a="альбом назад"; $I /dev/input/event1 drag 60 150 250 150 250 ;;
 	4) x=$((30 + RANDOM % 260)); a="перемотка $x"; $I /dev/input/event1 drag $x 362 $x 362 60 ;;
-	5) a="закрыть и открыть"; $I /dev/input/event1 drag 160 200 160 420 250; sleep 1; $I /dev/input/event1 drag 160 455 160 455 60 ;;
+	5) a="закрыть и открыть"; $I /dev/input/event1 drag 160 200 160 420 250; sleep 1; $I /dev/input/event1 drag 160 465 160 300 250 ;;
 	esac
 	echo "$(date +%T) $i $a" >> $LOG
 	[ $((i % 10)) -eq 0 ] && sync

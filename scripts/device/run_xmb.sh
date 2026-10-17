@@ -11,6 +11,10 @@ LOG=$D/xmb.log
 [ -d $D ] || LOG=/tmp/xmb.log
 mv -f $LOG $LOG.prev 2>/dev/null
 echo "=== $(date) запуск" > $LOG
+# причина последнего сброса процессора (CPM RSR, X1600: бит 0 — питание, 1 — сторожевой таймер, им же делаются
+# reboot и паника ядра, 2 — гибернация). Биты копятся — после чтения обнулить: 0 — с прошлого запуска XMB сброса не было
+echo "сброс: $(devmem 0x10000008 32)" >> $LOG
+devmem 0x10000008 32 0
 sh /tmp/stop_stock.sh >> $LOG 2>&1
 chmod +x /tmp/xmb/xmb
 warm=
