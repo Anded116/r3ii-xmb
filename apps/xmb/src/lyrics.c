@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 void lyrics_path(char *out, int cap, const char *audio_path, int cue, const char *artist, const char *title)
 {
@@ -146,4 +147,194 @@ int lyrics_at(const lyrics_t *l, double sec)
 		}
 	}
 	return r;
+}
+
+/* ---------- LRCLIB ---------- */
+
+#include <pthread.h>
+
+static struct {
+	pthread_mutex_t mu;
+	int state;
+	char url[2][1024], path[1100];
+} lf = { .mu = PTHREAD_MUTEX_INITIALIZER };
+
+static void url_add(char *u, int cap, const char *key, const char *val)
+{
+	int k = (int)strlen(u);
+	k += snprintf(u + k, cap - k, "%s%s=", strchr(u, '?') ? "&" : "?", key);
+	for (const unsigned char *p = (const unsigned char *)val; *p && k < cap - 4; p++) {
+		if (isalnum(*p) || strchr("-_.~", *p))
+			u[k++] = (char)*p;
+		else
+			k += snprintf(u + k, cap - k, "%%%02X", *p);
+	}
+	u[k] = 0;
+}
+
+/* строковое поле JSON с позиции p (после ключа и двоеточия): разэкранировать в out; null или не строка — 0 */
+static int json_str(const char *p, char *out, int cap)
+{
+	while (*p == ' ')
+		p++;
+	if (*p != '"')
+		return 0;
+	int k = 0;
+	for (p++; *p && *p != '"' && k < cap - 5; p++) {
+		if (*p != '\\') {
+			out[k++] = *p;
+			continue;
+		}
+		p++;
+		switch (*p) {
+		case 'n': out[k++] = '\n'; break;
+		case 't': out[k++] = '\t'; break;
+		case 'r': break;
+		case 'u': {
+			unsigned c = (unsigned)strtoul((char[]){ p[1], p[2], p[3], p[4], 0 }, NULL, 16);
+			p += 4;
+			if (c >= 0xd800 && c < 0xdc00 && p[1] == '\\' && p[2] == 'u') {   /* суррогатная пара */
+				unsigned lo = (unsigned)strtoul((char[]){ p[3], p[4], p[5], p[6], 0 }, NULL, 16);
+				c = 0x10000 + ((c - 0xd800) << 10) + (lo - 0xdc00);
+				p += 6;
+			}
+			if (c < 0x80) {
+				out[k++] = (char)c;
+			} else if (c < 0x800) {
+				out[k++] = (char)(0xc0 | c >> 6);
+				out[k++] = (char)(0x80 | (c & 0x3f));
+			} else if (c < 0x10000) {
+				out[k++] = (char)(0xe0 | c >> 12);
+				out[k++] = (char)(0x80 | ((c >> 6) & 0x3f));
+				out[k++] = (char)(0x80 | (c & 0x3f));
+			} else {
+				out[k++] = (char)(0xf0 | c >> 18);
+				out[k++] = (char)(0x80 | ((c >> 12) & 0x3f));
+				out[k++] = (char)(0x80 | ((c >> 6) & 0x3f));
+				out[k++] = (char)(0x80 | (c & 0x3f));
+			}
+			break;
+		}
+		default: out[k++] = *p; break;   /* \" \\ \/ */
+		}
+	}
+	out[k] = 0;
+	return k > 0 && *p == '"';   /* ответ оборвался посреди строки — не брать */
+}
+
+/* первый непустой текст в ответе: синхронный важнее простого (у поиска — массив, берём первый с метками) */
+static int pick(const char *json, char *out, int cap)
+{
+	static const char *const keys[2] = { "\"syncedLyrics\":", "\"plainLyrics\":" };
+	for (int i = 0; i < 2; i++)
+		for (const char *p = json; (p = strstr(p, keys[i])); p++)
+			if (json_str(p + strlen(keys[i]), out, cap))
+				return 1;
+	return 0;
+}
+
+#if XMB_DEVICE
+static int get(const char *url, const char *file)
+{
+	char cmd[1300];
+	snprintf(cmd, sizeof(cmd), "wget -q -T 20 -U 'XMB (github.com/Anded116/r3ii-xmb)' -O %s '%s' 2>>/tmp/xmb_wget.log", file, url);
+	return system(cmd);
+}
+#else
+static int get(const char *url, const char *file)
+{
+	(void)url;
+	(void)file;
+	return -1;
+}
+#endif
+
+static void *fetch_thread(void *arg)
+{
+	(void)arg;
+	const char *tmp = "/tmp/xmb_lrclib.json";
+	int st = LF_ERROR;
+	char *text = malloc(256 * 1024);
+	/* точный запрос по длительности, не нашлось — поиск; сервер не ответил — точный ещё раз */
+	for (int a = 0; a < 3 && text && (a < 2 || st == LF_ERROR); a++) {
+		int i = a % 2;
+		if (a == 2)
+			sleep(2);
+		unlink(tmp);
+		int rc = get(lf.url[i], tmp);
+		FILE *f = fopen(tmp, "rb");
+		if (!f) {
+			st = rc ? LF_ERROR : LF_NONE;
+			continue;
+		}
+		static char json[512 * 1024];
+		size_t n = fread(json, 1, sizeof(json) - 1, f);
+		fclose(f);
+		json[n] = 0;
+		st = LF_NONE;
+		if (!pick(json, text, 256 * 1024))
+			continue;
+		lyrics_t l = { 0 };
+		if (lyrics_parse(&l, text) && (f = fopen(lf.path, "wb"))) {
+			fputs(text, f);
+			fputc('\n', f);
+			fclose(f);
+			st = LF_FOUND;
+		}
+		lyrics_free(&l);
+		if (st == LF_FOUND)
+			break;
+	}
+	free(text);
+	unlink(tmp);
+	printf("lyrics: LRCLIB — %s\n", st == LF_FOUND ? "найден" : st == LF_NONE ? "нет" : "ошибка сети");
+	fflush(stdout);
+	pthread_mutex_lock(&lf.mu);
+	lf.state = st;
+	pthread_mutex_unlock(&lf.mu);
+	return NULL;
+}
+
+void lyrics_fetch(const char *artist, const char *title, const char *album, double dur, const char *lrc_path)
+{
+	pthread_mutex_lock(&lf.mu);
+	if (lf.state == LF_BUSY) {
+		pthread_mutex_unlock(&lf.mu);
+		return;
+	}
+	lf.state = LF_BUSY;
+	pthread_mutex_unlock(&lf.mu);
+	char d[16];
+	snprintf(d, sizeof(d), "%d", (int)(dur + 0.5));
+	const char *t = title;   /* «6. Название», «06 - Название» — номер из тегов LRCLIB не знает */
+	while (isdigit((unsigned char)*t))
+		t++;
+	if (t > title && t - title <= 3 && strchr(".-) ", *t)) {
+		while (*t && strchr(".-) ", *t))
+			t++;
+		title = *t ? t : title;
+	}
+	snprintf(lf.url[0], sizeof(lf.url[0]), "https://lrclib.net/api/get");
+	url_add(lf.url[0], sizeof(lf.url[0]), "artist_name", artist);
+	url_add(lf.url[0], sizeof(lf.url[0]), "track_name", title);
+	if (album && *album)
+		url_add(lf.url[0], sizeof(lf.url[0]), "album_name", album);
+	url_add(lf.url[0], sizeof(lf.url[0]), "duration", d);
+	snprintf(lf.url[1], sizeof(lf.url[1]), "https://lrclib.net/api/search");
+	url_add(lf.url[1], sizeof(lf.url[1]), "track_name", title);
+	url_add(lf.url[1], sizeof(lf.url[1]), "artist_name", artist);
+	snprintf(lf.path, sizeof(lf.path), "%s", lrc_path);
+	pthread_t th;
+	pthread_create(&th, NULL, fetch_thread, NULL);
+	pthread_detach(th);
+}
+
+int lyrics_fetch_poll(void)
+{
+	pthread_mutex_lock(&lf.mu);
+	int st = lf.state;
+	if (st != LF_BUSY)
+		lf.state = LF_IDLE;
+	pthread_mutex_unlock(&lf.mu);
+	return st;
 }

@@ -24,6 +24,7 @@
 #include "xmb_bg.h"
 #include "xmb_player.h"
 #include "bt.h"
+#include "wifi.h"
 #include <pthread.h>
 #include <strings.h>
 #include <errno.h>
@@ -86,7 +87,7 @@ static const ui_size_t *sz = &ui_sizes[1];
 #define SEG 30         /* сегментов в ползунке шторки */
 #define ACCENT 0xff7a1a /* оранжевый Walkman */
 
-enum { A_NONE, A_TRACK, A_EQ, A_BTN_RESET, A_SEARCH, A_STOCK, A_USB, A_NEWPL, A_BTDEV, A_BTSCAN };
+enum { A_NONE, A_TRACK, A_EQ, A_BTN_RESET, A_SEARCH, A_STOCK, A_USB, A_NEWPL, A_BTDEV, A_BTSCAN, A_WIFINET, A_WIFISCAN };
 enum { T_NONE, T_TAP, T_HCAT, T_VLIST, T_SWIPE_UP, T_PLAYER, T_PULL, T_SHADE, T_BACKSWIPE, T_INDEX, T_MINI, T_SEEK, T_EQ };
 
 /* ---------- данные ---------- */
@@ -303,6 +304,7 @@ static void size_metrics(void);
 static void about_fill(void);
 static void battery_guard(void);
 static void lyrics_refresh(void);
+static void lyrics_poll(void);
 static void toast(const char *fmt, ...);
 static void slide_tick(double dt);
 static void slide_open(const char *icon, const char *title, const char *sub, const char *hint, int dir,
@@ -315,6 +317,13 @@ static char bt_dev_sub[48];
 static const char *const codec_bt[] = { NULL, "LDAC", "aptX-HD", "aptX", "AAC", "SBC" };   /* как в codecs */
 static void bt_apply(void);
 static void bt_codec_apply(void);
+
+/* сети Wi-Fi: строит wifi_build из снимка wifi.c, последний пункт — поиск */
+#define KB_WIFI -2   /* клавиатура вводит пароль сети wifi_kb_ssid */
+static node_t wifi_nodes[WIFI_MAX + 1];
+static wifi_net_t wifi_list[WIFI_MAX];
+static char wifi_sub[WIFI_MAX][72], wifi_items_sub[48], wifi_kb_ssid[33];
+static void wifi_apply(void);
 
 static const node_t eq_items[] = {
 	OPT(LV_SYMBOL_POWER, "Эквалайзер", eq_onoff, &s.eq_on, eq_apply),
@@ -331,6 +340,11 @@ static const node_t btn_items[] = {
 	OPT(LV_SYMBOL_PREV, "«Пред. трек»: нажатие", btn_act_names, &s.btn[XMB_BTN_SCREEN][XMB_G_SHORT], NULL),
 	OPT(LV_SYMBOL_PREV, "«Пред. трек»: два нажатия", btn_act_names, &s.btn[XMB_BTN_SCREEN][XMB_G_DOUBLE], NULL),
 	ACT(LV_SYMBOL_REFRESH, "Как было", "вернуть назначения по умолчанию", A_BTN_RESET),
+};
+static const char *const wifi_onoff[] = { "Включён", "Выключен", NULL };
+static node_t wifi_items[] = {
+	OPT(LV_SYMBOL_WIFI, "Wi-Fi", wifi_onoff, &s.wifi_off, wifi_apply),
+	{ LV_SYMBOL_LIST, "Сети", wifi_items_sub, wifi_nodes, 1 },
 };
 static node_t bt_items[] = {
 	OPT(LV_SYMBOL_BLUETOOTH, "Bluetooth", bt_onoff, &s.bt_off, bt_apply),
@@ -379,6 +393,7 @@ static const node_t set_items[] = {
 	DIR(LV_SYMBOL_AUDIO, "Звук", "эквалайзер, усиление, ReplayGain", sound_items),
 	DIR(LV_SYMBOL_IMAGE, "Экран", "тема, фон, яркость, размер", screen_items),
 	DIR(LV_SYMBOL_BLUETOOTH, "Bluetooth", NULL, bt_items),
+	DIR(LV_SYMBOL_WIFI, "Wi-Fi", wifi_items_sub, wifi_items),
 	DIR(LV_SYMBOL_KEYBOARD, "Управление", "кнопки на корпусе, сенсор", control_items),
 	DIR(LV_SYMBOL_POWER, "Питание", "таймер сна, сон устройства", power_items),
 	ACT(LV_SYMBOL_USB, "USB-накопитель", "карта — компьютеру по кабелю", A_USB),
@@ -1685,9 +1700,25 @@ static void sleep_start(void)
 	update_modes();
 }
 
-/* текст играющего трека: файл .lrc рядом с ним; перечитывается при смене трека */
+/* текст играющего трека: файл .lrc рядом с ним, перечитывается при смене трека; нет — ищется в LRCLIB (по Wi-Fi),
+ * найденный сохраняется рядом с треком */
 static lyrics_t lyr;
-static int lyr_track = -1;
+static int lyr_track = -1, lyr_wait = -1;   /* lyr_wait — для какого трека идёт поиск */
+
+static void lyrics_file(char *f, int cap)
+{
+	const lib_track_t *tr = &s.lib->tracks[s.track];
+	lyrics_path(f, cap, tr->path, tr->start > 0 || tr->end > 0, tr->artist, tr->title);
+}
+
+static void lyrics_find(void)
+{
+	const lib_track_t *tr = &s.lib->tracks[s.track];
+	char f[1100];
+	lyrics_file(f, sizeof(f));
+	lyrics_fetch(tr->artist, tr->title, s.lib->albums[tr->aidx].title, tr->dur, f);
+	lyr_wait = s.track;
+}
 
 static void lyrics_refresh(void)
 {
@@ -1695,24 +1726,54 @@ static void lyrics_refresh(void)
 		return;
 	lyr_track = s.track;
 	if (s.track >= 0) {
-		const lib_track_t *tr = &s.lib->tracks[s.track];
 		char f[1100];
-		lyrics_path(f, sizeof(f), tr->path, tr->start > 0 || tr->end > 0, tr->artist, tr->title);
+		lyrics_file(f, sizeof(f));
 		lyrics_load(&lyr, f);
 	} else {
 		lyrics_free(&lyr);
 	}
 	player_set_lyrics(&lyr);
+	if (s.track >= 0 && !lyr.n && player_lyrics_shown() && wifi_online())
+		lyrics_find();   /* текст открыт — у следующего трека тоже искать */
 }
 
 static void lyrics_toggle(void)
 {
 	lyrics_refresh();
-	if (!player_lyrics_shown() && !lyr.n) {
-		toast("%s", "Для этого трека нет текста");
+	if (player_lyrics_shown() || lyr.n) {
+		player_show_lyrics(!player_lyrics_shown());
 		return;
 	}
-	player_show_lyrics(!player_lyrics_shown());
+	if (s.track < 0)
+		return;
+	if (!wifi_online()) {
+		toast("%s", "Текста нет. С Wi-Fi найду его в LRCLIB");
+		return;
+	}
+	toast("%s", "Ищу текст…");
+	lyrics_find();
+	player_show_lyrics(1);   /* найдётся — появится сам */
+}
+
+/* итог поиска в LRCLIB: найден — перечитать файл, если трек тот же */
+static void lyrics_poll(void)
+{
+	int st = lyrics_fetch_poll();
+	if (st == LF_IDLE || st == LF_BUSY)
+		return;
+	int same = lyr_wait == s.track;
+	lyr_wait = -1;
+	if (!same)
+		return;
+	if (st == LF_FOUND) {
+		lyr_track = -1;
+		lyrics_refresh();
+	} else {
+		toast("%s", st == LF_NONE ? "Текст не найден" : "LRCLIB не отвечает");
+		if (!lyr.n)
+			player_show_lyrics(0);
+	}
+	update_modes();
 }
 
 static void toggle_mode(int m)
@@ -2077,6 +2138,12 @@ static void search_done(void)
 
 static void kb_done(void)
 {
+	if (s.kb_pl == KB_WIFI) {
+		wifi_connect(wifi_kb_ssid, lv_textarea_get_text(s.kb_ta));
+		toast("Подключение к «%s»…", wifi_kb_ssid);
+		kb_close();
+		return;
+	}
 	char name[64];
 	snprintf(name, sizeof(name), "%s", lv_textarea_get_text(s.kb_ta));
 	for (char *c = name; *c; c++)   /* символы, которых не бывает в именах файлов */
@@ -2125,7 +2192,7 @@ static void kb_event(lv_event_t *e)
 					 : mode == LV_KEYBOARD_MODE_USER_2 ? LV_KEYBOARD_MODE_USER_1
 					 : mode == LV_KEYBOARD_MODE_USER_3 ? LV_KEYBOARD_MODE_USER_4
 									   : LV_KEYBOARD_MODE_USER_3);
-	else if (!strcmp(txt, LV_SYMBOL_OK) && s.kb_pl < 0)
+	else if (!strcmp(txt, LV_SYMBOL_OK) && s.kb_pl == -1)
 		search_done();
 	else if (!strcmp(txt, LV_SYMBOL_OK))
 		kb_done();
@@ -2138,7 +2205,7 @@ static void kb_event(lv_event_t *e)
 	}
 }
 
-/* pl — переименовать плейлист (s.npl — создать новый), pl < 0 — поиск */
+/* pl — переименовать плейлист (s.npl — создать новый), -1 — поиск, KB_WIFI — пароль сети */
 static void kb_open(int pl, const char *title, const char *text)
 {
 	kb_close();
@@ -2159,7 +2226,8 @@ static void kb_open(int pl, const char *title, const char *text)
 	lv_obj_set_size(s.kb_ta, SCR_W - 32, 44);
 	lv_obj_set_pos(s.kb_ta, 16, 38);
 	lv_textarea_set_text(s.kb_ta, text);
-	if (pl < 0) {
+	lv_textarea_set_max_length(s.kb_ta, pl == KB_WIFI ? 63 : 40);
+	if (pl == -1) {
 		s.kb_info = label(s.kb_panel, s.f_sub, "");
 		lv_obj_set_pos(s.kb_info, 16, 88);
 		lv_obj_set_style_text_opa(s.kb_info, 180, 0);
@@ -2200,7 +2268,7 @@ static void kb_open(int pl, const char *title, const char *text)
 
 /* ---------- действия с пунктом: долгий клик колесом или долгое касание ---------- */
 
-enum { CA_FAV, CA_ADDPL, CA_REMOVE, CA_UP, CA_DOWN, CA_RENAME, CA_DELETE, CA_QNEXT, CA_QEND, CA_QREMOVE, CA_ERASE };
+enum { CA_FAV, CA_ADDPL, CA_REMOVE, CA_UP, CA_DOWN, CA_RENAME, CA_DELETE, CA_QNEXT, CA_QEND, CA_QREMOVE, CA_ERASE, CA_FORGET };
 
 static struct {
 	int pl, pos, track, choice, n, act[8];
@@ -2335,7 +2403,12 @@ static void ctx_open(void)
 		return;
 	const node_t *n = &c->nodes[c->sel];
 	cx.n = 0;
-	if (s.cat == CAT_PLAYLISTS && s.depth == 0) {
+	if (n->action == A_WIFINET) {
+		if (!wifi_list[n->track].saved)
+			return;
+		cx.track = n->track;
+		ctx_add(CA_FORGET, "Забыть сеть");
+	} else if (s.cat == CAT_PLAYLISTS && s.depth == 0) {
 		cx.pl = c->sel;
 		if (cx.pl >= s.npl)
 			return;
@@ -2406,6 +2479,9 @@ static void ctx_commit(void)
 {
 	playlist_t *p = cx.pl >= 0 && cx.pl < s.npl ? &s.pls[cx.pl] : NULL;
 	switch (cx.act[cx.choice]) {
+	case CA_FORGET:
+		wifi_forget(wifi_list[cx.track].ssid);
+		break;
 	case CA_FAV:
 		fav_toggle_track(cx.track);
 		break;
@@ -3247,6 +3323,59 @@ static void bt_build(void)
 	refresh_subs();
 }
 
+static void wifi_apply(void)
+{
+	wifi_power(!s.wifi_off);
+}
+
+static void wifi_build(void)
+{
+	int n = s.wifi_off ? 0 : wifi_networks(wifi_list, WIFI_MAX), conn = -1;
+	for (int i = 0; i < n; i++) {
+		const wifi_net_t *w = &wifi_list[i];
+		const char *sig = tx(w->signal >= -60 ? "сильный сигнал" : w->signal >= -72 ? "средний сигнал" : "слабый сигнал");
+		snprintf(wifi_sub[i], sizeof(wifi_sub[i]), "%s · %s",
+			 tx(w->connected ? "подключено" : w->saved ? "сохранена" : w->secured ? "с паролем" : "открытая"), sig);
+		wifi_nodes[i] = (node_t){ .icon = LV_SYMBOL_WIFI, .title = w->ssid, .sub = wifi_sub[i],
+					  .action = A_WIFINET, .track = i };
+		if (w->connected)
+			conn = i;
+	}
+	const char *st = wifi_status();
+	if (s.wifi_off)
+		wifi_nodes[n] = (node_t){ .icon = LV_SYMBOL_WIFI, .title = "Wi-Fi выключен", .sub = "включите его выше" };
+	else
+		wifi_nodes[n] = (node_t){ .icon = LV_SYMBOL_REFRESH, .title = st[0] ? st : "Искать сети", .action = A_WIFISCAN };
+	wifi_items[1].nkids = n + 1;
+	snprintf(wifi_items_sub, sizeof(wifi_items_sub), "%s",
+		 conn >= 0 ? wifi_list[conn].ssid : tx(s.wifi_off ? "выключен" : "не подключено"));
+	for (int d = 1; d <= s.depth; d++) {
+		column_t *c = &s.stack[d];
+		if (c->nodes != wifi_nodes)
+			continue;
+		int sel = c->sel;
+		column_fill(c, wifi_nodes, n + 1);
+		c->sel = c->pos = sel <= n ? sel : n;
+		layout();
+	}
+	refresh_subs();
+}
+
+static void wifi_poll(void)
+{
+	static unsigned gen = ~0u, mseq;
+	if (wifi_gen() != gen) {
+		gen = wifi_gen();
+		wifi_build();
+	}
+	unsigned seq;
+	const char *m = wifi_message(&seq);
+	if (seq != mseq) {
+		mseq = seq;
+		toast("%s", m);
+	}
+}
+
 static void bt_poll(void)
 {
 	static unsigned gen = ~0u, mseq;
@@ -3322,6 +3451,8 @@ static void frame_cb(lv_timer_t *t)
 	library_poll();
 	settings_poll();
 	bt_poll();
+	wifi_poll();
+	lyrics_poll();
 	battery_guard();
 	/* гашение экрана без касаний и кнопок; пока тянут шторку или ползунок — не гаснет */
 	if (s.screen_on && screen_sec[s.screen_off] && s.t_mode == T_NONE &&
@@ -3652,7 +3783,10 @@ static void tile_tap(int i)
 		s.bt_off = !s.bt_off;
 		bt_apply();
 		break;
-	case TL_WIFI: s.wifi_off = !s.wifi_off; break;
+	case TL_WIFI:
+		s.wifi_off = !s.wifi_off;
+		wifi_apply();
+		break;
 	case TL_EQ:
 		s.eq_on = !s.eq_on;
 		eq_apply();
@@ -4077,6 +4211,19 @@ static void select_current(void)
 		}
 	} else if (n->action == A_BTSCAN) {
 		bt_scan();
+	} else if (n->action == A_WIFISCAN) {
+		wifi_scan();
+	} else if (n->action == A_WIFINET) {
+		const wifi_net_t *w = &wifi_list[n->track];
+		if (w->connected) {
+			toast("%s", "Уже подключено — удержание колеса: забыть сеть");
+		} else if (w->saved || !w->secured) {
+			wifi_connect(w->ssid, w->saved ? NULL : "");
+			toast("Подключение к «%s»…", w->ssid);
+		} else {
+			snprintf(wifi_kb_ssid, sizeof(wifi_kb_ssid), "%s", w->ssid);
+			kb_open(KB_WIFI, "Пароль сети", "");
+		}
 	} else if (n->action == A_NEWPL) {
 		kb_open(s.npl, "Новый плейлист", "");
 	} else if (n->action == A_TRACK && n->track == s.track && !s.resume) {
@@ -4089,7 +4236,9 @@ static void select_current(void)
 		if (n->kids == about_items)
 			about_fill();
 		if (n->kids == bt_nodes && !s.bt_off)
-			bt_scan();   /* список — сразу с поиском: рядом могут быть новые наушники */
+			bt_scan();
+		if (n->kids == wifi_nodes && !s.wifi_off)
+			wifi_scan();   /* список — сразу с поиском: рядом могут быть новые наушники */
 		column_t *k = &s.stack[s.depth + 1];
 		int same = k->nodes == n->kids && k->count == n->nkids, sel = k->sel;   /* вернулись в тот же список */
 		column_fill(k, n->kids, n->nkids);
@@ -4297,7 +4446,7 @@ int xmb_input_name(const char *name)
 		return 1;
 	}
 	if (s.kb_panel && !strcmp(name, "kbok")) {
-		if (s.kb_pl < 0)
+		if (s.kb_pl == -1)
 			search_done();
 		else
 			kb_done();
@@ -5090,6 +5239,7 @@ void xmb_init(const char *font_dir)
 	s.seek_preview = -1;
 	settings_load();
 	bt_init(!s.bt_off);
+	wifi_init(!s.wifi_off);
 	i18n_set(s.lang);
 	sz = &ui_sizes[s.ui_size];
 	size_metrics();

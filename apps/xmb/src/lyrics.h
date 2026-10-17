@@ -21,4 +21,9 @@ int lyrics_load(lyrics_t *l, const char *lrc_path);
 void lyrics_free(lyrics_t *l);
 int lyrics_at(const lyrics_t *l, double sec);      /* строка, которая звучит в sec; -1 — ещё ни одной */
 
+/* LRCLIB (lrclib.net) в фоне: найденный текст сохраняется в lrc_path; опрос — lyrics_fetch_poll */
+enum { LF_IDLE, LF_BUSY, LF_FOUND, LF_NONE, LF_ERROR };
+void lyrics_fetch(const char *artist, const char *title, const char *album, double dur, const char *lrc_path);
+int lyrics_fetch_poll(void);   /* LF_FOUND / LF_NONE / LF_ERROR — один раз, дальше LF_IDLE */
+
 #endif
