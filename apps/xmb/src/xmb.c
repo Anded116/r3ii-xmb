@@ -70,6 +70,7 @@ static const ui_size_t *sz = &ui_sizes[1];
 #define INDEX_MIN 30   /* указатель — у списков от стольких пунктов */
 #define IDX_W 18       /* ширина полосы указателя */
 #define GLOW 72       /* размер пятна свечения под выбранным */
+#define GLOW_PAD 56   /* у обложки пятно больше её на столько */
 #define POOL 16       /* строк на колонку: привязываются к видимым пунктам, списки любой длины */
 #define ROW_COVER 34  /* обложка в строке */
 #define GRID_COLS 3    /* сетка альбомов: колонки, шаг ячейки, обложка, центр текущего ряда */
@@ -214,7 +215,7 @@ static struct {
 	lv_font_t *f_bat;
 	lv_obj_t *opt_panel, *opt_rows[MAX_OPTS], *opt_checks[MAX_OPTS], *opt_sw[MAX_OPTS];
 	column_t cat_col[8], stack[MAX_DEPTH];   /* stack[d] — вложенный уровень d (с 1) */
-	int cat, at_cats, depth, screen_on, glow_x, glow_y;
+	int cat, at_cats, depth, screen_on, glow_x, glow_y, glow_sz;
 	double glow_k, level;
 	lv_obj_t *glow, *main, *mini, *mini_thumb, *mini_artist, *mini_time;
 	double cat_pos, depth_t, focus_t, hint_t[2], bhint_t, slide;
@@ -1010,6 +1011,7 @@ static void layout_grid(column_t *c, double x, double fade, double tk, int activ
 			s.glow_x = (int)cx;
 			s.glow_y = (int)cy;
 			s.glow_k = k;
+			s.glow_sz = tk > 0.5 ? GRID_COVER + GLOW_PAD : GLOW;
 		}
 	}
 }
@@ -1067,7 +1069,7 @@ static void layout_column(column_t *c, double x, double fade, double tk, int act
 		else
 			y = ITEM_ABOVE_Y + (d + 1) * rh;
 		double near = show_sel ? fmax(0.0, 1.0 - fabs(d)) : 0;
-		double base = c->big ? (d < -0.5 ? 0.32 : 0.45) : d < -0.5 ? 0.45 : 0.62;   /* у обложек — контрастнее */
+		double base = d < -0.5 ? 0.45 : 0.62;
 		double k = (active ? base + (1.0 - base) * near : base * 0.75) * fade;
 		int sel = show_sel && near > 0.5;
 		/* у родителя остаётся только иконка выбранного пункта — звено цепочки */
@@ -1126,26 +1128,13 @@ static void layout_column(column_t *c, double x, double fade, double tk, int act
 			set_pos(r->title, (int)x + TEXT_DX, yy + (sel ? s.dy_title_sel : s.dy_title));
 			set_pos(r->sub, (int)x + TEXT_DX, yy + s.dy_sub);
 		}
-		/* список с обложками: выбранная — в светлой рамке (свечение под крупной обложкой не видно); строки общие
-		 * для всех списков — в остальных рамку снять */
-		{
-			lv_obj_t *frame = show_img ? r->img : r->icon, *other = show_img ? r->icon : r->img;
-			int ow = c->big && sel && active && tk > 0.5 ? 2 : 0;
-			if (lv_obj_get_style_outline_width(frame, 0) != ow) {
-				lv_obj_set_style_outline_width(frame, ow, 0);
-				lv_obj_set_style_outline_color(frame, lv_color_white(), 0);
-				lv_obj_set_style_outline_opa(frame, 210, 0);
-				lv_obj_set_style_outline_pad(frame, 2, 0);
-			}
-			if (lv_obj_get_style_outline_width(other, 0))
-				lv_obj_set_style_outline_width(other, 0, 0);
-		}
 		/* выбранный — icon_sel, остальные — icon, звенья цепочки — 14 */
 		set_icon_px(r->icon, tile ? 24 : 14 + (sz->icon - 14 + (sz->icon_sel - sz->icon) * near) * tk);
 		if (sel && active) {
-			s.glow_x = (int)x;
+			s.glow_x = (int)x + (c->big && tk > 0.5 ? cdx : 0);
 			s.glow_y = yy;
 			s.glow_k = k_icon;
+			s.glow_sz = c->big && tk > 0.5 ? BIG_COVER + GLOW_PAD : GLOW;
 		}
 		set_opa(r->icon, (int)(255 * k_icon));
 		set_opa(r->title, (int)(255 * k_text));
@@ -1334,6 +1323,7 @@ static void layout(void)
 	double cx = trail_x(-dt_);
 	double ui = 1.0 - player_progress();   /* XMB гаснет, пока раскрывается плеер */
 	s.glow_k = 0;
+	s.glow_sz = GLOW;
 	for (int c = 0; c < NCAT; c++) {
 		double d = c - s.cat_pos;
 		double near = fmax(0.0, 1.0 - fabs(d));
@@ -1371,8 +1361,14 @@ static void layout(void)
 		s.glow_y = CAT_Y;
 		s.glow_k = 1.0 - deep;
 	}
-	set_pos(s.glow, s.glow_x - GLOW / 2, s.glow_y - GLOW / 2);
-	int gk = (int)(90 * clamp01(s.glow_k) * (1.0 - fabs(s.slide)) * ui);
+	/* под обложкой свечение крупнее: видно его край вокруг картинки */
+	static int glow_cur = GLOW;
+	if (glow_cur != s.glow_sz) {
+		glow_cur = s.glow_sz;
+		lv_image_set_src(s.glow, bg_glow(s.glow_sz));
+	}
+	set_pos(s.glow, s.glow_x - s.glow_sz / 2, s.glow_y - s.glow_sz / 2);
+	int gk = (int)((s.glow_sz > GLOW ? 150 : 90) * clamp01(s.glow_k) * (1.0 - fabs(s.slide)) * ui);
 	if (lv_obj_get_style_image_opa(s.glow, 0) != gk)
 		lv_obj_set_style_image_opa(s.glow, (lv_opa_t)gk, 0);
 	set_hidden(s.glow, gk < 4);
