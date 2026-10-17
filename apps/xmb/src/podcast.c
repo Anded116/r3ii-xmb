@@ -32,7 +32,7 @@ typedef struct {
 
 static struct {
 	pthread_mutex_t mu;
-	char dir[320], state_file[340];
+	char dir[320], state_file[340], checked_file[340];
 	st_t *st;
 	int nst;
 	int busy, want, nfeeds, new_files;
@@ -463,7 +463,7 @@ static int do_feed(const char *url, int fi, int nf, int *got)
 		snprintf(pd.part, sizeof(pd.part), "%s", part);
 		pd.part_len = atoll(len);
 		pthread_mutex_unlock(&pd.mu);
-		int rc = fetch(enc, part, 60);
+		int rc = fetch(enc, part, 20);   /* тишина дольше 20 с — соединение умерло: повтор */
 		pthread_mutex_lock(&pd.mu);
 		pd.part[0] = 0;
 		pthread_mutex_unlock(&pd.mu);
@@ -483,6 +483,11 @@ static int do_feed(const char *url, int fi, int nf, int *got)
 static void *pod_thread(void *arg)
 {
 	(void)arg;
+	FILE *f = fopen(pd.checked_file, "w");
+	if (f) {
+		fprintf(f, "%lld\n", (long long)pd.last);
+		fclose(f);
+	}
 	static char urls[MAX_FEEDS][512];
 	int n = read_feeds(urls, MAX_FEEDS), got = 0, ok = 0;
 	pd.nfeeds = n;
@@ -513,7 +518,16 @@ void pod_init(const char *music_root)
 {
 	snprintf(pd.dir, sizeof(pd.dir), "%s/Podcasts", music_root ? music_root : ".");
 	snprintf(pd.state_file, sizeof(pd.state_file), "%s/.state", pd.dir);
+	snprintf(pd.checked_file, sizeof(pd.checked_file), "%s/.checked", pd.dir);
 	st_load();
+	/* когда проверяли в прошлый раз — на карте: иначе каждый запуск XMB (после накопителя, удаления) проверял бы снова */
+	FILE *f = fopen(pd.checked_file, "r");
+	long long last = 0;
+	if (f) {
+		if (fscanf(f, "%lld", &last) == 1)
+			pd.last = (time_t)last;
+		fclose(f);
+	}
 	char urls[4][512];
 	pd.nfeeds = read_feeds(urls, 4);
 }
@@ -528,7 +542,7 @@ void pod_tick(int online)
 	if (!online || pd.busy)
 		return;
 	time_t now = time(NULL);
-	if (!pd.want && pd.last && now - pd.last < CHECK_EVERY)
+	if (!pd.want && pd.last && now >= pd.last && now - pd.last < CHECK_EVERY)
 		return;
 	pd.want = 0;
 	pd.last = now;
@@ -547,6 +561,14 @@ int pod_busy(void)
 const char *pod_status(void)
 {
 	return pd.status;
+}
+
+int pod_downloading(void)
+{
+	pthread_mutex_lock(&pd.mu);
+	int r = pd.part[0] != 0;
+	pthread_mutex_unlock(&pd.mu);
+	return r;
 }
 
 double pod_progress(void)
