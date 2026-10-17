@@ -2551,7 +2551,8 @@ static void kb_open(int pl, const char *title, const char *text)
 	lv_obj_set_style_bg_color(s.kb_ta, lv_color_hex(0x2c3038), 0);
 	lv_obj_set_style_text_color(s.kb_ta, lv_color_white(), 0);
 	lv_obj_set_style_border_color(s.kb_ta, lv_color_hex(ACCENT), 0);
-	lv_obj_set_style_border_color(s.kb_ta, lv_color_white(), LV_PART_CURSOR);   /* курсор — светлый на тёмном поле */
+	/* курсор — светлый на тёмном поле; тема красит его только у поля в фокусе (а с клавиатурой оно в фокусе) */
+	lv_obj_set_style_border_color(s.kb_ta, lv_color_white(), LV_PART_CURSOR | LV_STATE_FOCUSED);
 	lv_keyboard_set_map(kb, LV_KEYBOARD_MODE_USER_1, kb_ru, kb_ctrl_ru);
 	lv_keyboard_set_map(kb, LV_KEYBOARD_MODE_USER_2, kb_RU, kb_ctrl_ru);
 	lv_keyboard_set_map(kb, LV_KEYBOARD_MODE_USER_3, s.kb_langs ? kb_en1 : kb_en, s.kb_langs ? kb_ctrl_en1 : kb_ctrl_en);
