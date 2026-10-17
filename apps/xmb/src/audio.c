@@ -1169,6 +1169,7 @@ int audio_init(void)
 	a.d[0].rg = a.d[1].rg = a.rg_pend = a.nx_rg = 1;
 #if XMB_DEVICE
 	a.port = -1;
+	a.s24_bad = getenv("XMB_S16") != NULL;   /* проверка: вывод только 16 бит */
 	signal(SIGPIPE, SIG_IGN);   /* Bluetooth: «bluealsa-cli» закрылся — ошибка записи, а не смерть процесса */
 #else
 	SDL_InitSubSystem(SDL_INIT_AUDIO);

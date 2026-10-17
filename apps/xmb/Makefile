@@ -23,7 +23,7 @@ DEV_LIBS := -static -lm -lpthread
 
 HOST_OBJ := $(patsubst %.c,build/host/%.o,$(LVGL_SRC) $(APP_SRC) src/main_host.c)
 DEV_OBJ := $(patsubst %.c,build/dev/%.o,$(LVGL_SRC) $(APP_SRC) $(TINYALSA) src/main_device.c)
-PLAYTEST_OBJ := $(patsubst %.c,build/dev/%.o,src/audio.c $(SONIX) $(FAAD2) $(TINYALSA) src/playtest.c)
+PLAYTEST_OBJ := $(patsubst %.c,build/dev/%.o,src/audio.c src/spawn.c $(SONIX) $(FAAD2) $(TINYALSA) src/playtest.c)
 LIBTEST_OBJ := $(patsubst %.c,build/dev/%.o,src/library.c third_party/sonix/mp4.c src/libtest.c)
 SEEKTEST_OBJ := $(patsubst %.c,build/dev/%.o,src/seektest.c)
 # xmbget — скачивание по HTTPS (mbedTLS) для подкастов и текстов: отдельная программа, XMB её запускает
