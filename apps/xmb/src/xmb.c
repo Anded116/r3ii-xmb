@@ -5349,7 +5349,7 @@ static void touch_cb(lv_event_t *e)
 				s.t_mode = T_VLIST;
 				s.t_start_pos = s.opt_sel;
 			} else if (s.opt_open)
-				s.t_mode = T_BACKSWIPE;   /* боковое меню: свайп влево — назад, как в списках */
+				s.t_mode = T_BACKSWIPE;   /* боковое меню: свайп влево — назад */
 			else if (player_shown())
 				s.t_mode = T_PLAYER;
 			else if (in_mini && horiz)
@@ -5466,7 +5466,7 @@ static void touch_cb(lv_event_t *e)
 			s.kin = fabs(s.kin_v) > 4 ? (s.opt_open ? 2 : 1) : 0;
 		} else if (mode == T_HCAT && abs(dx) > CAT_STEP * 0.4) {
 			set_cat(s.cat + (dx < 0 ? 1 : -1));
-		} else if (mode == T_BACKSWIPE && dx < -50) {
+		} else if (mode == T_BACKSWIPE && (s.opt_open ? dx < -50 : dx > 50)) {   /* списки — вправо, меню справа — влево */
 			show_hint(0);
 			if (s.opt_open)
 				options_cancel();
@@ -5496,7 +5496,8 @@ static void touch_cb(lv_event_t *e)
 /* скругление углов, как у Palm: чёрная маска угла (A8, сглаженная) — под верхней панелью и внизу экрана, на
  * системном слое поверх всего */
 #define CORNER_R 12
-static uint8_t corner_px[4][(CORNER_R + EDGE_MAX) * CORNER_R];
+#define EDGE_TAPER 16   /* за дугой край рамки сходит на нет клином: длина — во столько раз больше ширины */
+static uint8_t corner_px[4][(CORNER_R + EDGE_MAX) * (CORNER_R + EDGE_TAPER * EDGE_MAX)];
 static lv_image_dsc_t corner_img[4];
 static lv_obj_t *corner_obj[4];
 
@@ -5508,25 +5509,34 @@ static void corners_place(void)
 	for (int c = 0; c < 4; c++)
 		if (corner_obj[c])
 			lv_obj_set_pos(corner_obj[c], c & 1 ? SCR_W - (int)corner_img[c].header.w : 0,
-				       !(c & 2) ? TOP_H : up ? SCR_H - MINI_H - CORNER_R : SCR_H - CORNER_R);
+				       !(c & 2) ? TOP_H : (up ? SCR_H - MINI_H : SCR_H) - (int)corner_img[c].header.h);
 }
 
 /* рамка корпуса закрывает несколько пикселей экрана по бокам (Настройки → Экран → Рамка): дуга угла касается
- * видимого края, а не края кадра */
+ * видимого края, а не края кадра, а дальше чёрное у края сходит на нет пологим клином — под углом обрыва не видно */
 static void apply_edges(void)
 {
 	for (int c = 0; c < 4; c++) {   /* 0 — левый верхний, 1 — правый верхний, 2 — левый нижний, 3 — правый нижний */
-		int k = c & 1 ? s.edge_r : s.edge_l, w = CORNER_R + k;
-		for (int y = 0; y < CORNER_R; y++)
+		int k = c & 1 ? s.edge_r : s.edge_l, w = CORNER_R + k, len = EDGE_TAPER * k, h = CORNER_R + len;
+		for (int y = 0; y < h; y++) {
+			int ya = c & 2 ? y - len : y;   /* строка дуги; вне 0…CORNER_R−1 — клин */
 			for (int x = 0; x < w; x++) {
+				uint8_t *px = &corner_px[c][y * w + x];
+				if (ya < 0 || ya >= CORNER_R) {
+					int j = ya < 0 ? -1 - ya : ya - CORNER_R;   /* шаг от конца дуги */
+					double edge = k * (1.0 - (j + 0.5) / len);   /* ширина клина в этой строке */
+					*px = (uint8_t)(255 * clamp01(edge - (c & 1 ? w - 1 - x : x)));
+					continue;
+				}
 				int xx = c & 1 ? x : x - k;   /* столбец внутри дуги; за ней — полоса рамки */
-				double dx = c & 1 ? xx + 0.5 : CORNER_R - xx - 0.5, dy = c & 2 ? y + 0.5 : CORNER_R - y - 0.5;
+				double dx = c & 1 ? xx + 0.5 : CORNER_R - xx - 0.5, dy = c & 2 ? ya + 0.5 : CORNER_R - ya - 0.5;
 				double d = sqrt(dx * dx + dy * dy) - CORNER_R + 0.5;
-				corner_px[c][y * w + x] = xx < 0 || xx >= CORNER_R ? 255 : (uint8_t)(255 * clamp01(d));
+				*px = xx < 0 || xx >= CORNER_R ? 255 : (uint8_t)(255 * clamp01(d));
 			}
+		}
 		corner_img[c] = (lv_image_dsc_t){ .header = { .magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8,
-							      .w = w, .h = CORNER_R, .stride = w },
-						  .data_size = w * CORNER_R, .data = corner_px[c] };
+							      .w = w, .h = h, .stride = w },
+						  .data_size = w * h, .data = corner_px[c] };
 		if (!corner_obj[c]) {
 			corner_obj[c] = lv_image_create(lv_layer_sys());
 			lv_obj_set_style_image_recolor(corner_obj[c], lv_color_black(), 0);
