@@ -241,6 +241,8 @@ static struct {
 	int next_qi, seq;   /* следующий в очереди (заказан движку заранее, −1 — нет) и счётчик его переходов */
 	int audio_gen;      /* трек открыт потоком звука: формат (кодек, бит, частота) — уже его */
 	int up_next;        /* сколько треков сразу за текущим поставлено «играть следующим» — их не перемешивать */
+	double seek_hold;   /* перемотали сюда: позиция из движка — только когда он до неё дошёл (иначе шкала дёргается) */
+	uint32_t seek_ms;
 	track_t np;
 	char np_format[48];
 	lv_obj_t *mini_img;
@@ -306,6 +308,7 @@ static void battery_guard(void);
 static void lyrics_refresh(void);
 static void lyrics_poll(void);
 static void toast(const char *fmt, ...);
+static void seek_to(double sec);
 static void slide_tick(double dt);
 static void slide_open(const char *icon, const char *title, const char *sub, const char *hint, int dir,
 		       const char *cancel_text, void (*done)(void), void (*cancelled)(void));
@@ -2715,7 +2718,7 @@ static void px_commit(void)
 			s.ab = 2;
 			s.ab_b = s.pos;
 			player_set_ab(s.ab_a / s.dur, s.ab_b / s.dur);
-			audio_seek(s.ab_a);
+			seek_to(s.ab_a);
 			s.pos = s.ab_a;
 			toast("%s", "Повтор A-B");
 		} else {
@@ -3143,6 +3146,13 @@ static void play_queue(const node_t *q, int qlen, int qi)
 	np_switch(q, qlen, qi);
 }
 
+static void seek_to(double sec)
+{
+	audio_seek(sec);
+	s.pos = s.seek_hold = sec;
+	s.seek_ms = lv_tick_get();
+}
+
 /* пауза / продолжение; последний трек прошлого запуска открывается с того места, где остановились */
 static void toggle_play(void)
 {
@@ -3152,7 +3162,7 @@ static void toggle_play(void)
 		double p = s.resume_pos;
 		play_queue(s.queue, s.qlen, s.qi);
 		if (p > 1) {
-			audio_seek(p);
+			seek_to(p);
 			s.pos = p;
 		}
 		return;
@@ -3209,7 +3219,7 @@ static void prev_track(void)
 		return;
 	}
 	if (s.pos > 3 && !s.resume) {
-		audio_seek(0);
+		seek_to(0);
 		s.pos = 0;
 		player_set_state(s.playing, s.pos, s.volume);
 		return;
@@ -3523,7 +3533,7 @@ static void frame_cb(lv_timer_t *t)
 	audio_status_t st;
 	audio_get_status(&st);
 	if (s.ab == 2 && s.playing && s.pos >= s.ab_b) {   /* повтор A-B: дошли до B — к A */
-		audio_seek(s.ab_a);
+		seek_to(s.ab_a);
 		s.pos = s.ab_a;
 	}
 	if (s.playing || st.playing)
@@ -3559,7 +3569,10 @@ static void frame_cb(lv_timer_t *t)
 				s.playing = st.playing;
 				update_np_labels();
 			}
-			s.pos = st.pos;
+			if (s.seek_ms && (fabs(st.pos - s.seek_hold) < 1.0 || lv_tick_get() - s.seek_ms > 600))
+				s.seek_ms = 0;
+			if (!s.seek_ms)
+				s.pos = st.pos;
 			if (st.dur > 0)
 				s.dur = st.dur;
 		}
@@ -4671,7 +4684,7 @@ void xmb_button(int button, int gesture)
 		if (s.track >= 0 && !s.resume) {
 			double p = s.pos + (s.btn[button][gesture] == BA_FWD ? 10 : -10);
 			p = p < 0 ? 0 : p > s.dur - 1 ? s.dur - 1 : p;
-			audio_seek(p);
+			seek_to(p);
 			s.pos = p;
 		}
 		break;
@@ -4840,7 +4853,7 @@ static void touch_cb(lv_event_t *e)
 			if (s.resume)
 				s.resume_pos = s.seek_preview;
 			else
-				audio_seek(s.seek_preview);
+				seek_to(s.seek_preview);
 			s.pos = s.seek_preview;
 			s.seek_preview = -1;
 			s.t_mode = T_NONE;
@@ -4977,6 +4990,7 @@ static void touch_cb(lv_event_t *e)
 			} else if (act == PA_ADD) {
 				playlist_menu();
 			} else if (act == PA_ALBUM) {
+				show_hint(1);   /* отклик, как у тапа «выбрать»: плеер закрывается, альбом открыт на треке */
 				reveal_album();
 			} else if (m >= 0) {
 				toggle_mode(m);

@@ -98,12 +98,15 @@ static void fmt_time(char *buf, int s)
 
 /* ---------- кассета ---------- */
 
+/* кассета рисуется сама: прозрачность раскрытия плеера на неё не действует — множитель вручную */
+static double draw_k = 1;
+
 static void rect(lv_layer_t *l, int x1, int y1, int x2, int y2, uint32_t c, int opa, int r)
 {
 	lv_draw_rect_dsc_t d;
 	lv_draw_rect_dsc_init(&d);
 	d.bg_color = lv_color_hex(c);
-	d.bg_opa = (lv_opa_t)opa;
+	d.bg_opa = (lv_opa_t)(opa * draw_k);
 	d.radius = r;
 	lv_area_t a = { x1, y1, x2, y2 };
 	lv_draw_rect(l, &d, &a);
@@ -124,6 +127,7 @@ static void reel(lv_layer_t *l, int cx, int cy, double tape, double angle)
 		lv_draw_line_dsc_t d;
 		lv_draw_line_dsc_init(&d);
 		d.color = lv_color_hex(0x2a2d33);
+		d.opa = (lv_opa_t)(255 * draw_k);
 		d.width = 2;
 		d.p1.x = cx + cos(a) * 5;
 		d.p1.y = cy + sin(a) * 5;
@@ -140,6 +144,7 @@ static void cassette_draw(lv_event_t *e)
 	lv_obj_get_coords(p.cassette, &a);
 	int x = a.x1, y = a.y1;
 	double prog = p.track && p.track->duration && p.pos > 0 ? p.pos / p.track->duration : 0;
+	draw_k = p.t >= 1 ? 1.0 : p.t * p.t;   /* как у остального содержимого */
 
 	rect(l, x, y, x + CAS_W - 1, y + CAS_H - 1, 0x22252b, 255, 10);            /* корпус */
 	rect(l, x + 2, y + 2, x + CAS_W - 3, y + CAS_H / 2, 0xffffff, 14, 9);       /* блик сверху */
@@ -160,7 +165,7 @@ static void cassette_draw(lv_event_t *e)
 	lv_draw_rect_dsc_init(&d);
 	d.bg_grad.dir = LV_GRAD_DIR_VER;
 	d.bg_grad.stops[0].color = lv_color_white();
-	d.bg_grad.stops[0].opa = 40;
+	d.bg_grad.stops[0].opa = (lv_opa_t)(40 * draw_k);
 	d.bg_grad.stops[0].frac = 0;
 	d.bg_grad.stops[1].color = lv_color_white();
 	d.bg_grad.stops[1].opa = 0;
@@ -228,7 +233,9 @@ static double slot_k(double cx)   /* 0 — в центре, 1 — на мест�
 static void card(lv_layer_t *l, int slot, double cx, int top, const char *album, const char *cover)
 {
 	double k = slot_k(cx);
-	int sz = (int)(COVER - (COVER - CARD) * k + 0.5), opa = (int)(255 - 105 * k);
+	/* соседи рисуются здесь сами: прозрачность раскрытия плеера (у содержимого — t²) и текста песни — вручную */
+	double fade = (p.t >= 1 ? 1.0 : p.t * p.t) * (1.0 - p.lyr_k);
+	int sz = (int)(COVER - (COVER - CARD) * k + 0.5), opa = (int)((255 - 105 * k) * fade);
 	int x = (int)(cx - sz / 2.0), y = top + (COVER - sz) / 2;
 	/* в покое — миниатюра своего размера (сглаженная); в движении и пока её нет — уменьшенная большая,
 	 * а не заглушка (иначе на кадр мелькает цветной квадрат) */
@@ -770,7 +777,8 @@ void player_tick(double dt)
 		if (fabs(lk - p.lyr_k) < 0.01)
 			p.lyr_k = lk;
 		lv_obj_set_style_image_opa(p.cover, (lv_opa_t)(255 * (1 - p.lyr_k)), 0);
-		lv_obj_set_hidden(p.cards, p.lyr_k > 0.5);   /* соседи рисуются сами: прозрачность объекта на них не действует */
+		lv_obj_set_hidden(p.cards, p.lyr_k >= 1);   /* соседи гаснут в cards_draw */
+		lv_obj_invalidate(p.cards);
 		lv_obj_set_hidden(p.lyr, p.lyr_k == 0);
 	}
 	if (p.t > 0 && p.lyr_k > 0)
