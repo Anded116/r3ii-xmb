@@ -46,6 +46,10 @@ uint32_t xmb_last_input(void);
  * сохранить и закрыть; экран режима накопителя (on = 0 — убрать); выход из него касанием */
 void xmb_usb_host(int connected, int offer);
 bool xmb_usb_storage_requested(void);
+/* USB-ЦАП: заявка из меню; на время режима — его экран (колесо — громкость), после — обычный интерфейс */
+bool xmb_usb_dac_requested(void);
+void xmb_dac_prepare(void);
+void xmb_dac_end(void);
 void xmb_storage_prepare(void);
 bool xmb_usb_end_requested(void);
 

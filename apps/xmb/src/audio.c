@@ -11,7 +11,7 @@
  * ПК (XMB_HOST): SDL2 audio, громкость программно.
  */
 #include "audio.h"
-#include "spawn.h"
+#include "subproc.h"
 
 #include <math.h>
 #include <pthread.h>
@@ -37,6 +37,7 @@
 #if XMB_DEVICE
 #include <errno.h>
 #include <signal.h>
+#include <sys/ioctl.h>
 #include <tinyalsa/asoundlib.h>
 #define PORT_PHONES 1
 #define PORT_OFF 5
@@ -134,6 +135,9 @@ static struct {
 	uint32_t rs_ph;
 	int16_t rs_last[2];
 	int out_bits, s24_bad;   /* формат открытого PCM; s24_bad — драйвер 24 бита не принял, дальше только 16 */
+	/* USB-ЦАП: /dev/uac_sa (−1 — нет), заявка интерфейса, частота потока с компьютера (0 — не идёт) */
+	int usb_fd, usb_rq_fd, usb_rq, usb_rate;
+	uint32_t usb_last_ms;   /* когда пришёл последний пакет */
 #else
 	SDL_AudioDeviceID dev;
 #endif
@@ -555,13 +559,17 @@ static int dec_start(dec_t *d, const char *path, double start, double end, doubl
 /* ---------- вывод ---------- */
 
 #if XMB_DEVICE
+/* громкость пишет поток интерфейса, выход и тракт — поток звука: к кодеку — по одному */
 static void mixer_set(const char *name, int v)
 {
+	static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
+	pthread_mutex_lock(&mu);
 	if (!a.mixer)
 		a.mixer = mixer_open(0);
 	struct mixer_ctl *c = a.mixer ? mixer_get_ctl_by_name(a.mixer, name) : NULL;
 	if (c)
 		mixer_ctl_set_value(c, 0, v);
+	pthread_mutex_unlock(&mu);
 }
 
 /* кривые громкости стока (/usr/resource/ot_devices.json, VOLUMES «HW»: HDB, MDB, LDB) — ослабление ES9219
@@ -1050,12 +1058,99 @@ static void take_cmds(void)
 		out_drop();   /* новое место или трек — без хвоста старого */
 }
 
+/* готовый кусок (24 бита в int32) — уровень, эквалайзер, спектр и в вывод; общее для файла и USB-ЦАПа */
+static void play_buf(int32_t *buf, unsigned got, int rate)
+{
+	double sum = 0;
+	for (unsigned i = 0; i < got * 2; i += 2)
+		sum += (double)buf[i] * buf[i];
+	float rms = (float)(sqrt(sum / got) / 8388608.0);
+	a.level = rms > 1 ? 1 : rms;
+	if (eq.on)
+		eq_process(buf, got);
+	/* экран погашен или фону спектр не нужен — не считать; фон обновляется 45 раз в секунду, а куски
+	 * на 96 кГц идут под сотню в секунду — БПФ не чаще 25 раз */
+	static unsigned spec_frames;
+	spec_frames += got;
+	if (spec_on && spec_frames >= (unsigned)rate / 25) {
+		spec_frames = 0;
+		spectrum(buf, got, rate);
+	}
+#if XMB_DEVICE
+	a.idle = 0;
+#endif
+	if (out_open(rate) == 0)
+		out_write(buf, got);
+	else
+		usleep(20000);
+}
+
+#if XMB_DEVICE
+static uint32_t now_ms(void)
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (uint32_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
+}
+
+/* USB-ЦАП: звук с компьютера — из /dev/uac_sa функции гаджета uac_sa (как у стока; разобрано в Sonix, usbdac.c).
+ * ioctl 0 — идёт ли поток (в промежутках между 10-мс пакетами — 0), ioctl 1 — формат, частота (её выбирает
+ * компьютер, 32–384 кГц) и флаги (1 — DSD), read — стерео по 32 бита. 1 — круг занят USB, 0 — тишина: обычный
+ * круг (пауза держит тракт тишиной, потом гасит) */
+static int usb_step(int32_t *buf)
+{
+	pthread_mutex_lock(&a.mu);
+	if (a.usb_rq) {
+		a.usb_fd = a.usb_rq_fd;
+		a.usb_rq = 0;
+		a.usb_rate = 0;
+	}
+	int fd = a.usb_fd;
+	pthread_mutex_unlock(&a.mu);
+	if (fd < 0)
+		return 0;
+	int st = 0;
+	struct { int format, rate, flags; } f = { 0, 0, 0 };
+	unsigned got = 0;
+	if (!ioctl(fd, 0, &st) && st > 0 && !ioctl(fd, 1, &f) && f.rate > 0 && f.flags != 1) {   /* DSD не берём */
+		ssize_t n = read(fd, buf, CHUNK * 8);
+		got = n > 0 ? (unsigned)n / 8 : 0;
+	}
+	if (got) {
+		for (unsigned i = 0; i < got * 2; i++)
+			buf[i] >>= 8;   /* 32 бита компьютера → 24 бита тракта */
+		pthread_mutex_lock(&a.mu);
+		if (a.usb_rate != f.rate)
+			fprintf(stderr, "audio: USB-ЦАП — %d Гц, формат %d\n", f.rate, f.format);
+		a.usb_rate = f.rate;
+		a.usb_last_ms = now_ms();
+		if (a.eq_dirty || eq.rate != f.rate) {
+			eq_setup(a.eq_on, a.eq_gain, f.rate);
+			a.eq_dirty = 0;
+		}
+		pthread_mutex_unlock(&a.mu);
+		play_buf(buf, got, f.rate);
+		return 1;
+	}
+	if (a.usb_rate && now_ms() - a.usb_last_ms < 1500) {   /* промежуток между пакетами, а не конец */
+		usleep(2000);
+		return 1;
+	}
+	a.usb_rate = 0;
+	return 0;
+}
+#endif
+
 static void *audio_thread(void *arg)
 {
 	(void)arg;
 
 	static int32_t buf[CHUNK * 2], nb[CHUNK * 2];
 	for (;;) {
+#if XMB_DEVICE
+		if (usb_step(buf))
+			continue;
+#endif
 		pthread_mutex_lock(&a.mu);
 		take_cmds();
 		bt_take();
@@ -1117,28 +1212,7 @@ static void *audio_thread(void *arg)
 		pthread_mutex_unlock(&a.mu);
 
 		if (got) {
-			double sum = 0;
-			for (unsigned i = 0; i < got * 2; i += 2)
-				sum += (double)buf[i] * buf[i];
-			float rms = (float)(sqrt(sum / got) / 8388608.0);
-			a.level = rms > 1 ? 1 : rms;
-			if (eq.on)
-				eq_process(buf, got);
-			/* экран погашен или фону спектр не нужен — не считать; фон обновляется 45 раз в секунду, а куски
-			 * на 96 кГц идут под сотню в секунду — БПФ не чаще 25 раз */
-			static unsigned spec_frames;
-			spec_frames += got;
-			if (spec_on && spec_frames >= (unsigned)rate / 25) {
-				spec_frames = 0;
-				spectrum(buf, got, rate);
-			}
-#if XMB_DEVICE
-			a.idle = 0;
-#endif
-			if (out_open(rate) == 0)
-				out_write(buf, got);
-			else
-				usleep(20000);
+			play_buf(buf, got, rate);
 			continue;
 		}
 		a.level = 0;
@@ -1169,6 +1243,7 @@ int audio_init(void)
 	a.d[0].rg = a.d[1].rg = a.rg_pend = a.nx_rg = 1;
 #if XMB_DEVICE
 	a.port = -1;
+	a.usb_fd = -1;
 	a.s24_bad = getenv("XMB_S16") != NULL;   /* проверка: вывод только 16 бит */
 	signal(SIGPIPE, SIG_IGN);   /* Bluetooth: «bluealsa-cli» закрылся — ошибка записи, а не смерть процесса */
 #else
@@ -1312,6 +1387,35 @@ void audio_set_volume(int percent)
 {
 	a.volume = percent < 0 ? 0 : percent > 100 ? 100 : percent;
 	apply_volume();
+}
+
+void audio_set_usb_in(int fd)
+{
+#if XMB_DEVICE
+	pthread_mutex_lock(&a.mu);
+	a.usb_rq_fd = fd;
+	a.usb_rq = 1;
+	pthread_mutex_unlock(&a.mu);
+	for (int i = 0; i < 50; i++) {   /* поток отпустил прежний — его можно закрыть */
+		pthread_mutex_lock(&a.mu);
+		int done = !a.usb_rq;
+		pthread_mutex_unlock(&a.mu);
+		if (done)
+			break;
+		usleep(10000);
+	}
+#else
+	(void)fd;
+#endif
+}
+
+int audio_usb_in_rate(void)
+{
+#if XMB_DEVICE
+	return a.usb_fd >= 0 ? a.usb_rate : 0;
+#else
+	return 0;
+#endif
 }
 
 int audio_probe(const char *path, char codec[8], int *rate, int *bits)

@@ -8,6 +8,8 @@
  * event1: тач через lv_evdev.
  */
 #include <dirent.h>
+#include <errno.h>
+#include <sys/stat.h>
 #include <fcntl.h>
 #include <linux/fb.h>
 #include <linux/input.h>
@@ -25,7 +27,7 @@
 
 #include "lvgl/lvgl.h"
 #include "audio.h"
-#include "spawn.h"
+#include "subproc.h"
 #include "filesave.h"
 #include "xmb.h"
 
@@ -197,6 +199,9 @@ static int deep_sleep(void)
 #define USB_HOLD_MS 1000   /* в режиме накопителя: удержание колеса — вернуть карту */
 
 static int usb_storage, usb_adb;   /* режим накопителя; до него контроллер держал adb_demo */
+static int usb_dac, dac_fd = -1;   /* режим USB-ЦАПа (2 — выйти) и его /dev/uac_sa */
+static char dac_ms_link[64];       /* функция накопителя в конфигурации — вернуть после ЦАПа */
+static char dac_class[3][16];      /* класс устройства android0 до ЦАПа */
 static char usb_udc[64];
 
 static int read_line(const char *path, char *buf, int n)
@@ -292,6 +297,99 @@ static void usb_storage_end(void)
 		perror("usb: mount");
 	write_str(usb_adb ? GADGETS "/adb_demo/UDC" : GADGETS "/android0/UDC", usb_udc);
 	printf("usb: storage end\n");
+	fflush(stdout);
+}
+
+/* ---------- USB-ЦАП ----------
+ * Как у стока (uac_device_config.sh и hiby_player, разобрано в Sonix): в гаджете android0 вместо накопителя —
+ * функция uac_sa, вшитая в ядро; она создаёт /dev/uac_sa, из него поток звука и читает (audio.c). Карта остаётся
+ * у плеера. adb в одном гаджете с ЦАПом Windows не принимает — на время режима его нет */
+#define A0 GADGETS "/android0"
+#define UAC A0 "/functions/uac_sa.a"
+static const char *const dac_class_attr[3] = { A0 "/bDeviceClass", A0 "/bDeviceSubClass", A0 "/bDeviceProtocol" };
+
+static int usb_dac_begin(void)
+{
+	char b[64];
+	printf("usb: ЦАП\n");
+	fflush(stdout);
+	xmb_dac_prepare();
+	usb_adb = read_line(GADGETS "/adb_demo/UDC", b, sizeof(b));
+	if (usb_adb)
+		write_str(GADGETS "/adb_demo/UDC", "");
+	write_str(A0 "/UDC", "");
+	/* из конфигурации — накопитель (ссылку запомнить: вернуть) */
+	dac_ms_link[0] = 0;
+	DIR *d = opendir(A0 "/configs/c.1");
+	struct dirent *e;
+	while (d && (e = readdir(d)))
+		if (!strncmp(e->d_name, "mass_storage", 12)) {
+			char path[160];
+			snprintf(dac_ms_link, sizeof(dac_ms_link), "%s", e->d_name);
+			snprintf(path, sizeof(path), A0 "/configs/c.1/%s", e->d_name);
+			unlink(path);
+		}
+	if (d)
+		closedir(d);
+	if (mkdir(UAC, 0755) && errno != EEXIST) {
+		perror("usb: uac_sa");
+		return 0;
+	}
+	write_str(UAC "/c_chmask", "0x03");
+	write_str(UAC "/c_ssize", "2");
+	write_str(UAC "/c_srate", "32000,44100,48000,88200,96000,176400,192000,352800,384000");
+	write_str(UAC "/p_chmask", "0");   /* без записи: микрофон, которого никто не кормит, хост может отвергнуть */
+	for (int i = 0; i < 3; i++) {   /* 239/2/1 — составное устройство со звуком */
+		read_line(dac_class_attr[i], dac_class[i], sizeof(dac_class[i]));
+		write_str(dac_class_attr[i], i == 0 ? "239" : i == 1 ? "2" : "1");
+	}
+	if (symlink(UAC, A0 "/configs/c.1/uac_sa.a") && errno != EEXIST)
+		perror("usb: uac_sa link");
+	write_str(A0 "/UDC", usb_udc);
+	/* без обратной связи по частоте часы компьютера и плеера расходятся, и компьютер обрывает поток */
+	write_str("/sys/class/android_usb/f_uac_sa/dynamic_feedback", "1");
+	/* компьютер перечитывает устройство только после «переподключения» — поднять и опустить подтяжку линии */
+	if (!access("/sys/class/usb_gadget/android0/soft_disconnect", F_OK)) {
+		write_str("/sys/class/usb_gadget/android0/soft_disconnect", "1");
+		usleep(300000);
+		write_str("/sys/class/usb_gadget/android0/soft_disconnect", "0");
+	}
+	for (int i = 0; i < 500 && access("/dev/uac_sa", F_OK); i++)
+		usleep(10000);
+	dac_fd = open("/dev/uac_sa", O_RDWR);
+	if (dac_fd < 0) {
+		perror("usb: /dev/uac_sa");
+		return 0;
+	}
+	audio_set_usb_in(dac_fd);
+	usb_dac = 1;
+	printf("usb: ЦАП включён\n");
+	return 1;
+}
+
+static void usb_dac_end(void)
+{
+	audio_set_usb_in(-1);
+	if (dac_fd >= 0)
+		close(dac_fd);
+	dac_fd = -1;
+	write_str(A0 "/UDC", "");
+	unlink(A0 "/configs/c.1/uac_sa.a");
+	rmdir(UAC);
+	for (int i = 0; i < 3; i++)
+		if (dac_class[i][0])
+			write_str(dac_class_attr[i], dac_class[i]);
+	if (dac_ms_link[0]) {
+		char link[160], target[160];
+		snprintf(link, sizeof(link), A0 "/configs/c.1/%s", dac_ms_link);
+		snprintf(target, sizeof(target), A0 "/functions/%.40s", dac_ms_link);
+		if (symlink(target, link))
+			perror("usb: mass_storage link");
+	}
+	write_str(usb_adb ? GADGETS "/adb_demo/UDC" : A0 "/UDC", usb_udc);
+	usb_dac = 0;
+	xmb_dac_end();
+	printf("usb: ЦАП выключен\n");
 	fflush(stdout);
 }
 
@@ -652,8 +750,8 @@ int main(int argc, char **argv)
 			while (pfd[i].fd >= 0 && read(pfd[i].fd, &ev, sizeof(ev)) == sizeof(ev)) {
 				if (ev.type != EV_KEY)
 					continue;
-				if (usb_storage && ev.code != KEY_POWER && ev.code != KEY_LEFT && ev.code != KEY_RIGHT)
-					continue;   /* в режиме накопителя работает только колесо: прокрутка возвращает карту */
+				if ((usb_storage || usb_dac) && ev.code != KEY_POWER && ev.code != KEY_LEFT && ev.code != KEY_RIGHT)
+					continue;   /* в режиме накопителя и ЦАПа работает только колесо */
 				if (wake_until) {   /* после сна: разбудившее нажатие только включает экран — глотаем до отпускания */
 					if (ev.value == 0 || now > wake_until)
 						wake_until = 0;
@@ -679,7 +777,7 @@ int main(int argc, char **argv)
 					if (ev.value == 1) {
 						sel_down = now;
 						sel_long = 0;
-					} else if (ev.value == 0 && sel_down && usb_storage) {
+					} else if (ev.value == 0 && sel_down && (usb_storage || usb_dac)) {
 						sel_down = 0;   /* в режиме накопителя клик только будит экран; карта — прокруткой (или удержанием) */
 						if (!xmb_screen_on())
 							xmb_input(XMB_SELECT);
@@ -723,7 +821,7 @@ int main(int argc, char **argv)
 				perror("карта: mount");
 			}
 			int h = usb_host();
-			if (h != host && !usb_storage)
+			if (h != host && !usb_storage && !usb_dac)
 				xmb_usb_host(h, 1);
 			host = h;
 			char lun[64];
@@ -734,7 +832,12 @@ int main(int argc, char **argv)
 				exit_code = XMB_RESTART;
 				break;
 			}
+			/* ЦАП: удержание колеса, кабель вынут или выход из интерфейса */
+			if (usb_dac && (usb_dac == 2 || !usb_power() || xmb_usb_end_requested()))
+				usb_dac_end();
 		}
+		if (xmb_usb_dac_requested() && host && !usb_storage && !usb_dac && !usb_dac_begin())
+			usb_dac_end();   /* не вышло — вернуть всё как было */
 		if (xmb_usb_storage_requested() && host && !usb_storage && !usb_storage_begin()) {
 			exit_code = XMB_RESTART;   /* всё уже закрыто — проще начать заново */
 			break;
@@ -743,14 +846,16 @@ int main(int argc, char **argv)
 		btn_tick(&b_next, now);
 		btn_tick(&b_play, now);
 		btn_tick(&b_screen, now);
-		if (sel_down && !sel_long && !usb_storage && now - sel_down >= HOLD_PREV_MS) {
+		if (sel_down && !sel_long && !usb_storage && !usb_dac && now - sel_down >= HOLD_PREV_MS) {
 			sel_long = 1;
 			xmb_input(XMB_MENU);
 		}
 		/* удержание колеса дольше — отсчёт до сна, как в стоке: отпустить — отмена */
 		if (sel_down && usb_storage && now - sel_down >= USB_HOLD_MS)
 			usb_storage = 2;   /* удержание колеса: карта — обратно плееру (клик слишком легко задеть) */
-		if (sel_down && !usb_storage && now - sel_down >= SLEEP_HOLD_MS) {
+		if (sel_down && usb_dac && now - sel_down >= USB_HOLD_MS)
+			usb_dac = 2;
+		if (sel_down && !usb_storage && !usb_dac && now - sel_down >= SLEEP_HOLD_MS) {
 			int left = SLEEP_HOLD_MS + SLEEP_COUNT_MS - (int)(now - sel_down);
 			if (!xmb_screen_on())
 				xmb_wake();

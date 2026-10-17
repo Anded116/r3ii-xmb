@@ -45,6 +45,10 @@ void audio_get_status(audio_status_t *st);
  * в разъём. Частота файла пересчитывается под частоту кодека, громкость — программно */
 void audio_set_bt(const char *path, int rate, int bits);
 int audio_supported(const char *path);   /* по расширению */
+/* USB-ЦАП: звук с компьютера из /dev/uac_sa (fd открыт платформой; −1 — отключить, после возврата fd можно
+ * закрыть); частота потока, который сейчас идёт с компьютера (0 — тишина) */
+void audio_set_usb_in(int fd);
+int audio_usb_in_rate(void);
 /* формат файла по заголовку, без воспроизведения: кодек (как в audio_status_t), частота, бит; 0 — прочитан */
 int audio_probe(const char *path, char codec[8], int *rate, int *bits);
 
