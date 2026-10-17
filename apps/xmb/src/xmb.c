@@ -283,7 +283,6 @@ static void apply_gain(void);
 static void apply_rg(void);
 static void eq_apply(void);
 static void eq_open(void);
-static void topbar_dark(int on);
 static void sleep_start(void);
 static void player_more(void);
 static void ab_reset(void);
@@ -1042,7 +1041,8 @@ static void layout_column(column_t *c, double x, double fade, double tk, int act
 		double k_text = k * tk;
 		int yy = (int)y;
 		/* у краёв списка строки появляются и уходят плавно, а не за один кадр */
-		int top = deep ? TOP_H + 10 : TOP_H - 14, bot = SCR_H - MINI_H - 12;
+		/* сверху строка уходит под чёрную верхнюю панель — гаснет, только когда уже под ней */
+		int top = deep ? TOP_H - (int)(rh * 0.3) : TOP_H - 14, bot = SCR_H - MINI_H - 12;
 		double edge = clamp01((yy - top) / (rh * 0.7)) * clamp01((bot - yy) / (rh * 0.7));
 		/* на уровне категорий пункт, уезжающий вверх, пролетает сквозь иконку и название категории — там гаснет */
 		if (!deep && d < 0)
@@ -2000,15 +2000,8 @@ static const lv_buttonmatrix_ctrl_t kb_ctrl_en[] = {
 };
 static lv_keyboard_mode_t kb_lang = LV_KEYBOARD_MODE_USER_1;   /* последний язык: русский или латиница */
 
-/* верхняя панель над чёрными окнами на весь экран (клавиатура, эквалайзер, USB) — тоже чёрная */
-static void topbar_dark(int on)
-{
-	lv_obj_set_style_bg_opa(s.tb, on ? LV_OPA_COVER : 60, 0);
-}
-
 static void kb_close(void)
 {
-	topbar_dark(0);
 	if (s.kb_panel)
 		lv_obj_delete(s.kb_panel);
 	s.kb_panel = NULL;
@@ -2240,7 +2233,6 @@ static void kb_open(int pl, const char *title, const char *text)
 {
 	kb_close();
 	s.kb_pl = pl;
-	topbar_dark(1);
 	s.kb_panel = plain(lv_layer_top());
 	lv_obj_set_clickable(s.kb_panel, true);   /* касания не проходят в меню под клавиатурой */
 	lv_obj_set_size(s.kb_panel, SCR_W, SCR_H - TOP_H);
@@ -3924,7 +3916,6 @@ static void slide_close(void)
 		return;
 	lv_obj_delete(sl.panel);
 	memset(&sl, 0, sizeof(sl));
-	topbar_dark(0);
 }
 
 static void slide_cancel(void)
@@ -3968,7 +3959,6 @@ static void slide_open(const char *icon, const char *title, const char *sub, con
 	sl.dir = dir;
 	sl.done = done;
 	sl.cancelled = cancelled;
-	topbar_dark(1);   /* полноэкранное тёмное окно — строка состояния чёрная */
 	sl.panel = plain(lv_layer_top());
 	lv_obj_set_size(sl.panel, SCR_W, SCR_H - TOP_H);
 	lv_obj_set_pos(sl.panel, 0, TOP_H);
@@ -4170,7 +4160,6 @@ void xmb_storage_prepare(void)
 		options_cancel();
 	if (!s.screen_on)
 		screen(1);
-	topbar_dark(1);
 	/* вернуть карту — прокруткой вверх (или «Извлечь» на компьютере, или выдернуть кабель); отмены нет */
 	slide_open(LV_SYMBOL_USB, "Карта у компьютера", tx("Чтобы вернуть её плееру, прокрутите колесо вверх"),
 		   "вернуть карту", -1, NULL, usb_return, NULL);
@@ -4418,7 +4407,6 @@ static void eq_draw(lv_event_t *e)
 /* редактор: свой пресет начинается с текущего */
 static void eq_open(void)
 {
-	topbar_dark(1);
 	if (s.eq_preset != EQ_CUSTOM) {
 		for (int i = 0; i < EQ_BANDS; i++)
 			s.eq_custom[i] = eq_db(i) + 12;
@@ -4434,7 +4422,6 @@ static void eq_open(void)
 
 static void eq_close(void)
 {
-	topbar_dark(0);
 	s.eq_edit = 0;
 	set_hidden(s.eq_panel, true);
 	refresh_subs();
@@ -5072,6 +5059,32 @@ static void touch_cb(lv_event_t *e)
 
 /* ---------- init ---------- */
 
+/* скругление углов, как у Palm: чёрная маска угла (A8, сглаженная) — под верхней панелью и внизу экрана, на
+ * системном слое поверх всего */
+#define CORNER_R 12
+static uint8_t corner_px[4][CORNER_R * CORNER_R];
+static lv_image_dsc_t corner_img[4];
+
+static void corners_create(void)
+{
+	for (int c = 0; c < 4; c++) {   /* 0 — левый верхний, 1 — правый верхний, 2 — левый нижний, 3 — правый нижний */
+		for (int y = 0; y < CORNER_R; y++)
+			for (int x = 0; x < CORNER_R; x++) {
+				double dx = (c & 1 ? x + 0.5 : CORNER_R - x - 0.5), dy = (c & 2 ? y + 0.5 : CORNER_R - y - 0.5);
+				double d = sqrt(dx * dx + dy * dy) - CORNER_R + 0.5;
+				corner_px[c][y * CORNER_R + x] = (uint8_t)(255 * clamp01(d));
+			}
+		corner_img[c] = (lv_image_dsc_t){ .header = { .magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8,
+							      .w = CORNER_R, .h = CORNER_R, .stride = CORNER_R },
+						  .data_size = CORNER_R * CORNER_R, .data = corner_px[c] };
+		lv_obj_t *o = lv_image_create(lv_layer_sys());
+		lv_image_set_src(o, &corner_img[c]);
+		lv_obj_set_style_image_recolor(o, lv_color_black(), 0);
+		lv_obj_set_style_image_recolor_opa(o, LV_OPA_COVER, 0);
+		lv_obj_set_pos(o, c & 1 ? SCR_W - CORNER_R : 0, c & 2 ? SCR_H - CORNER_R : TOP_H);
+	}
+}
+
 /* ползунок шторки: сегменты, как громкость на PSP; при регулировке колесом — оранжевые */
 static void slider_draw(lv_event_t *e)
 {
@@ -5441,10 +5454,10 @@ void xmb_init(const char *font_dir)
 	/* верхний слой: шторка под верхней панелью */
 	lv_obj_t *top = lv_layer_top();
 	shade_create(top);
-	lv_obj_t *tb = s.tb = plain(top);
+	lv_obj_t *tb = s.tb = plain(top);   /* всегда чёрная: под ней ничего не просвечивает и не темнеет дважды */
 	lv_obj_set_size(tb, SCR_W, TOP_H);
 	lv_obj_set_style_bg_color(tb, lv_color_black(), 0);
-	lv_obj_set_style_bg_opa(tb, 60, 0);
+	lv_obj_set_style_bg_opa(tb, LV_OPA_COVER, 0);
 	s.tb_left = label(tb, s.f_clock, "");
 	lv_obj_set_pos(s.tb_left, 12, 5);
 	s.tb_right = label(tb, &lv_font_montserrat_14, "");
@@ -5515,5 +5528,6 @@ void xmb_init(const char *font_dir)
 	s.last_ms = s.input_ms = s.active_ms = lv_tick_get();
 	layout();
 	update_topbar();
+	corners_create();
 	lv_timer_create(frame_cb, 16, NULL);
 }
