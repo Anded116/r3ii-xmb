@@ -218,6 +218,7 @@ static struct {
 	int cat, at_cats, depth, screen_on, glow_x, glow_y, glow_sz;
 	int act_kind;             /* фоновая работа в статус-баре: 0 — нет, 1 — скан библиотеки, 2 — подкасты */
 	double act_frac, act_phase;   /* доля (−1 — неизвестна: бежит отрезок) и фаза бегущего отрезка */
+	char act_text[64];
 	double glow_k, level;
 	lv_obj_t *glow, *main, *mini, *mini_thumb, *mini_artist, *mini_time;
 	double cat_pos, depth_t, focus_t, hint_t[2], bhint_t, slide;
@@ -1708,7 +1709,7 @@ static void library_poll(void)
 	nav_restore(0);
 }
 
-/* фоновая работа — по центру статус-бара: значок и полоса */
+/* фоновая работа — в статус-баре вместо значков режимов: сверху что идёт, под ним полоса */
 static void activity_tick(void)
 {
 	static uint32_t last, probe;
@@ -1717,18 +1718,33 @@ static void activity_tick(void)
 	last = now;
 	int kind = !s.lib ? 1 : pod_busy() ? 2 : 0;
 	double frac = s.act_frac;
-	if (kind == 2 && now - probe > 500) {   /* размер файла на карте — не каждый кадр */
-		probe = now;
-		frac = pod_progress();
-	} else if (kind != 2) {
+	char text[64] = "";
+	if (kind == 1) {
 		frac = -1;
+		snprintf(text, sizeof(text), tx("Библиотека: просмотрено %d"), scan.progress);
+	} else if (kind == 2) {
+		if (now - probe > 500) {   /* размер файла на карте — не каждый кадр */
+			probe = now;
+			frac = pod_progress();
+		}
+		if (!pod_downloading())
+			snprintf(text, sizeof(text), "%s", tx("Подкасты: проверка"));
+		else if (frac >= 0)
+			snprintf(text, sizeof(text), tx("Подкасты: загрузка %d%%"), (int)(frac * 100));
+		else
+			snprintf(text, sizeof(text), "%s", tx("Подкасты: загрузка"));
 	}
 	if (kind != s.act_kind) {
 		s.act_kind = kind;
 		set_hidden(s.tb_act, !kind);
+		set_hidden(s.tb_right, kind != 0);   /* значки режимов и радио — на время работы прячутся */
 	}
 	if (!kind)
 		return;
+	if (strcmp(text, s.act_text)) {
+		snprintf(s.act_text, sizeof(s.act_text), "%s", text);
+		lv_obj_invalidate(s.tb_act);
+	}
 	if (frac < 0) {
 		s.act_phase = fmod(s.act_phase + fmin(dt, 0.1) / 1.4, 1.0);
 		lv_obj_invalidate(s.tb_act);
@@ -1745,12 +1761,14 @@ static void activity_draw(lv_event_t *e)
 	lv_obj_get_coords(lv_event_get_target(e), &a);
 	lv_draw_label_dsc_t t;
 	lv_draw_label_dsc_init(&t);
-	t.font = &lv_font_montserrat_14;
+	t.font = s.f_bat;
 	t.color = lv_color_white();
-	t.text = s.act_kind == 1 ? LV_SYMBOL_REFRESH : LV_SYMBOL_DOWNLOAD;
-	lv_area_t ta = { a.x1, a.y1, a.x1 + 15, a.y2 };
+	t.align = LV_TEXT_ALIGN_CENTER;
+	t.text = s.act_text;
+	t.text_local = 1;
+	lv_area_t ta = { a.x1, a.y1, a.x2, a.y1 + 15 };
 	lv_draw_label(l, &t, &ta);
-	int x0 = a.x1 + 20, x1 = a.x2, w = x1 - x0, y = (a.y1 + a.y2) / 2;
+	int w = 120, x0 = (a.x1 + a.x2 - w) / 2, x1 = x0 + w, y = a.y2 - 2;
 	lv_draw_rect_dsc_t r;
 	lv_draw_rect_dsc_init(&r);
 	r.radius = 2;
@@ -5726,9 +5744,9 @@ void xmb_init(const char *font_dir)
 	lv_obj_set_size(s.tb_bat, 34, 16);
 	lv_obj_set_pos(s.tb_bat, SCR_W - 44, 6);
 	lv_obj_add_event_cb(s.tb_bat, battery_draw, LV_EVENT_DRAW_MAIN, NULL);
-	s.tb_act = plain(tb);
-	lv_obj_set_size(s.tb_act, 56, 16);
-	lv_obj_set_pos(s.tb_act, (SCR_W - 56) / 2, 6);
+	s.tb_act = plain(tb);   /* между часами и батарейкой */
+	lv_obj_set_size(s.tb_act, 200, 24);
+	lv_obj_set_pos(s.tb_act, (SCR_W - 200) / 2, 2);
 	lv_obj_add_event_cb(s.tb_act, activity_draw, LV_EVENT_DRAW_MAIN, NULL);
 	lv_obj_set_hidden(s.tb_act, true);
 
