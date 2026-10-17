@@ -8,22 +8,22 @@
 
 | Статус | Тикетов |
 |---|---|
-| `open` | 6 |
+| `open` | 5 |
 | `in-progress` | 1 |
-| `fixed` | 18 |
+| `fixed` | 21 |
 | `verified` | 1 |
-| `accepted` | 2 |
-| **всего** | **28** |
+| `accepted` | 3 |
+| **всего** | **31** |
 
 | Область | open | in-progress | fixed |
 |---|---|---|---|
-| ui | 0 | 0 | 5 |
+| ui | 0 | 0 | 6 |
 | player | 1 | 0 | 2 |
 | audio | 1 | 0 | 1 |
 | library | 0 | 0 | 2 |
-| net | 1 | 0 | 3 |
+| net | 1 | 0 | 4 |
 | power | 0 | 1 | 3 |
-| display | 1 | 0 | 1 |
+| display | 0 | 0 | 2 |
 | input | 1 | 0 | 1 |
 | firmware | 1 | 0 | 0 |
 
@@ -34,7 +34,6 @@
 | [XMB-0024](XMB-0024-pleer-perezagruzilsya-sam-pri-pereklyuchenii.md) | P1 | open | firmware | Плеер перезагрузился сам при переключении трека в полноэкранном плеере 👀 |
 | [XMB-0006](XMB-0006-polnoekrannyy-pleer-ne-reagiroval-na-kasaniya.md) | P2 | open | input | Полноэкранный плеер не реагировал на касания до выключения и включения экрана 👀 |
 | [XMB-0010](XMB-0010-bluetooth-proverit-naushniki-zvuk-i-smenu-kodeka.md) | P2 | open | net | Bluetooth: проверить наушники, звук и смену кодека |
-| [XMB-0019](XMB-0019-skrugleniya-uglov-ekrana-ne-sovsem-kruglye.md) | P2 | open | display | Скругления углов экрана не совсем круглые |
 | [XMB-0011](XMB-0011-rezhim-usb-tsap.md) | P3 | open | audio | Режим USB-ЦАП |
 | [XMB-0015](XMB-0015-ekran-zagoraetsya-cherez-1-4-1-75-s-posle.md) | P3 | in-progress | power | Экран загорается через 1,4–1,75 с после пробуждения |
 | [XMB-0028](XMB-0028-pleer-na-pauze-posle-zapuska-xmb-stroka.md) | P3 | open | player | Плеер на паузе после запуска XMB: строка формата — только «FLAC», без разрядности и частоты |
@@ -54,12 +53,15 @@
 - [ ] [XMB-0007](XMB-0007-niz-spiskov-gasnet-nad-mini-pleerom.md) `[P2/ui]` Низ списков гаснет над мини-плеером
 - [ ] [XMB-0013](XMB-0013-son-na-kabele-kompyutera-ekran-srazu.md) `[P2/power]` Сон на кабеле компьютера: экран сразу загорался с диалогом накопителя
 - [ ] [XMB-0018](XMB-0018-podsvetka-alboma-po-obschemu-standartu-ui-bez.md) `[P2/ui]` Подсветка альбома по общему стандарту UI, без сильного приглушения соседей
+- [ ] [XMB-0019](XMB-0019-skrugleniya-uglov-ekrana-ne-sovsem-kruglye.md) `[P2/display]` Скругления углов экрана не совсем круглые
 - [ ] [XMB-0020](XMB-0020-nastroyki-klaviatury-angliyskaya-raskladka-po.md) `[P2/ui]` Настройки клавиатуры; английская раскладка по умолчанию
 - [ ] [XMB-0021](XMB-0021-svayp-vlevo-vo-vlozhennyh-menyu-na-uroven-vyshe.md) `[P2/input]` Свайп влево во вложенных меню — на уровень выше
 - [ ] [XMB-0022](XMB-0022-fonovye-protsessy-skan-zagruzka-podkastov-v.md) `[P2/ui]` Фоновые процессы (скан, загрузка подкастов) — в центре статус-бара с прогрессом
 - [ ] [XMB-0025](XMB-0025-status-bar-pri-fonovoy-rabote-sverhu-tekst.md) `[P2/ui]` Статус-бар при фоновой работе: сверху текст, что идёт, снизу полоса; остальные значки скрыть
 - [ ] [XMB-0026](XMB-0026-podkasty-proveryayutsya-slishkom-chasto-pri.md) `[P2/net]` Подкасты проверяются слишком часто — при каждом запуске XMB
 - [ ] [XMB-0027](XMB-0027-crystal-castles-ii-i-iii-slity-v-odin-albom.md) `[P2/library]` Crystal Castles: (II) и (III) слиты в один альбом, (III) играет одним 40-минутным треком
+- [ ] [XMB-0029](XMB-0029-varianty-oformleniya-mini-pleera-stroki-spiska.md) `[P2/ui]` Варианты оформления мини-плеера: строки списка не должны просвечивать сквозь него
+- [ ] [XMB-0031](XMB-0031-teksty-pesen-dlya-vsey-biblioteki-pleer-sam.md) `[P2/net]` Тексты песен для всей библиотеки — плеер сам скачивает в фоне и держит на карте
 - [ ] [XMB-0023](XMB-0023-fon-pleera-tsvetom-oblozhki-plavnaya-smena.md) `[P3/player]` Фон плеера цветом обложки: плавная смена оттенка
 
 **Проверить ТЕСТОМ**
@@ -74,6 +76,7 @@
 
 | ID | Принято | Статус | Область | Решение |
 |---|---|---|---|---|
+| [XMB-0030](XMB-0030-stroki-spiska-u-mini-pleera-ne-uvodit-v.md) | 2026-10-17 | accepted | ui | Строки списка у мини-плеера не уводить в прозрачность — решать оформлением самого мини-плеера |
 | [XMB-0017](XMB-0017-podkasty-vybirayutsya-na-pk-pleer-tolko.md) | 2026-10-17 | accepted | net | Подкасты выбираются на ПК, плеер только подгружает новые выпуски |
 | [XMB-0016](XMB-0016-fon-volnu-v-pokoe-ne-trogaem-chastota-kadrov.md) | 2026-10-17 | accepted | display | Фон-волну в покое не трогаем: частота кадров фона не снижается |
 
