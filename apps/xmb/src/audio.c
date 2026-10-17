@@ -730,8 +730,18 @@ static void out_write(const int32_t *buf, unsigned frames)
 		to_s16(buf, s16, frames);
 	if (a.bt_pipe)
 		bt_write(s16, frames);
-	else if (a.pcm && pcm_writei(a.pcm, a.out_bits == 16 ? (const void *)s16 : (const void *)buf, frames) < 0)
+	else if (a.pcm && pcm_writei(a.pcm, a.out_bits == 16 ? (const void *)s16 : (const void *)buf, frames) < 0) {
+		/* недогрузка (поток не успел) — слышна щелчком: считать и раз в 10 с писать в журнал */
+		static unsigned xruns;
+		static time_t said;
+		xruns++;
+		if (time(NULL) - said >= 10) {
+			said = time(NULL);
+			fprintf(stderr, "audio: недогрузка PCM (%u, %d бит, %d Гц): %s\n", xruns, a.out_bits, a.out_rate,
+				pcm_get_error(a.pcm));
+		}
 		pcm_prepare(a.pcm);
+	}
 }
 
 /* заявка интерфейса на смену выхода (под a.mu): закрыть текущий, следующая запись откроет новый */
