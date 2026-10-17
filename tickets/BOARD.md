@@ -8,11 +8,11 @@
 
 | Статус | Тикетов |
 |---|---|
-| `open` | 3 |
+| `open` | 4 |
 | `fixed` | 25 |
 | `verified` | 2 |
 | `accepted` | 3 |
-| **всего** | **33** |
+| **всего** | **34** |
 
 | Область | open | in-progress | fixed |
 |---|---|---|---|
@@ -22,7 +22,7 @@
 | library | 0 | 0 | 2 |
 | net | 1 | 0 | 4 |
 | power | 0 | 0 | 4 |
-| display | 0 | 0 | 2 |
+| display | 1 | 0 | 2 |
 | input | 1 | 0 | 1 |
 | firmware | 1 | 0 | 0 |
 
@@ -33,6 +33,7 @@
 | [XMB-0024](XMB-0024-pleer-perezagruzilsya-sam-pri-pereklyuchenii.md) | P1 | open | firmware | Плеер перезагрузился сам при переключении трека в полноэкранном плеере 👀 |
 | [XMB-0006](XMB-0006-polnoekrannyy-pleer-ne-reagiroval-na-kasaniya.md) | P2 | open | input | Полноэкранный плеер не реагировал на касания до выключения и включения экрана 👀 |
 | [XMB-0010](XMB-0010-bluetooth-proverit-naushniki-zvuk-i-smenu-kodeka.md) | P2 | open | net | Bluetooth: проверить наушники, звук и смену кодека |
+| [XMB-0034](XMB-0034-ekran-60-gts-naskolko-riskovanno-i-stoit-li.md) | P3 | open | display | Экран 60 Гц: насколько рискованно и стоит ли |
 
 ## 🧪 Ждут проверки (fixed)
 
