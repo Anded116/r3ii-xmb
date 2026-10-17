@@ -23,3 +23,7 @@
 /scripts/wsl_apt.*
 /scripts/device/tone_*.sh
 /scripts/device/play_flac_test.sh
+
+# сгенерированный UI тикетов — пересоздаётся командой tickets.ps1 board
+/tickets/board.html
+/tickets/feedback*.json
