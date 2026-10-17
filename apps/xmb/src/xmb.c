@@ -1137,12 +1137,13 @@ static void layout_column(column_t *c, double x, double fade, double tk, int act
 		} else {
 			set_pos(r->icon, (int)x + cdx - 20, yy - 15);
 		}
+		int has_sub = lv_label_get_text(r->sub)[0] != 0;   /* без второй строки название — по центру строки */
 		if (c->big) {   /* три строки текста по высоте обложки */
-			int ty = yy - (s.h_title + 2 * s.h_sub) / 2;
+			int ty = yy - (has_sub ? s.h_title + 2 * s.h_sub : s.h_title) / 2;
 			set_pos(r->title, (int)x + TEXT_DX + 2 * cdx, ty);
 			set_pos(r->sub, (int)x + TEXT_DX + 2 * cdx, ty + s.h_title);
 		} else {
-			set_pos(r->title, (int)x + TEXT_DX, yy + (sel ? s.dy_title_sel : s.dy_title));
+			set_pos(r->title, (int)x + TEXT_DX, yy + (sel && has_sub ? s.dy_title_sel : s.dy_title));
 			set_pos(r->sub, (int)x + TEXT_DX, yy + s.dy_sub);
 		}
 		/* выбранный — icon_sel, остальные — icon, звенья цепочки — 14 */
@@ -1819,6 +1820,7 @@ static void update_np_labels(void)
 	if (s.track < 0) {
 		lv_label_set_text(s.mini_text, tx("Нет трека"));
 		lv_label_set_text(s.mini_artist, "");
+		lv_obj_set_y(s.mini_text, 16);   /* без второй строки — по центру */
 		refresh_subs();
 		return;
 	}
@@ -1826,6 +1828,7 @@ static void update_np_labels(void)
 	const lib_album_t *al = &s.lib->albums[tr->aidx];
 	lv_label_set_text(s.mini_text, tr->title);
 	lv_label_set_text(s.mini_artist, tx(tr->artist));
+	lv_obj_set_y(s.mini_text, 8);
 	mini_cover();
 	/* соседние альбомы для карусели плеера */
 	int a = s.album_pos[tr->aidx], lo = al->podcast ? nmusic : 0, hi = al->podcast ? s.lib->nalbums : nmusic;
@@ -5493,11 +5496,12 @@ static void touch_cb(lv_event_t *e)
 
 /* ---------- init ---------- */
 
-/* скругление углов, как у Palm: чёрная маска угла (A8, сглаженная) — под верхней панелью и внизу экрана, на
- * системном слое поверх всего */
-#define CORNER_R 12
-#define EDGE_TAPER 16   /* за дугой край рамки сходит на нет клином: длина — во столько раз больше ширины */
-static uint8_t corner_px[4][(CORNER_R + EDGE_MAX) * (CORNER_R + EDGE_TAPER * EDGE_MAX)];
+/* скругление углов: чёрная маска угла (A8, сглаженная) — под верхней панелью и внизу экрана, на системном слое
+ * поверх всего. Не дуга окружности, а суперэллипс степени 4, как у Apple: кривизна нарастает плавно, без излома на стыке с
+ * прямой. По глубине среза на диагонали — как окружность радиусом 12 */
+#define CORNER_S 22     /* сторона кривой */
+#define EDGE_TAPER 16   /* за кривой край рамки сходит на нет клином: длина — во столько раз больше ширины */
+static uint8_t corner_px[4][(CORNER_S + EDGE_MAX) * (CORNER_S + EDGE_TAPER * EDGE_MAX)];
 static lv_image_dsc_t corner_img[4];
 static lv_obj_t *corner_obj[4];
 
@@ -5512,28 +5516,35 @@ static void corners_place(void)
 				       !(c & 2) ? TOP_H : (up ? SCR_H - MINI_H : SCR_H) - (int)corner_img[c].header.h);
 }
 
-/* рамка корпуса закрывает несколько пикселей экрана по бокам (Настройки → Экран → Рамка): дуга угла касается
+/* чёрное ли в точке угла: across — от края экрана вглубь, along — от прямого края (панели) вдоль бока */
+static int corner_black(double across, double along, int k, int len)
+{
+	if (along < CORNER_S) {
+		double u = across - k;   /* от видимого края: рамка закрывает k пикселей */
+		if (u < 0)
+			return 1;
+		double a = (CORNER_S - u) / CORNER_S, b = (CORNER_S - along) / CORNER_S;
+		return u < CORNER_S && a * a * a * a + b * b * b * b > 1;
+	}
+	return len && across < k * (1.0 - (along - CORNER_S) / len);   /* клин вдоль края */
+}
+
+/* рамка корпуса закрывает несколько пикселей экрана по бокам (Настройки → Экран → Рамка): кривая угла касается
  * видимого края, а не края кадра, а дальше чёрное у края сходит на нет пологим клином — под углом обрыва не видно */
 static void apply_edges(void)
 {
 	for (int c = 0; c < 4; c++) {   /* 0 — левый верхний, 1 — правый верхний, 2 — левый нижний, 3 — правый нижний */
-		int k = c & 1 ? s.edge_r : s.edge_l, w = CORNER_R + k, len = EDGE_TAPER * k, h = CORNER_R + len;
-		for (int y = 0; y < h; y++) {
-			int ya = c & 2 ? y - len : y;   /* строка дуги; вне 0…CORNER_R−1 — клин */
+		int k = c & 1 ? s.edge_r : s.edge_l, w = CORNER_S + k, len = EDGE_TAPER * k, h = CORNER_S + len;
+		for (int y = 0; y < h; y++)
 			for (int x = 0; x < w; x++) {
-				uint8_t *px = &corner_px[c][y * w + x];
-				if (ya < 0 || ya >= CORNER_R) {
-					int j = ya < 0 ? -1 - ya : ya - CORNER_R;   /* шаг от конца дуги */
-					double edge = k * (1.0 - (j + 0.5) / len);   /* ширина клина в этой строке */
-					*px = (uint8_t)(255 * clamp01(edge - (c & 1 ? w - 1 - x : x)));
-					continue;
-				}
-				int xx = c & 1 ? x : x - k;   /* столбец внутри дуги; за ней — полоса рамки */
-				double dx = c & 1 ? xx + 0.5 : CORNER_R - xx - 0.5, dy = c & 2 ? ya + 0.5 : CORNER_R - ya - 0.5;
-				double d = sqrt(dx * dx + dy * dy) - CORNER_R + 0.5;
-				*px = xx < 0 || xx >= CORNER_R ? 255 : (uint8_t)(255 * clamp01(d));
+				int n = 0;   /* сглаживание: 4×4 точки на пиксель */
+				for (int sy = 0; sy < 4; sy++)
+					for (int sx = 0; sx < 4; sx++) {
+						double fx = x + (sx + 0.5) / 4, fy = y + (sy + 0.5) / 4;
+						n += corner_black(c & 1 ? w - fx : fx, c & 2 ? h - fy : fy, k, len);
+					}
+				corner_px[c][y * w + x] = (uint8_t)(n * 255 / 16);
 			}
-		}
 		corner_img[c] = (lv_image_dsc_t){ .header = { .magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8,
 							      .w = w, .h = h, .stride = w },
 						  .data_size = w * h, .data = corner_px[c] };
