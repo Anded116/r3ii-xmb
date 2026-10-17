@@ -14,6 +14,9 @@ typedef struct {
 
 void wifi_init(int on);
 void wifi_power(int on);
+/* перед глубоким сном: остановить радио (драйвер Broadcom держит блокировку сна, и ядро отвечает EBUSY),
+ * park = 0 — после сна поднять снова, если было включено */
+void wifi_park(int park);
 void wifi_scan(void);
 void wifi_connect(const char *ssid, const char *psk);   /* psk = NULL — сохранённая или открытая сеть */
 void wifi_forget(const char *ssid);

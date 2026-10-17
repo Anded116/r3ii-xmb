@@ -4849,6 +4849,11 @@ uint32_t xmb_sleep_after_ms(void)
 	return d;
 }
 
+void xmb_sleep_end(void)
+{
+	wifi_park(0);
+}
+
 void xmb_wake(void)
 {
 	screen(1);
@@ -4891,6 +4896,7 @@ void xmb_sleep_prepare(void)
 {
 	if (s.playing)
 		toggle_play();
+	wifi_park(1);
 	save_flush();
 	xmb_sleep_countdown(-1, NULL);
 	screen(0);

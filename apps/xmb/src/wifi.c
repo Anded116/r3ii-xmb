@@ -22,7 +22,7 @@ static struct {
 	pthread_cond_t cv;
 	int op, op_on;
 	char op_ssid[33], op_psk[64];
-	int power, online, refresh;
+	int power, online, refresh, parked;
 	char ssid[33];   /* к какой сети подключены */
 	wifi_net_t net[WIFI_MAX];
 	int nnet;
@@ -382,6 +382,26 @@ void wifi_init(int on)
 	w.power = on;
 }
 #endif
+
+void wifi_park(int park)
+{
+#if XMB_DEVICE
+	if (park && w.power) {
+		w.parked = 1;
+		w.power = 0;
+		sp_system("killall udhcpc wpa_supplicant > /dev/null 2>&1; ifconfig wlan0 down");
+		pthread_mutex_lock(&w.mu);
+		w.online = 0;
+		w.gen++;
+		pthread_mutex_unlock(&w.mu);
+	} else if (!park && w.parked) {
+		w.parked = 0;
+		post(OP_POWER, 1, NULL, NULL);
+	}
+#else
+	(void)park;
+#endif
+}
 
 void wifi_power(int on)
 {

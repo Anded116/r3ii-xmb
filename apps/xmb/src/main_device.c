@@ -12,6 +12,7 @@
 #include <linux/fb.h>
 #include <linux/input.h>
 #include <poll.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -113,8 +114,9 @@ static unsigned long irq_count(const char *name)
 /* глубокий сон (suspend to RAM): пауза, экран гаснет. Железо будит клик колесом и «след. трек» (md-gpio-keys),
  * кнопки на АЦП — нет. Будит только колесо, как кнопка питания: от «след. трек» (карман) — сразу обратно в сон.
  * Запись в /sys/power/state возвращается после сна */
-static void deep_sleep(void)
+static int deep_sleep(void)
 {
+	int slept = 0;
 	xmb_sleep_prepare();
 	screen_set(0);
 	audio_power_down();
@@ -127,18 +129,28 @@ static void deep_sleep(void)
 		if (fd >= 0) {
 			if (write(fd, "mem", 3) < 0)
 				perror("suspend");
+			else
+				slept = 1;
 			close(fd);
 		}
+		if (!slept)
+			break;
 		if (irq_count("KEY_POWER") != wheel || irq_count("KEY_PREVIOUSSONG") == next)
 			break;   /* колесо или не кнопка (кабель, зарядка) — просыпаемся */
 		printf("woken by next-track, back to sleep\n");
 		usleep(300000);   /* дать кнопке отпуститься */
+	}
+	xmb_sleep_end();
+	if (!slept) {   /* ядро отказало (кто-то держит блокировку сна): экран не трогать — сна не было */
+		printf("suspend не удался — экран остаётся погашенным, следующая попытка через 5 мин\n");
+		return 0;
 	}
 	fb_reprogram = 1;
 	xmb_wake();
 	printf("resume\n");
 	if (sp_system("setsid sh /tmp/adb_restart.sh > /dev/null 2>&1 < /dev/null &") != 0)   /* adbd после сна — заново */
 		perror("adb_restart");
+	return 1;
 }
 
 /* ---------- USB-накопитель ----------
@@ -418,49 +430,59 @@ void platform_brightness(int percent)
 		bl_write(bl_level);   /* экран и так включён: без промежуточного 0 (лишняя запись и мигание) */
 }
 
-/* заряд перечитывается раз в 10 с: верхняя панель спрашивает каждый кадр */
+/* заряд, зарядка, напряжение — фоновым потоком раз в 10 с: датчик отвечает по I2C, и после сна чтение sysfs
+ * бывает тянется до секунды — главный цикл на нём вставал бы. Интерфейс берёт готовые значения */
+static volatile int bat_cap = -1, bat_chg, bat_mv = -1;
+
+static int read_int(const char *path)
+{
+	char buf[32];
+	int v = -1;
+	FILE *f = fopen(path, "r");
+	if (f && fgets(buf, sizeof(buf), f))
+		v = atoi(buf);
+	if (f)
+		fclose(f);
+	return v;
+}
+
+static void *bat_thread(void *arg)
+{
+	(void)arg;
+	static const char *names[] = { "battery", "cw2015", "axp2101-battery", "bat" };
+	char path[96], buf[32];
+	for (;;) {
+		for (int i = 0; i < 4; i++) {
+			snprintf(path, sizeof(path), "/sys/class/power_supply/%s/capacity", names[i]);
+			int cap = read_int(path);
+			if (cap < 0)
+				continue;
+			bat_cap = cap;
+			snprintf(path, sizeof(path), "/sys/class/power_supply/%s/status", names[i]);
+			FILE *f = fopen(path, "r");
+			if (f) {
+				bat_chg = fgets(buf, sizeof(buf), f) && (!strncmp(buf, "Charging", 8) || !strncmp(buf, "Full", 4));
+				fclose(f);
+			}
+			snprintf(path, sizeof(path), "/sys/class/power_supply/%s/voltage_now", names[i]);
+			int uv = read_int(path);
+			bat_mv = uv > 0 ? uv / 1000 : -1;
+			break;
+		}
+		sleep(10);
+	}
+	return NULL;
+}
+
 int platform_battery(int *charging)
 {
-	static const char *names[] = { "battery", "cw2015", "axp2101-battery", "bat" };
-	static uint32_t last;
-	static int cap = -1, chg;
-	uint32_t now = tick_ms();
-	if (last && now - last < 10000) {
-		*charging = chg;
-		return cap;
-	}
-	last = now;
-	char path[96], buf[32];
-	for (int i = 0; i < 4; i++) {
-		snprintf(path, sizeof(path), "/sys/class/power_supply/%s/capacity", names[i]);
-		FILE *f = fopen(path, "r");
-		if (!f)
-			continue;
-		if (fgets(buf, sizeof(buf), f))
-			cap = atoi(buf);
-		fclose(f);
-		snprintf(path, sizeof(path), "/sys/class/power_supply/%s/status", names[i]);
-		f = fopen(path, "r");
-		if (f) {
-			chg = fgets(buf, sizeof(buf), f) && (!strncmp(buf, "Charging", 8) || !strncmp(buf, "Full", 4));
-			fclose(f);
-		}
-		break;
-	}
-	*charging = chg;
-	return cap;
+	*charging = bat_chg;
+	return bat_cap;
 }
 
 int platform_battery_mv(void)
 {
-	char buf[32];
-	int mv = -1;
-	FILE *f = fopen("/sys/class/power_supply/battery/voltage_now", "r");
-	if (f && fgets(buf, sizeof(buf), f))
-		mv = atoi(buf) / 1000;
-	if (f)
-		fclose(f);
-	return mv;
+	return bat_mv;
 }
 
 int main(int argc, char **argv)
@@ -484,6 +506,9 @@ int main(int argc, char **argv)
 	fb_mem = mmap(NULL, fi.smem_len, PROT_READ | PROT_WRITE, MAP_SHARED, fb_fd, 0);
 	if (fb_mem == MAP_FAILED) { perror("mmap"); return 1; }
 
+	pthread_t bt_;
+	pthread_create(&bt_, NULL, bat_thread, NULL);
+	pthread_detach(bt_);
 	lv_init();
 	lv_tick_set_cb(tick_ms);
 	lv_display_t *disp = lv_display_create(W, H);
@@ -536,6 +561,7 @@ int main(int argc, char **argv)
 	int screen = 1;
 	uint32_t t_fps = tick_ms(), off_since = tick_ms(), wake_until = 0;   /* после сна: разбудившее нажатие — до отпускания */
 	uint32_t auto_cd = 0;   /* начало отсчёта перед автоматическим сном, 0 — нет */
+	uint32_t sleep_fail = 0;   /* когда ядро последний раз отказало в сне */
 	uint32_t usb_ms = 0;
 	int host = usb_host(), exit_code = 0;   /* кабель, подключённый до запуска, — без диалога */
 	int sd_heal = 0;   /* попыток вернуть карту, отнятую стоком */
@@ -671,7 +697,8 @@ int main(int argc, char **argv)
 				xmb_sleep_countdown((left + SLEEP_COUNT_MS / 3 - 1) / (SLEEP_COUNT_MS / 3), "отпустите колесо — отмена");
 			} else {
 				sel_down = 0;
-				deep_sleep();
+				if (!deep_sleep())
+					sleep_fail = tick_ms();
 				screen = 0;
 				wake_until = tick_ms() + 1500;
 				sel_down = 0;
@@ -689,7 +716,8 @@ int main(int argc, char **argv)
 		if ((screen || host) && !auto_cd)
 			off_since = now;
 		uint32_t after = xmb_sleep_after_ms();
-		if (!screen && after && now - off_since >= after && !auto_cd) {
+		/* сон не удался — следующая попытка не раньше чем через 5 мин (иначе экран загорался бы каждые полминуты) */
+		if (!screen && after && now - off_since >= after && !auto_cd && (!sleep_fail || now - sleep_fail > 300000)) {
 			xmb_wake();
 			auto_cd = tick_ms();
 		}
@@ -703,7 +731,8 @@ int main(int argc, char **argv)
 				xmb_sleep_countdown((left + 999) / 1000, "нажмите любую кнопку — отмена");
 			} else {
 				auto_cd = 0;
-				deep_sleep();
+				if (!deep_sleep())
+					sleep_fail = tick_ms();
 				screen = 0;
 				wake_until = tick_ms() + 1500;
 				sel_down = 0;
