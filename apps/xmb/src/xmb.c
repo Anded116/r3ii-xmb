@@ -4577,6 +4577,7 @@ static void slide_tick(double dt)
 
 static struct {
 	int host, req, end, storage, choice, dac_req, dac, src;   /* src — в плеере источник «Компьютер» */
+	int player_was;   /* плеер был открыт до ЦАПа: после выхода — как было */
 	char st[48];   /* что с потоком: частота или «ждёт» */
 } usb;
 static const char *const usb_opts[] = { "Отдать карту", "Как ЦАП", "Только зарядка", NULL };
@@ -4716,6 +4717,7 @@ void xmb_dac_prepare(void)
 	usb.dac = 1;
 	usb.src = 0;
 	usb.st[0] = 0;
+	usb.player_was = player_shown();
 	toast("%s", "ЦАП включён");
 	player_show(1);
 	lv_refr_now(NULL);
@@ -4730,6 +4732,7 @@ void xmb_dac_end(void)
 	player_set_dac(0, NULL, NULL, NULL, NULL);
 	if (was)
 		dac_mini_off();
+	player_show(usb.player_was);
 }
 
 bool xmb_usb_end_requested(void)
