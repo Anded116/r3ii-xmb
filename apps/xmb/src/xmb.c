@@ -228,7 +228,7 @@ static struct {
 	/* варианты */
 	const node_t *opt_item;
 	int opt_open, opt_count, opt_sel, opt_orig, opt_w;
-	double opt_pos, opt_t;
+	double opt_pos, opt_t, opt_sub;   /* opt_sub 1 → 0: вложенное меню въезжает справа поверх прежнего */
 	/* шторка */
 	lv_obj_t *sh_panel, *sh_bg[8], *sh_icon[8], *sh_label[8], *sh_slider[2];
 	int sh_open, sh_drag;   /* sh_drag — палец на ползунке: 1 + номер */
@@ -1121,19 +1121,24 @@ static void layout_options(void)
 	int x = (int)(SCR_W - s.opt_w * s.opt_t);
 	set_pos(s.opt_panel, x, 0);
 	set_hidden(s.opt_panel, s.opt_t < 0.01);
-	int tx = 24;   /* галочка выбранного — справа, текст ближе к краю; у тем — только образцы */
+	int sub = (int)(s.opt_sub * s.opt_w * 0.5);   /* вложенное меню: въезжает и проявляется */
+	int tx = 24 + sub;   /* галочка выбранного — справа, текст ближе к краю; у тем — только образцы */
+	/* с предпросмотром выбранное и есть значение: галочка стоит у подсветки и не обгоняет прокрутку */
+	int preview = s.opt_item && s.opt_item->apply && !s.opt_item->commit;
 	for (int i = 0; i < s.opt_count; i++) {
 		double d = i - s.opt_pos;
 		int y = (int)(SCR_H / 2 - 10 + d * OPT_ROW);   /* середина строчных и заглавных — по середине подсветки */
 		double near = fmax(0.0, 1.0 - fabs(d));
 		int off = y < -OPT_ROW || y > SCR_H;
+		int mine = s.opt_item && !s.opt_item->commit && i == *s.opt_item->val;
 		set_pos(s.opt_rows[i], tx, y);
-		set_pos(s.opt_checks[i], s.opt_w - 34, y);
-		set_opa(s.opt_rows[i], (int)(255 * (0.5 + 0.5 * near)));
+		set_pos(s.opt_checks[i], s.opt_w - 34 + sub, preview ? SCR_H / 2 - 10 : y);
+		set_opa(s.opt_rows[i], (int)(255 * (0.5 + 0.5 * near) * (1.0 - s.opt_sub)));
+		set_opa(s.opt_checks[i], (int)(255 * (1.0 - s.opt_sub)));
 		set_hidden(s.opt_rows[i], off || s.opt_sw[i]);
-		set_hidden(s.opt_checks[i], !s.opt_item || s.opt_item->commit || i != *s.opt_item->val || off);
+		set_hidden(s.opt_checks[i], !mine || (!preview && off));
 		if (s.opt_sw[i]) {
-			set_pos(s.opt_sw[i], 18, y - 3);
+			set_pos(s.opt_sw[i], 18 + sub, y - 3);
 			set_hidden(s.opt_sw[i], off);
 		}
 	}
@@ -3441,6 +3446,7 @@ static void frame_cb(lv_timer_t *t)
 	if (!(s.t_mode == T_VLIST && s.opt_open) && s.kin != 2)
 		s.opt_pos = approach(s.opt_pos, s.opt_sel, dt, 16);
 	s.opt_t = approach(s.opt_t, s.opt_open, dt, 14);
+	s.opt_sub = approach(s.opt_sub, 0, dt, 12);
 	if (!s.opt_open && s.opt_t == 0)
 		s.opt_item = NULL;
 	if (s.opt_open || s.opt_t > 0)
@@ -3687,6 +3693,7 @@ static void options_open(const node_t *it)
 	}
 	s.opt_w = it->swatch ? 96 : w + 24 + 46;
 	s.opt_w = s.opt_w < 120 && !it->swatch ? 120 : s.opt_w > OPT_W ? OPT_W : s.opt_w;
+	s.opt_sub = s.opt_t > 0.5 ? 1 : 0;   /* открыто поверх уже видного меню (действия → «В плейлист…») — вглубь */
 	lv_obj_set_width(s.opt_panel, s.opt_w);
 	lv_obj_clean(s.opt_panel);
 	lv_obj_t *hl = plain(s.opt_panel);
