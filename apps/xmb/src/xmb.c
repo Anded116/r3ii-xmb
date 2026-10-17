@@ -210,12 +210,14 @@ static struct {
 	uint32_t settings_ms;
 	unsigned settings_sig;
 	lv_obj_t *cat_icons[8], *cat_title, *mini_icon, *mini_text, *mini_bar, *off;
-	lv_obj_t *tb, *tb_left, *tb_right, *tb_bat, *hint[2], *bhint, *bhint_lbl;
+	lv_obj_t *tb, *tb_left, *tb_right, *tb_bat, *tb_act, *hint[2], *bhint, *bhint_lbl;
 	int bat, bat_chg;
 	lv_font_t *f_bat;
 	lv_obj_t *opt_panel, *opt_rows[MAX_OPTS], *opt_checks[MAX_OPTS], *opt_sw[MAX_OPTS];
 	column_t cat_col[8], stack[MAX_DEPTH];   /* stack[d] — вложенный уровень d (с 1) */
 	int cat, at_cats, depth, screen_on, glow_x, glow_y, glow_sz;
+	int act_kind;             /* фоновая работа в статус-баре: 0 — нет, 1 — скан библиотеки, 2 — подкасты */
+	double act_frac, act_phase;   /* доля (−1 — неизвестна: бежит отрезок) и фаза бегущего отрезка */
 	double glow_k, level;
 	lv_obj_t *glow, *main, *mini, *mini_thumb, *mini_artist, *mini_time;
 	double cat_pos, depth_t, focus_t, hint_t[2], bhint_t, slide;
@@ -1703,6 +1705,69 @@ static void library_poll(void)
 	s.lib = scan.result ? scan.result : calloc(1, sizeof(library_t));
 	library_build();
 	nav_restore(0);
+}
+
+/* фоновая работа — по центру статус-бара: значок и полоса */
+static void activity_tick(void)
+{
+	static uint32_t last, probe;
+	uint32_t now = lv_tick_get();
+	double dt = (now - last) / 1000.0;
+	last = now;
+	int kind = !s.lib ? 1 : pod_busy() ? 2 : 0;
+	double frac = s.act_frac;
+	if (kind == 2 && now - probe > 500) {   /* размер файла на карте — не каждый кадр */
+		probe = now;
+		frac = pod_progress();
+	} else if (kind != 2) {
+		frac = -1;
+	}
+	if (kind != s.act_kind) {
+		s.act_kind = kind;
+		set_hidden(s.tb_act, !kind);
+	}
+	if (!kind)
+		return;
+	if (frac < 0) {
+		s.act_phase = fmod(s.act_phase + fmin(dt, 0.1) / 1.4, 1.0);
+		lv_obj_invalidate(s.tb_act);
+	} else if (fabs(frac - s.act_frac) > 0.004) {
+		lv_obj_invalidate(s.tb_act);
+	}
+	s.act_frac = frac;
+}
+
+static void activity_draw(lv_event_t *e)
+{
+	lv_layer_t *l = lv_event_get_layer(e);
+	lv_area_t a;
+	lv_obj_get_coords(lv_event_get_target(e), &a);
+	lv_draw_label_dsc_t t;
+	lv_draw_label_dsc_init(&t);
+	t.font = &lv_font_montserrat_14;
+	t.color = lv_color_white();
+	t.text = s.act_kind == 1 ? LV_SYMBOL_REFRESH : LV_SYMBOL_DOWNLOAD;
+	lv_area_t ta = { a.x1, a.y1, a.x1 + 15, a.y2 };
+	lv_draw_label(l, &t, &ta);
+	int x0 = a.x1 + 20, x1 = a.x2, w = x1 - x0, y = (a.y1 + a.y2) / 2;
+	lv_draw_rect_dsc_t r;
+	lv_draw_rect_dsc_init(&r);
+	r.radius = 2;
+	r.bg_color = lv_color_white();
+	r.bg_opa = 60;
+	lv_area_t ba = { x0, y - 2, x1, y + 1 };
+	lv_draw_rect(l, &r, &ba);
+	r.bg_color = lv_color_hex(ACCENT);
+	r.bg_opa = LV_OPA_COVER;
+	if (s.act_frac >= 0) {
+		ba.x2 = x0 + (int)(w * s.act_frac);
+	} else {
+		int seg = w / 3, sx = x0 - seg + (int)((w + seg) * s.act_phase);
+		ba.x1 = LV_MAX(x0, sx);
+		ba.x2 = LV_MIN(x1, sx + seg);
+	}
+	if (ba.x2 > ba.x1)
+		lv_draw_rect(l, &r, &ba);
 }
 
 static void mini_cover(void)
@@ -3758,6 +3823,7 @@ static void frame_cb(lv_timer_t *t)
 		if (!player_carousel_moving())   /* полоса обложек и волна вместе не укладываются в кадр — волна ждёт */
 			bg_tick(dt);
 		update_topbar();
+		activity_tick();
 		uint32_t t2 = lv_tick_get();
 		if (prof && t2 - t0 > 8)
 			printf("кадр логики: раскладка %u мс, волна и верх %u мс\n", t1 - t0, t2 - t1);
@@ -5644,6 +5710,11 @@ void xmb_init(const char *font_dir)
 	lv_obj_set_size(s.tb_bat, 34, 16);
 	lv_obj_set_pos(s.tb_bat, SCR_W - 44, 6);
 	lv_obj_add_event_cb(s.tb_bat, battery_draw, LV_EVENT_DRAW_MAIN, NULL);
+	s.tb_act = plain(tb);
+	lv_obj_set_size(s.tb_act, 56, 16);
+	lv_obj_set_pos(s.tb_act, (SCR_W - 56) / 2, 6);
+	lv_obj_add_event_cb(s.tb_act, activity_draw, LV_EVENT_DRAW_MAIN, NULL);
+	lv_obj_set_hidden(s.tb_act, true);
 
 	/* подсказка кнопки на корпусе: значок действия сверху по центру */
 	s.bhint = plain(top);

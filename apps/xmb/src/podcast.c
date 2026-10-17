@@ -39,6 +39,8 @@ static struct {
 	time_t last;
 	unsigned msg_seq;
 	char status[96], msg[96];
+	char part[920];          /* выпуск, который качается сейчас; пусто — не качается */
+	long long part_len;      /* его размер из RSS, 0 — неизвестен */
 } pd = { .mu = PTHREAD_MUTEX_INITIALIZER };
 
 /* ---------- состояние выпусков ---------- */
@@ -432,11 +434,12 @@ static int do_feed(const char *url, int fi, int nf, int *got)
 		char *ie = strstr(it, "</item>");
 		if (!ie)
 			break;
-		char t[256] = "", date[32] = "", enc[1024] = "", type[64] = "", pub[96] = "";
+		char t[256] = "", date[32] = "", enc[1024] = "", type[64] = "", pub[96] = "", len[24] = "";
 		tag_text(it, ie, "title", t, sizeof(t));
 		tag_text(it, ie, "pubDate", pub, sizeof(pub));
 		tag_attr(it, ie, "enclosure", "url", enc, sizeof(enc));
 		tag_attr(it, ie, "enclosure", "type", type, sizeof(type));
+		tag_attr(it, ie, "enclosure", "length", len, sizeof(len));
 		if (!enc[0])
 			continue;
 		char path_part[1024];
@@ -456,7 +459,15 @@ static int do_feed(const char *url, int fi, int nf, int *got)
 			continue;
 		snprintf(part, sizeof(part), "%s.part", file);
 		set_status("скачивается выпуск %d (подписка %d)", taken, fi + 1);
-		if (fetch(enc, part, 60) == 0 && !stat(part, &st) && st.st_size > 0 && !rename(part, file)) {
+		pthread_mutex_lock(&pd.mu);
+		snprintf(pd.part, sizeof(pd.part), "%s", part);
+		pd.part_len = atoll(len);
+		pthread_mutex_unlock(&pd.mu);
+		int rc = fetch(enc, part, 60);
+		pthread_mutex_lock(&pd.mu);
+		pd.part[0] = 0;
+		pthread_mutex_unlock(&pd.mu);
+		if (rc == 0 && !stat(part, &st) && st.st_size > 0 && !rename(part, file)) {
 			(*got)++;
 			printf("podcast: %s\n", file);
 			fflush(stdout);
@@ -536,6 +547,17 @@ int pod_busy(void)
 const char *pod_status(void)
 {
 	return pd.status;
+}
+
+double pod_progress(void)
+{
+	double r = -1;
+	struct stat st;
+	pthread_mutex_lock(&pd.mu);
+	if (pd.part[0] && pd.part_len > 0)
+		r = !stat(pd.part, &st) ? (double)st.st_size / pd.part_len : 0;
+	pthread_mutex_unlock(&pd.mu);
+	return r > 1 ? 1 : r;
 }
 
 const char *pod_message(unsigned *seq)

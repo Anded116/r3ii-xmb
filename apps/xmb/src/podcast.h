@@ -13,6 +13,7 @@ void pod_tick(int online);        /* раз в кадр: при Wi-Fi и пор�
 void pod_update(void);            /* проверить сейчас (кнопка «Обновить») */
 int pod_busy(void);
 const char *pod_status(void);     /* что идёт: «проверка подписок…», «скачивается 2 из 3…»; пусто — ничего */
+double pod_progress(void);        /* скачано из текущего выпуска 0…1; −1 — неизвестно (проверка подписок, нет размера) */
 const char *pod_message(unsigned *seq);
 int pod_take_new(void);           /* скачано выпусков с прошлого вызова — библиотеке перечитаться */
 int pod_feeds(void);              /* подписок в файлах */
