@@ -269,6 +269,8 @@ static struct {
 	lv_point_t t_start;
 	uint32_t t_ms;
 	double t_start_pos;
+	int idx_sel;                /* выбор до касания указателя: свайп влево с него — назад, выбор возвращается */
+	double idx_pos, idx_rpos;
 	/* бросок: скорость — по движению пальца за последние ~100 мс (тач 33 Гц — по двум точкам скачет);
 	 * после отпускания список едет сам и тормозит трением, затем докатывается до пункта */
 	struct { uint32_t t; int y; } t_hist[8];
@@ -4969,6 +4971,10 @@ static void touch_cb(lv_event_t *e)
 		s.t_menu_off = s.touch_off && !s.sh_open && !player_shown();
 		double f;
 		if (!s.t_menu_off && !s.sh_open && !s.opt_open && !player_shown() && index_hit(p)) {
+			column_t *c = index_column();
+			s.idx_sel = c->sel;
+			s.idx_pos = c->pos;
+			s.idx_rpos = c->rpos;
 			s.t_mode = T_INDEX;
 			index_touch(p.y);
 		} else if (!s.sh_open && !s.opt_open && s.track >= 0 && s.dur > 0 && player_bar_at(p.x, p.y, &f)) {
@@ -4991,6 +4997,18 @@ static void touch_cb(lv_event_t *e)
 			s.seek_preview = -1;
 			s.t_mode = T_NONE;
 		}
+		return;
+	}
+	if (s.t_mode == T_INDEX && code == LV_EVENT_PRESSING && dx < -20 && abs(dx) > abs(dy) && s.depth > 0) {
+		column_t *c = index_column();
+		if (c) {
+			c->sel = s.idx_sel;
+			c->pos = s.idx_pos;
+			c->rpos = s.idx_rpos;
+			s.bubble_t = 0;
+			set_hidden(s.bubble, true);
+		}
+		s.t_mode = T_BACKSWIPE;
 		return;
 	}
 	if (s.t_mode == T_INDEX) {
