@@ -2,13 +2,14 @@
 id: XMB-0028
 title: Плеер на паузе после запуска XMB: строка формата — только «FLAC», без разрядности и частоты
 type: bug
-status: open
+status: fixed
 priority: P3
 area: player
 source: agent
 verify-in: review
 created: 2026-10-17
-updated: 2026-10-17
+updated: 2026-10-18
+commits: 3e773a1
 ---
 
 
@@ -27,3 +28,4 @@ updated: 2026-10-17
 ## История
 
 - 2026-10-17 (agent): создан (bug, open).
+- 2026-10-18 (agent): status open -> fixed; commits 3e773a1 - audio_probe: декодер открывается, читает частоту и разрядность из заголовка и закрывается. Проверено на плеере: на паузе после запуска — «FLAC · 24 bit / 192 kHz».
