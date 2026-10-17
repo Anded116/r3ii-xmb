@@ -1832,6 +1832,7 @@ static void toast(const char *fmt, ...)
 	s.toast_t = 1.0;
 	s.bhint_t = 0;   /* место сверху одно: уведомление вместо значка кнопки */
 	set_hidden(s.bhint, true);
+	lv_obj_move_foreground(s.toast);
 	set_hidden(s.toast, false);
 }
 
@@ -2873,19 +2874,32 @@ static void q_changed(const node_t *old)
 }
 
 /* очередь — треки списка q (без папок и прочего); возвращает место трека qi в ней */
+/* новая очередь — из списка, откуда запущен трек. Поставленное вручную «играть следующим» и ещё не сыгранное
+ * остаётся сразу за ним: другой альбом (в том числе случайный свайп в плеере) меняет только то, что дальше */
 static int q_set(const node_t *q, int qlen, int qi)
 {
 	const node_t *old = q_nodes;
+	int keep = s.up_next > 0 && s.qi + s.up_next < q_len ? s.up_next : 0;
+	node_t *pend = keep ? malloc(sizeof(node_t) * keep) : NULL;
+	if (pend)
+		memcpy(pend, q_nodes + s.qi + 1, sizeof(node_t) * keep);
+	else
+		keep = 0;
 	int n = 0, at = 0;
-	q_reserve(qlen);
+	q_reserve(qlen + keep);
 	for (int i = 0; i < qlen; i++)
 		if (q[i].action == A_TRACK) {
 			if (i == qi)
 				at = n;
 			q_nodes[n++] = q_node(q[i].track);
+			if (i == qi && keep) {
+				memcpy(q_nodes + n, pend, sizeof(node_t) * keep);
+				n += keep;
+			}
 		}
+	free(pend);
 	q_len = n;
-	s.up_next = 0;
+	s.up_next = keep;
 	s.qi = at;
 	q_changed(old);
 	return at;
@@ -3790,9 +3804,11 @@ static void set_cat(int c)
 	layout();
 }
 
+/* подсказки — на верхнем слое, а окна (эквалайзер, клавиатура, ползунок) создаются там позже и легли бы сверху */
 static void show_hint(int i)
 {
 	s.hint_t[i] = 1.0;
+	lv_obj_move_foreground(s.hint[i]);
 }
 
 /* что сделала кнопка на корпусе — значком сверху по центру (как «назад» и «выбрать» у тапа) */
@@ -3802,6 +3818,7 @@ static void show_btn_hint(const char *glyph, const lv_font_t *f)
 		return;
 	s.toast_t = 0;   /* место сверху одно: показано последнее */
 	set_hidden(s.toast, true);
+	lv_obj_move_foreground(s.bhint);
 	lv_obj_set_style_text_font(s.bhint_lbl, f, 0);
 	lv_label_set_text(s.bhint_lbl, glyph);
 	lv_point_t sz;
@@ -4884,10 +4901,10 @@ static void touch_cb(lv_event_t *e)
 			if (s.t_mode != T_EQ && abs(dx) < 10 && abs(dy) < 10 && on_bars) {
 				eq_touch(p);   /* тап по полосе — уровень под пальцем */
 				lv_obj_invalidate(s.eq_panel);
-			} else if (s.t_mode != T_EQ && abs(dx) < 10 && abs(dy) < 10)
-				eq_close();   /* тап мимо полос — закрыть */
-			else if (s.t_mode != T_EQ && dx < -50)
+			} else if (s.t_mode != T_EQ && ((abs(dx) < 10 && abs(dy) < 10) || dx < -50)) {
+				show_hint(0);   /* тап мимо полос или свайп влево — закрыть, со значком «назад» */
 				eq_close();
+			}
 			s.t_mode = T_NONE;
 		}
 		return;
