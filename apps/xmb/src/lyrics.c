@@ -1,7 +1,7 @@
 /* lyrics.c — разбор LRC: у строки бывает несколько меток ([00:12.30][01:40.00]припев), метки [ar:], [ti:] и т. п.
  * пропускаются, [offset:+/-мс] сдвигает всё. Нет ни одной метки времени — простой текст. */
 #include "lyrics.h"
-#include "spawn.h"
+#include "subproc.h"
 
 #include <ctype.h>
 #include <stdio.h>

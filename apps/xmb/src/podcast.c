@@ -6,7 +6,7 @@
 
 #include "filesave.h"
 #include "i18n.h"
-#include "spawn.h"
+#include "subproc.h"
 
 #include <ctype.h>
 #include <dirent.h>

@@ -1,5 +1,5 @@
-#ifndef XMB_SPAWN_H
-#define XMB_SPAWN_H
+#ifndef XMB_SUBPROC_H
+#define XMB_SUBPROC_H
 
 #include <stdio.h>
 

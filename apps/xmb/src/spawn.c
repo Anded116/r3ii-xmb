@@ -1,8 +1,10 @@
-#include "spawn.h"
+#include "subproc.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <pthread.h>
 #include <signal.h>
+#include <spawn.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -14,15 +16,36 @@ static struct {
 } open_[MAX_OPEN];
 static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
 
-/* в потомке: всё, кроме 0–2, закрыть и выполнить команду через sh */
-static void child(const char *cmd)
+extern char **environ;
+
+/* sh -c cmd без копии XMB: posix_spawn (в musl — clone с общей памятью, как vfork) вместо fork. fork копировал
+ * адресное пространство вместе с отображёнными страницами PCM (tinyalsa держит их mmap) — в момент старта звука это
+ * подозревается в падениях ядра (XMB-0024), и на 16 МБ XMB он заметно дорог. В потомке закрыто всё, кроме 0–2 (и
+ * pipe для popen: io — какой конец стать stdin/stdout), SIGPIPE — по умолчанию (XMB его игнорирует ради Bluetooth) */
+static pid_t spawn(const char *cmd, int io, int io_to)
 {
+	posix_spawn_file_actions_t fa;
+	posix_spawnattr_t at;
+	posix_spawn_file_actions_init(&fa);
+	posix_spawnattr_init(&at);
+	if (io >= 0)
+		posix_spawn_file_actions_adddup2(&fa, io, io_to);
 	long max = sysconf(_SC_OPEN_MAX);
 	for (int fd = 3; fd < (max > 0 && max < 4096 ? max : 1024); fd++)
-		close(fd);
-	signal(SIGPIPE, SIG_DFL);   /* XMB его игнорирует (Bluetooth), командам — как обычно */
-	execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
-	_exit(127);
+		if (fcntl(fd, F_GETFD) != -1)
+			posix_spawn_file_actions_addclose(&fa, fd);
+	sigset_t def;
+	sigemptyset(&def);
+	sigaddset(&def, SIGPIPE);
+	posix_spawnattr_setsigdefault(&at, &def);
+	posix_spawnattr_setflags(&at, POSIX_SPAWN_SETSIGDEF);
+	char *argv[] = { "sh", "-c", (char *)cmd, NULL };
+	pid_t pid;
+	if (posix_spawn(&pid, "/bin/sh", &fa, &at, argv, environ))
+		pid = -1;
+	posix_spawn_file_actions_destroy(&fa);
+	posix_spawnattr_destroy(&at);
+	return pid;
 }
 
 FILE *sp_popen(const char *cmd, const char *mode)
@@ -30,15 +53,11 @@ FILE *sp_popen(const char *cmd, const char *mode)
 	int w = mode[0] == 'w', p[2];
 	if (pipe(p))
 		return NULL;
-	pid_t pid = fork();
+	pid_t pid = spawn(cmd, w ? p[0] : p[1], w ? 0 : 1);
 	if (pid < 0) {
 		close(p[0]);
 		close(p[1]);
 		return NULL;
-	}
-	if (!pid) {
-		dup2(w ? p[0] : p[1], w ? 0 : 1);
-		child(cmd);
 	}
 	close(w ? p[0] : p[1]);
 	FILE *f = fdopen(w ? p[1] : p[0], w ? "w" : "r");
@@ -87,11 +106,9 @@ const char *sp_xmbget(void)
 
 int sp_system(const char *cmd)
 {
-	pid_t pid = fork();
+	pid_t pid = spawn(cmd, -1, 0);
 	if (pid < 0)
 		return -1;
-	if (!pid)
-		child(cmd);
 	int st = -1;
 	while (waitpid(pid, &st, 0) < 0 && errno == EINTR) {
 	}

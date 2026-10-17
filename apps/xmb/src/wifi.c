@@ -2,7 +2,7 @@
  * сохраняются туда же), wpa_cli и udhcpc. Раз в 3 с — состояние; подключилось — адрес по DHCP и время по NTP. */
 #define _GNU_SOURCE
 #include "wifi.h"
-#include "spawn.h"
+#include "subproc.h"
 
 #include <pthread.h>
 #include <sched.h>

@@ -3,7 +3,7 @@
  * звук уходит в него, пропал — в разъём. Список устройств перечитывается после операций и по просьбе интерфейса. */
 #define _GNU_SOURCE
 #include "bt.h"
-#include "spawn.h"
+#include "subproc.h"
 
 #include "audio.h"
 
