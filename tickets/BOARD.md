@@ -8,21 +8,21 @@
 
 | Статус | Тикетов |
 |---|---|
-| `open` | 8 |
+| `open` | 5 |
 | `in-progress` | 1 |
-| `fixed` | 12 |
+| `fixed` | 15 |
 | `verified` | 1 |
 | `accepted` | 2 |
 | **всего** | **24** |
 
 | Область | open | in-progress | fixed |
 |---|---|---|---|
-| ui | 1 | 0 | 3 |
+| ui | 0 | 0 | 4 |
 | player | 0 | 0 | 2 |
 | audio | 1 | 0 | 1 |
-| library | 1 | 0 | 0 |
+| library | 0 | 0 | 1 |
 | net | 1 | 0 | 2 |
-| power | 1 | 1 | 2 |
+| power | 0 | 1 | 3 |
 | display | 1 | 0 | 1 |
 | input | 1 | 0 | 1 |
 | firmware | 1 | 0 | 0 |
@@ -33,11 +33,8 @@
 |---|---|---|---|---|
 | [XMB-0024](XMB-0024-pleer-perezagruzilsya-sam-pri-pereklyuchenii.md) | P1 | open | firmware | Плеер перезагрузился сам при переключении трека в полноэкранном плеере 👀 |
 | [XMB-0006](XMB-0006-polnoekrannyy-pleer-ne-reagiroval-na-kasaniya.md) | P2 | open | input | Полноэкранный плеер не реагировал на касания до выключения и включения экрана 👀 |
-| [XMB-0007](XMB-0007-niz-spiskov-gasnet-nad-mini-pleerom.md) | P2 | open | ui | Низ списков гаснет над мини-плеером |
 | [XMB-0010](XMB-0010-bluetooth-proverit-naushniki-zvuk-i-smenu-kodeka.md) | P2 | open | net | Bluetooth: проверить наушники, звук и смену кодека |
 | [XMB-0019](XMB-0019-skrugleniya-uglov-ekrana-ne-sovsem-kruglye.md) | P2 | open | display | Скругления углов экрана не совсем круглые |
-| [XMB-0008](XMB-0008-geydzh-cw2015-proverit-zavisshiy-0.md) | P3 | open | power | Гейдж CW2015: проверить зависший 0 % |
-| [XMB-0009](XMB-0009-biblioteka-podpis-papki-chtoby-pereskanirovat.md) | P3 | open | library | Библиотека: подпись папки, чтобы пересканировать только изменившиеся |
 | [XMB-0011](XMB-0011-rezhim-usb-tsap.md) | P3 | open | audio | Режим USB-ЦАП |
 | [XMB-0015](XMB-0015-ekran-zagoraetsya-cherez-1-4-1-75-s-posle.md) | P3 | in-progress | power | Экран загорается через 1,4–1,75 с после пробуждения |
 
@@ -53,12 +50,21 @@
 - [ ] [XMB-0003](XMB-0003-teksty-pesen-iz-lrclib-chetvertaya-knopka-pleera.md) `[P2/player]` Тексты песен из LRCLIB (четвёртая кнопка плеера)
 - [ ] [XMB-0004](XMB-0004-ramka-ekrana-chernaya-verhnyaya-panel-i.md) `[P2/display]` Рамка экрана: чёрная верхняя панель и скругления углов
 - [ ] [XMB-0005](XMB-0005-podkasty-podpiski-vybirayutsya-na-pk-vypuski.md) `[P2/net]` Подкасты: подписки выбираются на ПК, выпуски плеер качает сам по Wi-Fi
+- [ ] [XMB-0007](XMB-0007-niz-spiskov-gasnet-nad-mini-pleerom.md) `[P2/ui]` Низ списков гаснет над мини-плеером
 - [ ] [XMB-0013](XMB-0013-son-na-kabele-kompyutera-ekran-srazu.md) `[P2/power]` Сон на кабеле компьютера: экран сразу загорался с диалогом накопителя
 - [ ] [XMB-0018](XMB-0018-podsvetka-alboma-po-obschemu-standartu-ui-bez.md) `[P2/ui]` Подсветка альбома по общему стандарту UI, без сильного приглушения соседей
 - [ ] [XMB-0020](XMB-0020-nastroyki-klaviatury-angliyskaya-raskladka-po.md) `[P2/ui]` Настройки клавиатуры; английская раскладка по умолчанию
 - [ ] [XMB-0021](XMB-0021-svayp-vlevo-vo-vlozhennyh-menyu-na-uroven-vyshe.md) `[P2/input]` Свайп влево во вложенных меню — на уровень выше
 - [ ] [XMB-0022](XMB-0022-fonovye-protsessy-skan-zagruzka-podkastov-v.md) `[P2/ui]` Фоновые процессы (скан, загрузка подкастов) — в центре статус-бара с прогрессом
 - [ ] [XMB-0023](XMB-0023-fon-pleera-tsvetom-oblozhki-plavnaya-smena.md) `[P3/player]` Фон плеера цветом обложки: плавная смена оттенка
+
+**Проверить ТЕСТОМ**
+
+- [ ] [XMB-0009](XMB-0009-biblioteka-podpis-papki-chtoby-pereskanirovat.md) `[P3/library]` Библиотека: подпись папки, чтобы пересканировать только изменившиеся
+
+**Без проверки (можно закрывать)**
+
+- [ ] [XMB-0008](XMB-0008-geydzh-cw2015-proverit-zavisshiy-0.md) `[P3/power]` Гейдж CW2015: проверить зависший 0 %
 
 ## 📐 Решения (decision)
 

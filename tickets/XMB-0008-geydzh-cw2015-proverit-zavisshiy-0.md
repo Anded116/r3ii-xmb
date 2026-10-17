@@ -2,13 +2,15 @@
 id: XMB-0008
 title: Гейдж CW2015: проверить зависший 0 %
 type: tech
-status: open
+status: fixed
 priority: P3
 area: power
 source: agent
-verify-in: review
+verify-in: none
 created: 2026-10-17
 updated: 2026-10-17
+commits: b1cb3a5
+labels: watch
 ---
 
 ## Описание
@@ -23,3 +25,4 @@ updated: 2026-10-17
 ## История
 
 - 2026-10-17 (agent): создан (tech, open).
+- 2026-10-17 (agent): status open -> fixed; verify-in -> none; commits b1cb3a5; labels watch - Залипание — поведение драйвера CW2015 (Sonix в своём модуле ядра сбрасывает датчик после 30 мин 0 % на зарядке); драйвер мы не меняем. Выключение по батарее и так требовало < 3600 мВ (датчик отдаёт voltage_now). Добавлено: при 0 % и напряжении > 3,6 В заряд берётся по кривой напряжения, в журнал — «батарея: датчик показывает 0 % при N мВ». Вживую не воспроизведено; если строка появится в xmb.log — значит, бывает.
