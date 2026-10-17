@@ -8,17 +8,17 @@
 
 | Статус | Тикетов |
 |---|---|
-| `open` | 3 |
-| `fixed` | 26 |
+| `open` | 4 |
+| `fixed` | 28 |
 | `verified` | 2 |
 | `accepted` | 3 |
-| **всего** | **34** |
+| **всего** | **37** |
 
 | Область | open | in-progress | fixed |
 |---|---|---|---|
 | ui | 0 | 0 | 7 |
 | player | 0 | 0 | 3 |
-| audio | 0 | 0 | 2 |
+| audio | 1 | 0 | 4 |
 | library | 0 | 0 | 2 |
 | net | 1 | 0 | 4 |
 | power | 0 | 0 | 4 |
@@ -33,6 +33,7 @@
 | [XMB-0024](XMB-0024-pleer-perezagruzilsya-sam-pri-pereklyuchenii.md) | P1 | open | firmware | Плеер перезагрузился сам при переключении трека в полноэкранном плеере 👀 |
 | [XMB-0006](XMB-0006-polnoekrannyy-pleer-ne-reagiroval-na-kasaniya.md) | P2 | open | input | Полноэкранный плеер не реагировал на касания до выключения и включения экрана 👀 |
 | [XMB-0010](XMB-0010-bluetooth-proverit-naushniki-zvuk-i-smenu-kodeka.md) | P2 | open | net | Bluetooth: проверить наушники, звук и смену кодека |
+| [XMB-0037](XMB-0037-usb-tsap-mozhno-li-menshe-50-ms-zaderzhki.md) | P3 | open | audio | USB-ЦАП: можно ли меньше 50 мс задержки |
 
 ## 🧪 Ждут проверки (fixed)
 
@@ -59,6 +60,8 @@
 - [ ] [XMB-0029](XMB-0029-varianty-oformleniya-mini-pleera-stroki-spiska.md) `[P2/ui]` Варианты оформления мини-плеера: строки списка не должны просвечивать сквозь него
 - [ ] [XMB-0031](XMB-0031-teksty-pesen-dlya-vsey-biblioteki-pleer-sam.md) `[P2/net]` Тексты песен для всей библиотеки — плеер сам скачивает в фоне и держит на карте
 - [ ] [XMB-0033](XMB-0033-kursor-v-polyah-vvoda-temnyy-hotya-zadan-belym.md) `[P2/ui]` Курсор в полях ввода тёмный, хотя задан белым
+- [ ] [XMB-0035](XMB-0035-okno-tsapa-vizualizirovat-gromkost.md) `[P2/audio]` Окно ЦАПа: визуализировать громкость
+- [ ] [XMB-0036](XMB-0036-okno-tsapa-vyhod-kak-v-ostalnoy-sisteme.md) `[P2/audio]` Окно ЦАПа: выход как в остальной системе
 - [ ] [XMB-0011](XMB-0011-rezhim-usb-tsap.md) `[P3/audio]` Режим USB-ЦАП
 - [ ] [XMB-0023](XMB-0023-fon-pleera-tsvetom-oblozhki-plavnaya-smena.md) `[P3/player]` Фон плеера цветом обложки: плавная смена оттенка
 - [ ] [XMB-0028](XMB-0028-pleer-na-pauze-posle-zapuska-xmb-stroka.md) `[P3/player]` Плеер на паузе после запуска XMB: строка формата — только «FLAC», без разрядности и частоты
