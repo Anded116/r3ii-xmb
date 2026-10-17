@@ -199,7 +199,7 @@ static int deep_sleep(void)
 #define USB_HOLD_MS 1000   /* в режиме накопителя: удержание колеса — вернуть карту */
 
 static int usb_storage, usb_adb;   /* режим накопителя; до него контроллер держал adb_demo */
-static int usb_dac, dac_fd = -1;   /* режим USB-ЦАПа (2 — выйти) и его /dev/uac_sa */
+static int usb_dac, dac_fd = -1;   /* режим USB-ЦАПа и его /dev/uac_sa */
 static char dac_ms_link[64];       /* функция накопителя в конфигурации — вернуть после ЦАПа */
 static char dac_class[3][16];      /* класс устройства android0 до ЦАПа */
 static char usb_udc[64];
@@ -750,8 +750,8 @@ int main(int argc, char **argv)
 			while (pfd[i].fd >= 0 && read(pfd[i].fd, &ev, sizeof(ev)) == sizeof(ev)) {
 				if (ev.type != EV_KEY)
 					continue;
-				if ((usb_storage || usb_dac) && ev.code != KEY_POWER && ev.code != KEY_LEFT && ev.code != KEY_RIGHT)
-					continue;   /* в режиме накопителя и ЦАПа работает только колесо */
+				if (usb_storage && ev.code != KEY_POWER && ev.code != KEY_LEFT && ev.code != KEY_RIGHT)
+					continue;   /* в режиме накопителя работает только колесо */
 				if (wake_until) {   /* после сна: разбудившее нажатие только включает экран — глотаем до отпускания */
 					if (ev.value == 0 || now > wake_until)
 						wake_until = 0;
@@ -777,10 +777,10 @@ int main(int argc, char **argv)
 					if (ev.value == 1) {
 						sel_down = now;
 						sel_long = 0;
-					} else if (ev.value == 0 && sel_down && (usb_storage || usb_dac)) {
+					} else if (ev.value == 0 && sel_down && usb_storage) {
 						sel_down = 0;   /* в режиме накопителя клик только будит экран; карта — прокруткой (или удержанием) */
-						if (!xmb_screen_on() || usb_dac)
-							xmb_input(XMB_SELECT);   /* ЦАП: клик — подтверждение выхода */
+						if (!xmb_screen_on())
+							xmb_input(XMB_SELECT);
 					} else if (ev.value == 0 && sel_down) {
 						if (now - sel_down >= SLEEP_HOLD_MS)
 							xmb_sleep_countdown(-1, NULL);   /* отпустили до конца отсчёта — не спим */
@@ -833,8 +833,10 @@ int main(int argc, char **argv)
 				break;
 			}
 			/* ЦАП: удержание колеса, кабель вынут или выход из интерфейса */
-			if (usb_dac && (usb_dac == 2 || !usb_power()))
+			if (usb_dac && !usb_power())
 				usb_dac_end();
+			xmb_set_usb_link(usb_dac ? XMB_USB_DAC : !h || usb_storage ? XMB_USB_NONE
+					 : read_line(GADGETS "/adb_demo/UDC", lun, sizeof(lun)) ? XMB_USB_ADB : XMB_USB_PC);
 		}
 		if (usb_dac && xmb_usb_end_requested())
 			usb_dac_end();
@@ -848,16 +850,14 @@ int main(int argc, char **argv)
 		btn_tick(&b_next, now);
 		btn_tick(&b_play, now);
 		btn_tick(&b_screen, now);
-		if (sel_down && !sel_long && !usb_storage && !usb_dac && now - sel_down >= HOLD_PREV_MS) {
+		if (sel_down && !sel_long && !usb_storage && now - sel_down >= HOLD_PREV_MS) {
 			sel_long = 1;
 			xmb_input(XMB_MENU);
 		}
 		/* удержание колеса дольше — отсчёт до сна, как в стоке: отпустить — отмена */
 		if (sel_down && usb_storage && now - sel_down >= USB_HOLD_MS)
 			usb_storage = 2;   /* удержание колеса: карта — обратно плееру (клик слишком легко задеть) */
-		if (sel_down && usb_dac && now - sel_down >= USB_HOLD_MS)
-			usb_dac = 2;
-		if (sel_down && !usb_storage && !usb_dac && now - sel_down >= SLEEP_HOLD_MS) {
+		if (sel_down && !usb_storage && now - sel_down >= SLEEP_HOLD_MS) {
 			int left = SLEEP_HOLD_MS + SLEEP_COUNT_MS - (int)(now - sel_down);
 			if (!xmb_screen_on())
 				xmb_wake();

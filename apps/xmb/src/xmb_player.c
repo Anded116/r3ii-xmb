@@ -45,9 +45,9 @@
 #define FULL_OPA PLAYER_DIM
 
 static struct {
-	lv_obj_t *root, *content, *cards, *cassette, *cover, *pending, *heart, *add, *title, *artist, *album, *format, *bar, *t_pos, *t_dur;
+	lv_obj_t *root, *content, *trk, *dacw, *cards, *cassette, *cover, *pending, *heart, *add, *title, *artist, *album, *format, *bar, *t_pos, *t_dur;
 	lv_obj_t *mode_icon[PM_COUNT], *mode_dot[PM_COUNT], *mode_label[PM_COUNT];
-	lv_obj_t *vol, *vol_bar, *vol_text;
+	lv_obj_t *vol, *vol_bar, *vol_text, *dac_exit, *dac_sub;
 	const track_t *track;
 	int shown, playing, volume;
 	double t, vol_t, pos, angle, acc;   /* t — раскрытие 0 (мини-плеер) … 1 (весь экран) */
@@ -65,6 +65,7 @@ static struct {
 	double lyr_k, lyr_scroll;
 	const lv_font_t *lyr_font;
 	int mini_opa;                 /* фон мини-плеера: с него начинается раскрытие (вид — в настройках) */
+	int dac;                      /* источник — компьютер (USB-ЦАП) */
 	uint32_t mini_color;
 } p = { .mini_opa = MINI_OPA };
 
@@ -353,7 +354,7 @@ void player_set_mini_bg(uint32_t color, int opa)
 
 uint32_t player_tint(void)
 {
-	return tint;
+	return p.dac ? 0 : tint;
 }
 
 /* обложка, пока её нет (декодируется или не поддержана) — кассета */
@@ -399,6 +400,8 @@ static void carousel_apply(void)
 
 void player_drag(int dx)
 {
+	if (p.dac)
+		return;
 	/* к краю без соседа — тугая резинка */
 	int edge = (dx > 0 && !p.prev_album) || (dx < 0 && !p.next_album);
 	p.dragging = 1;
@@ -453,7 +456,7 @@ void player_set_fav(int on)
 
 int player_action_at(int x, int y)
 {
-	if (!p.shown || p.t < 1 || y < COVER_Y + COVER + 6 || y > ACT_Y + 14)
+	if (!p.shown || p.t < 1 || p.dac || y < COVER_Y + COVER + 6 || y > ACT_Y + 14)
 		return PA_NONE;
 	if (y >= ACT_Y - 18 && (x < ACT_X + 28 || x > W - ACT_X - 28))
 		return x < ACT_X + 28 ? PA_FAV : PA_ADD;
@@ -470,21 +473,22 @@ void player_create(lv_obj_t *parent, const lv_font_t *f_big, const lv_font_t *f_
 	lv_obj_set_style_bg_color(p.root, lv_color_hex(p.mini_color), 0);
 	lv_obj_set_hidden(p.root, true);
 	p.content = box(p.root, 0, 0, W, H);
+	p.trk = box(p.content, 0, 0, W, H);   /* то, что есть только у трека */
 
-	p.cards = box(p.content, 0, COVER_Y, W, COVER);
+	p.cards = box(p.trk, 0, COVER_Y, W, COVER);
 	lv_obj_add_event_cb(p.cards, cards_draw, LV_EVENT_DRAW_MAIN, NULL);
-	p.cassette = box(p.content, CAS_X, CAS_Y, CAS_W, CAS_H + 28);
+	p.cassette = box(p.trk, CAS_X, CAS_Y, CAS_W, CAS_H + 28);
 	lv_obj_add_event_cb(p.cassette, cassette_draw, LV_EVENT_DRAW_MAIN, NULL);
-	p.pending = box(p.content, COVER_X, COVER_Y, COVER, COVER);
+	p.pending = box(p.trk, COVER_X, COVER_Y, COVER, COVER);
 	lv_obj_set_style_bg_opa(p.pending, LV_OPA_COVER, 0);
 	lv_obj_set_style_bg_color(p.pending, lv_color_hex(EMPTY_BG), 0);
 	lv_obj_set_hidden(p.pending, true);
-	p.cover = lv_image_create(p.content);
+	p.cover = lv_image_create(p.trk);
 	lv_obj_set_pos(p.cover, COVER_X, COVER_Y);
 	lv_obj_set_size(p.cover, COVER, COVER);
 	lv_obj_set_hidden(p.cover, true);
 
-	p.lyr = box(p.content, 0, LYR_Y, W, LYR_H);   /* строки за краем обрезаются */
+	p.lyr = box(p.trk, 0, LYR_Y, W, LYR_H);   /* строки за краем обрезаются */
 	p.lyr_font = f_mid;
 	for (int i = 0; i < NLYR; i++) {
 		p.lyr_line[i] = lv_label_create(p.lyr);
@@ -501,30 +505,30 @@ void player_create(lv_obj_t *parent, const lv_font_t *f_big, const lv_font_t *f_
 
 	p.title = text(p.content, f_big, COVER_Y + COVER + 14, LV_OPA_COVER);
 	p.artist = text(p.content, f_mid, COVER_Y + COVER + 38, 210);
-	p.album = text(p.content, f_small, COVER_Y + COVER + 58, 140);
+	p.album = text(p.trk, f_small, COVER_Y + COVER + 58, 140);
 	lv_obj_set_width(p.album, W - 2 * (ACT_X + 28));
 	lv_obj_set_x(p.album, ACT_X + 28);
 
-	lv_obj_t *track = box(p.content, BAR_X, BAR_Y, BAR_W, 2);
+	lv_obj_t *track = box(p.trk, BAR_X, BAR_Y, BAR_W, 2);
 	lv_obj_set_style_bg_color(track, lv_color_white(), 0);
 	lv_obj_set_style_bg_opa(track, 50, 0);
-	p.bar = box(p.content, BAR_X, BAR_Y - 1, 0, 4);
+	p.bar = box(p.trk, BAR_X, BAR_Y - 1, 0, 4);
 	lv_obj_set_style_radius(p.bar, 2, 0);
 	lv_obj_set_style_bg_color(p.bar, lv_color_hex(ACCENT), 0);
 	lv_obj_set_style_bg_opa(p.bar, LV_OPA_COVER, 0);
 	for (int i = 0; i < 2; i++) {   /* отметки A и B */
-		p.ab[i] = box(p.content, BAR_X, BAR_Y - 6, 2, 14);
+		p.ab[i] = box(p.trk, BAR_X, BAR_Y - 6, 2, 14);
 		lv_obj_set_style_bg_color(p.ab[i], lv_color_white(), 0);
 		lv_obj_set_style_bg_opa(p.ab[i], LV_OPA_COVER, 0);
 		lv_obj_set_hidden(p.ab[i], true);
 	}
 
-	p.t_pos = lv_label_create(p.content);
+	p.t_pos = lv_label_create(p.trk);
 	lv_obj_set_style_text_font(p.t_pos, f_small, 0);
 	lv_obj_set_style_text_color(p.t_pos, lv_color_white(), 0);
 	lv_obj_set_style_text_opa(p.t_pos, 170, 0);
 	lv_obj_set_pos(p.t_pos, BAR_X, BAR_Y + 8);
-	p.t_dur = lv_label_create(p.content);
+	p.t_dur = lv_label_create(p.trk);
 	lv_obj_set_style_text_font(p.t_dur, f_small, 0);
 	lv_obj_set_style_text_color(p.t_dur, lv_color_white(), 0);
 	lv_obj_set_style_text_opa(p.t_dur, 170, 0);
@@ -533,14 +537,14 @@ void player_create(lv_obj_t *parent, const lv_font_t *f_big, const lv_font_t *f_
 	lv_obj_set_pos(p.t_dur, BAR_X + BAR_W - 60, BAR_Y + 8);
 
 	p.format = text(p.content, f_small, BAR_Y + 30, 130);
-	p.heart = lv_label_create(p.content);
+	p.heart = lv_label_create(p.trk);
 	lv_obj_set_style_text_font(p.heart, &lv_font_montserrat_20, 0);
 	lv_obj_set_width(p.heart, 32);
 	lv_obj_set_style_text_align(p.heart, LV_TEXT_ALIGN_CENTER, 0);
 	lv_obj_set_pos(p.heart, ACT_X - 16, ACT_Y - 11);
 	p.fav = -1;
 	player_set_fav(0);
-	p.add = lv_label_create(p.content);
+	p.add = lv_label_create(p.trk);
 	lv_obj_set_style_text_font(p.add, &lv_font_montserrat_20, 0);
 	lv_obj_set_style_text_color(p.add, lv_color_hex(0xaeb3bb), 0);
 	lv_obj_set_width(p.add, 32);
@@ -551,14 +555,14 @@ void player_create(lv_obj_t *parent, const lv_font_t *f_big, const lv_font_t *f_
 	static const char *const icons[PM_COUNT] = { LV_SYMBOL_SHUFFLE, LV_SYMBOL_LOOP, FA_LYRICS, FA_MORE };
 	for (int i = 0; i < PM_COUNT; i++) {
 		int cx = MODE_STEP / 2 + i * MODE_STEP;
-		p.mode_icon[i] = lv_label_create(p.content);
+		p.mode_icon[i] = lv_label_create(p.trk);
 		lv_obj_set_style_text_font(p.mode_icon[i], &lv_font_montserrat_20, 0);
 		lv_obj_set_style_text_color(p.mode_icon[i], lv_color_white(), 0);
 		lv_obj_set_width(p.mode_icon[i], 60);
 		lv_obj_set_style_text_align(p.mode_icon[i], LV_TEXT_ALIGN_CENTER, 0);
 		lv_label_set_text(p.mode_icon[i], icons[i]);
 		lv_obj_set_pos(p.mode_icon[i], cx - 30, MODES_Y);
-		p.mode_label[i] = lv_label_create(p.content);
+		p.mode_label[i] = lv_label_create(p.trk);
 		lv_obj_set_style_text_font(p.mode_label[i], f_small, 0);
 		lv_obj_set_style_text_color(p.mode_label[i], lv_color_white(), 0);
 		lv_obj_set_size(p.mode_label[i], MODE_STEP - 2, 16);
@@ -566,11 +570,38 @@ void player_create(lv_obj_t *parent, const lv_font_t *f_big, const lv_font_t *f_
 		lv_label_set_long_mode(p.mode_label[i], LV_LABEL_LONG_MODE_DOTS);
 		lv_label_set_text(p.mode_label[i], "");
 		lv_obj_set_pos(p.mode_label[i], cx - MODE_STEP / 2 + 1, MODES_Y + 26);
-		p.mode_dot[i] = box(p.content, cx - 8, MODES_Y + 46, 16, 3);
+		p.mode_dot[i] = box(p.trk, cx - 8, MODES_Y + 46, 16, 3);
 		lv_obj_set_style_radius(p.mode_dot[i], 1, 0);
 		lv_obj_set_style_bg_color(p.mode_dot[i], lv_color_hex(ACCENT), 0);
 		lv_obj_set_style_bg_opa(p.mode_dot[i], LV_OPA_COVER, 0);
 	}
+
+	/* компьютер: пустая обложка со значком USB, внизу — выход из режима */
+	p.dacw = box(p.content, 0, 0, W, H);
+	lv_obj_t *dc = box(p.dacw, COVER_X, COVER_Y, COVER, COVER);
+	lv_obj_set_style_bg_opa(dc, LV_OPA_COVER, 0);
+	lv_obj_set_style_bg_color(dc, lv_color_hex(EMPTY_BG), 0);
+	lv_obj_t *dci = lv_label_create(dc);
+	lv_obj_set_style_text_font(dci, &lv_font_montserrat_40, 0);
+	lv_obj_set_style_text_color(dci, lv_color_hex(EMPTY_FG), 0);
+	lv_label_set_text(dci, LV_SYMBOL_USB);
+	lv_obj_center(dci);
+	p.dac_sub = text(p.dacw, f_small, COVER_Y + COVER + 58, 140);
+	lv_obj_t *xi = lv_label_create(p.dacw);
+	lv_obj_set_style_text_font(xi, &lv_font_montserrat_20, 0);
+	lv_obj_set_style_text_color(xi, lv_color_white(), 0);
+	lv_obj_set_width(xi, 180);
+	lv_obj_set_style_text_align(xi, LV_TEXT_ALIGN_CENTER, 0);
+	lv_label_set_text(xi, LV_SYMBOL_EJECT);
+	lv_obj_set_pos(xi, W / 2 - 90, MODES_Y);
+	p.dac_exit = lv_label_create(p.dacw);
+	lv_obj_set_style_text_font(p.dac_exit, f_small, 0);
+	lv_obj_set_style_text_color(p.dac_exit, lv_color_white(), 0);
+	lv_obj_set_style_text_opa(p.dac_exit, 220, 0);
+	lv_obj_set_width(p.dac_exit, 180);
+	lv_obj_set_style_text_align(p.dac_exit, LV_TEXT_ALIGN_CENTER, 0);
+	lv_obj_set_pos(p.dac_exit, W / 2 - 90, MODES_Y + 26);
+	lv_obj_set_hidden(p.dacw, true);
 
 	/* громкость: сегменты, как на PSP */
 	p.vol = box(p.content, 24, 30, W - 48, 34);
@@ -612,6 +643,21 @@ void player_set_track(const track_t *t)
 	p.pos = -1;
 }
 
+void player_set_dac(int on, const char *title, const char *status, const char *sub, const char *exit_label)
+{
+	p.dac = on;
+	lv_obj_set_hidden(p.trk, on);
+	lv_obj_set_hidden(p.dacw, !on);
+	lv_obj_set_hidden(p.format, on);
+	if (!on)
+		return;
+	p.off = 0;
+	lv_label_set_text(p.title, title);
+	lv_label_set_text(p.artist, status);
+	lv_label_set_text(p.dac_sub, sub);
+	lv_label_set_text(p.dac_exit, exit_label);
+}
+
 void player_set_state(int playing, double pos, int volume)
 {
 	char buf[16];
@@ -647,13 +693,15 @@ int player_mode_at(int x, int y)
 {
 	if (!p.shown || y < MODES_Y - 12 || y > MODES_Y + 56)
 		return -1;
+	if (p.dac)
+		return x > W / 2 - 90 && x < W / 2 + 90 ? PM_DAC_EXIT : -1;
 	int i = x / MODE_STEP;
 	return x >= 0 && i < PM_COUNT ? i : -1;
 }
 
 int player_bar_at(int x, int y, double *frac)
 {
-	if (!p.shown || p.t < 1 || y < BAR_Y - 9 || y > BAR_Y + 16 || x < BAR_X - 16 || x > BAR_X + BAR_W + 16)
+	if (!p.shown || p.t < 1 || p.dac || y < BAR_Y - 9 || y > BAR_Y + 16 || x < BAR_X - 16 || x > BAR_X + BAR_W + 16)
 		return 0;
 	double f = (double)(x - BAR_X) / BAR_W;
 	*frac = f < 0 ? 0 : f > 1 ? 1 : f;

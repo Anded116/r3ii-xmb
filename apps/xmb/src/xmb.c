@@ -259,7 +259,7 @@ static struct {
 	uint32_t seek_ms;
 	track_t np;
 	char np_format[48];
-	lv_obj_t *mini_img;
+	lv_obj_t *mini_img, *mini_note, *tb_usb;
 	library_t *lib;
 	/* плейлисты: [0] — «Избранное» */
 	playlist_t *pls;
@@ -328,7 +328,10 @@ static void lyrics_refresh(void);
 static void lyrics_poll(void);
 static void pod_labels(void);
 static void podcast_poll(void);
-static void dac_update(void);
+static void dac_tick(void);
+static int dac_shown(void);
+static void dac_mini(void);
+static int pc_playing(void);
 static void toast(const char *fmt, ...);
 static void seek_to(double sec);
 static void slide_tick(double dt);
@@ -1441,6 +1444,54 @@ static void battery_draw(lv_event_t *e)
 	lv_draw_label(l, &t, &ta);
 }
 
+/* значки подключения к компьютеру: штекер и знак режима, по пикселям 14×14 (в A8 — при первом показе) */
+static const char *const usb_art[4][14] = {
+	{ "..............", ".####.........", ".#..#.........", ".####.........", "######........", "######........",
+	  "######........", "######........", ".####.........", "..##..........", "..##..........", "..##..........",
+	  "..##..........", ".............." },
+	{ "..............", ".####.........", ".#..#...###...", ".####....###..", "######....###.", "######.....###",
+	  "######....###.", "######...###..", ".####...###...", "..##..........", "..##..........", "..##.....#####",
+	  "..##.....#####", ".............." },
+	{ "..............", ".####.....##..", ".#..#.....###.", ".####.....####", "######....##.#", "######....##.#",
+	  "######....##..", "######....##..", ".####.....##..", "..##.....###..", "..##....####..", "..##....####..",
+	  "..##.....##...", ".............." },
+	{ "..............", ".####....#....", ".#..#...###...", ".####..#####..", "######...#....", "######...#.#..",
+	  "######...#.#..", "######...#.#..", ".####....#.#..", "..##.......#..", "..##.....#####", "..##......###.",
+	  "..##.......#..", ".............." },
+};
+static int usb_link;
+
+void xmb_set_usb_link(int link)
+{
+	usb_link = link;
+}
+
+static const lv_image_dsc_t *usb_icon(int link)
+{
+	static lv_image_dsc_t d[4];
+	static uint8_t px[4][14 * 14];
+	lv_image_dsc_t *o = &d[link - 1];
+	if (!o->data) {
+		const char *const *a = usb_art[link - 1];
+		int w = 0;
+		for (int y = 0; y < 14; y++)
+			for (int x = 0; a[y][x]; x++)
+				if (a[y][x] == '#' && x >= w)
+					w = x + 1;
+		for (int y = 0; y < 14; y++)
+			for (int x = 0; x < w; x++)
+				px[link - 1][y * w + x] = a[y][x] == '#' ? 255 : 0;
+		o->header.magic = LV_IMAGE_HEADER_MAGIC;
+		o->header.cf = LV_COLOR_FORMAT_A8;
+		o->header.w = w;
+		o->header.h = 14;
+		o->header.stride = w;
+		o->data_size = w * 14;
+		o->data = px[link - 1];
+	}
+	return o;
+}
+
 static void update_topbar(void)
 {
 	static char last_icons[64];
@@ -1454,9 +1505,20 @@ static void update_topbar(void)
 	}
 	snprintf(buf, sizeof(buf), "%s%s%s%s", s.shuffle ? LV_SYMBOL_SHUFFLE "  " : "", s.repeat ? LV_SYMBOL_LOOP "  " : "",
 		 s.bt_off ? "" : LV_SYMBOL_BLUETOOTH "  ", s.wifi_off ? "" : LV_SYMBOL_WIFI);
-	if (strcmp(buf, last_icons)) {
+	static int last_link = -1;
+	if (strcmp(buf, last_icons) || usb_link != last_link) {
 		strcpy(last_icons, buf);
+		last_link = usb_link;
 		lv_label_set_text(s.tb_right, buf);
+		/* значок USB — левее остальных: правый край строки значков — SCR_W - 50 */
+		if (usb_link) {
+			lv_point_t sz;
+			lv_text_get_size(&sz, buf, &lv_font_montserrat_14, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+			const lv_image_dsc_t *ic = usb_icon(usb_link);
+			lv_image_set_src(s.tb_usb, ic);
+			lv_obj_set_pos(s.tb_usb, SCR_W - 50 - sz.x - (sz.x ? 8 : 0) - (int)ic->header.w, 7);
+		}
+		set_hidden(s.tb_usb, !usb_link || s.act_kind);
 	}
 	/* процент батареи — плавно: датчик скачет на нагрузке, показываем не больше ±1 за 20 с */
 	static uint32_t bat_step_ms;
@@ -1756,6 +1818,7 @@ static void activity_tick(void)
 		s.act_kind = kind;
 		set_hidden(s.tb_act, !kind);
 		set_hidden(s.tb_right, kind != 0);   /* значки режимов и радио — на время работы прячутся */
+		set_hidden(s.tb_usb, kind != 0 || !usb_link);
 	}
 	if (!kind)
 		return;
@@ -1809,6 +1872,8 @@ static void activity_draw(lv_event_t *e)
 
 static void mini_cover(void)
 {
+	if (dac_shown())
+		return;
 	const char *cv = s.track >= 0 ? s.lib->albums[s.lib->tracks[s.track].aidx].cover : NULL;
 	const lv_image_dsc_t *d = cover_get(cv, 36);
 	if (lv_image_get_src(s.mini_img) != d)
@@ -1818,6 +1883,10 @@ static void mini_cover(void)
 
 static void update_np_labels(void)
 {
+	if (dac_shown()) {
+		dac_mini();
+		return;
+	}
 	lv_label_set_text(s.mini_icon, s.playing ? LV_SYMBOL_PLAY : LV_SYMBOL_PAUSE);
 	if (s.track < 0) {
 		lv_label_set_text(s.mini_text, tx("Нет трека"));
@@ -3433,6 +3502,10 @@ static void play_queue(const node_t *q, int qlen, int qi)
 {
 	if (!q || qi < 0 || qi >= qlen || q[qi].action != A_TRACK)
 		return;
+	if (pc_playing()) {
+		toast("%s", "Сейчас играет компьютер");
+		return;
+	}
 	int track = q[qi].track;
 	if (q != q_nodes) {   /* запуск из другого списка: он и становится очередью */
 		qi = q_set(q, qlen, qi);
@@ -3459,6 +3532,10 @@ static void toggle_play(void)
 {
 	if (s.track < 0)
 		return;
+	if (!s.playing && pc_playing()) {
+		toast("%s", "Сейчас играет компьютер");
+		return;
+	}
 	if (s.resume) {
 		double p = s.resume_pos;
 		play_queue(s.queue, s.qlen, s.qi);
@@ -3954,7 +4031,7 @@ static void frame_cb(lv_timer_t *t)
 	}
 
 	/* визуализатор: уровень сигнала (RMS), быстрая атака, медленный спад */
-	double lvl = s.playing ? fmin(1.0, st.level * 3.5) : 0;
+	double lvl = s.playing || pc_playing() ? fmin(1.0, st.level * 3.5) : 0;
 	s.level = lvl > s.level ? approach(s.level, lvl, dt, 30) : approach(s.level, lvl, dt, 5);
 	if (s.track >= 0)
 		mini_cover();   /* опрос держит обложку в кэше и подхватывает готовую */
@@ -3981,7 +4058,7 @@ static void frame_cb(lv_timer_t *t)
 			bg_tick(dt);
 		update_topbar();
 		activity_tick();
-		dac_update();
+		dac_tick();
 		uint32_t t2 = lv_tick_get();
 		if (prof && t2 - t0 > 8)
 			printf("кадр логики: раскладка %u мс, волна и верх %u мс\n", t1 - t0, t2 - t1);
@@ -4499,8 +4576,8 @@ static void slide_tick(double dt)
 /* ---------- USB-накопитель: карта отдаётся компьютеру, плеер ждёт на экране «USB» ---------- */
 
 static struct {
-	int host, req, end, storage, choice, dac_req, dac, dac_vol;
-	lv_obj_t *panel, *state, *vol, *vol_bar;
+	int host, req, end, storage, choice, dac_req, dac, src;   /* src — в плеере источник «Компьютер» */
+	char st[48];   /* что с потоком: частота или «ждёт» */
 } usb;
 static const char *const usb_opts[] = { "Отдать карту", "Как ЦАП", "Только зарядка", NULL };
 
@@ -4515,9 +4592,13 @@ static void usb_commit(void)
 static const node_t usb_node = { .icon = LV_SYMBOL_USB, .title = "USB", .opts = usb_opts, .val = &usb.choice,
 				 .commit = usb_commit };
 
+static void dac_exit_ask(void);
+
 static void usb_menu(void)
 {
-	if (usb.host)
+	if (usb.dac)
+		dac_exit_ask();
+	else if (usb.host)
 		xmb_usb_host(1, 1);   /* тот же выбор, что при подключении кабеля */
 	else
 		toast("%s", "Подключите кабель к компьютеру");
@@ -4557,113 +4638,98 @@ bool xmb_usb_dac_requested(void)
 	return r;
 }
 
-/* ЦАП: экран режима — что играет компьютер и громкость (колесо, палец по шкале); выход — как у других смен
- * режима, ползунком с отменой (клик колесом или тап по подсказке), или выдернуть кабель */
-static void slider_draw(lv_event_t *e);
-
-static void dac_update(void)
-{
-	if (!usb.panel)
-		return;
-	int rate = audio_usb_in_rate();
-	char b[64];
-	if (rate)
-		snprintf(b, sizeof(b), tx("Играет · %g кГц"), rate / 1000.0);
-	else
-		snprintf(b, sizeof(b), "%s", tx("Ждёт звук с компьютера"));
-	if (strcmp(lv_label_get_text(usb.state), b))
-		lv_label_set_text(usb.state, b);
-	if (usb.dac_vol != s.volume) {
-		usb.dac_vol = s.volume;
-		lv_label_set_text_fmt(usb.vol, "%d", s.volume);
-		lv_obj_invalidate(usb.vol_bar);
-	}
-}
-
+/* ЦАП в фоне: пока компьютер играет — в плеере и мини-плеере источник «Компьютер», своя музыка на паузе (как при
+ * звонке); компьютер замолчал — своя музыка играет как обычно, а пока она на паузе, в плеере — снова «Компьютер».
+ * Выход — «Выйти из ЦАП» в плеере или пункт USB (ползунком с отменой), или выдернуть кабель */
 static void dac_exit_ask(void)
 {
 	slide_open(LV_SYMBOL_USB, "Выйти из режима ЦАП?", tx("Звук с компьютера прервётся"), "выйти", 1, "Отмена",
 		   usb_return, NULL);
 }
 
-static void dac_exit_cb(lv_event_t *e)
+static int pc_playing(void)
 {
-	(void)e;
-	dac_exit_ask();
+	return usb.dac && audio_usb_in_rate() > 0;
 }
 
-/* палец на шкале — громкость по делениям, как в шторке */
-static void dac_vol_cb(lv_event_t *e)
+static int dac_shown(void)
 {
-	lv_point_t p;
-	lv_indev_get_point(lv_indev_active(), &p);
-	lv_area_t a;
-	lv_obj_get_coords(usb.vol_bar, &a);
-	int w = lv_area_get_width(&a), k = ((p.x - a.x1) * SEG + w / 2) / w;
-	k = k < 0 ? 0 : k > SEG ? SEG : k;
-	int v = (k * 100 + SEG / 2) / SEG;
-	(void)e;
-	if (v != s.volume) {
-		s.volume = v;
-		audio_set_volume(s.volume);
-		dac_update();
+	return usb.dac && usb.src;
+}
+
+static void dac_mini(void)
+{
+	lv_label_set_text(s.mini_icon, pc_playing() ? LV_SYMBOL_PLAY : LV_SYMBOL_PAUSE);
+	lv_label_set_text(s.mini_text, tx("Компьютер"));
+	lv_label_set_text(s.mini_artist, usb.st);
+	lv_obj_set_y(s.mini_text, 8);
+	set_hidden(s.mini_img, true);
+	lv_label_set_text(s.mini_note, LV_SYMBOL_USB);
+	set_hidden(s.mini_bar, true);
+	set_hidden(s.mini_time, true);
+}
+
+/* снова свой трек: мини-плеер — как был */
+static void dac_mini_off(void)
+{
+	lv_label_set_text(s.mini_note, LV_SYMBOL_AUDIO);
+	set_hidden(s.mini_bar, false);
+	set_hidden(s.mini_time, false);
+	update_np_labels();
+	if (s.track < 0)
+		player_show(0);
+}
+
+static void dac_tick(void)
+{
+	if (!usb.dac)
+		return;
+	int rate = audio_usb_in_rate();
+	if (rate && s.playing) {
+		toggle_play();
+		toast("%s", "Звук с компьютера");
 	}
+	char st[48];
+	if (rate)
+		snprintf(st, sizeof(st), tx("Играет · %g кГц"), rate / 1000.0);
+	else
+		snprintf(st, sizeof(st), "%s", tx("Ждёт звук с компьютера"));
+	int src = rate || !s.playing;
+	if (src == usb.src && !strcmp(st, usb.st))
+		return;
+	int was = usb.src;
+	usb.src = src;
+	snprintf(usb.st, sizeof(usb.st), "%s", st);
+	player_set_dac(src, tx("Компьютер"), st, tx("USB-ЦАП"), tx("Выйти из ЦАП"));
+	if (src)
+		dac_mini();
+	else if (was)
+		dac_mini_off();
 }
 
 void xmb_dac_prepare(void)
 {
-	if (s.playing)
-		toggle_play();
 	if (s.opt_open)
 		options_cancel();
 	if (!s.screen_on)
 		screen(1);
 	usb.dac = 1;
-	usb.dac_vol = -1;
-	usb.panel = plain(lv_layer_top());
-	lv_obj_set_size(usb.panel, SCR_W, SCR_H - TOP_H);
-	lv_obj_set_pos(usb.panel, 0, TOP_H);
-	lv_obj_set_style_bg_color(usb.panel, lv_color_hex(0x101114), 0);
-	lv_obj_set_style_bg_opa(usb.panel, LV_OPA_COVER, 0);
-	lv_obj_set_clickable(usb.panel, true);   /* касания не проходят в меню под ним */
-	lv_obj_t *icon = label(usb.panel, &lv_font_montserrat_40, LV_SYMBOL_USB);
-	lv_obj_align(icon, LV_ALIGN_TOP_MID, 0, 26);
-	lv_obj_t *t = label(usb.panel, s.f_title, tx("USB-ЦАП"));
-	lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 84);
-	usb.state = label(usb.panel, s.f_item, "");
-	lv_obj_set_style_text_opa(usb.state, 180, 0);
-	lv_obj_align(usb.state, LV_ALIGN_TOP_MID, 0, 118);
-
-	lv_obj_t *vt = label(usb.panel, s.f_sub, tx("Громкость"));
-	lv_obj_set_style_text_opa(vt, 150, 0);
-	lv_obj_align(vt, LV_ALIGN_TOP_MID, 0, 200);
-	usb.vol = label(usb.panel, &lv_font_montserrat_40, "");
-	lv_obj_align(usb.vol, LV_ALIGN_TOP_MID, 0, 222);
-	usb.vol_bar = plain(usb.panel);
-	lv_obj_set_size(usb.vol_bar, SEG * 9, 22);
-	lv_obj_align(usb.vol_bar, LV_ALIGN_TOP_MID, 1, 284);
-	lv_obj_set_ext_click_area(usb.vol_bar, 20);
-	lv_obj_set_clickable(usb.vol_bar, true);
-	lv_obj_add_event_cb(usb.vol_bar, slider_draw, LV_EVENT_DRAW_MAIN, (void *)(intptr_t)1);
-	lv_obj_add_event_cb(usb.vol_bar, dac_vol_cb, LV_EVENT_PRESSING, NULL);
-
-	lv_obj_t *h = label(usb.panel, s.f_item, tx("Нажмите колесо — выйти"));
-	lv_obj_set_style_text_opa(h, 150, 0);
-	lv_obj_set_style_pad_all(h, 10, 0);
-	lv_obj_align(h, LV_ALIGN_BOTTOM_MID, 0, -6);
-	lv_obj_set_clickable(h, true);
-	lv_obj_add_event_cb(h, dac_exit_cb, LV_EVENT_CLICKED, NULL);
-	dac_update();
+	usb.src = 0;
+	usb.st[0] = 0;
+	toast("%s", "ЦАП включён");
+	player_show(1);
 	lv_refr_now(NULL);
 }
 
 void xmb_dac_end(void)
 {
-	usb.dac = 0;
-	slide_close();
-	if (usb.panel)
-		lv_obj_delete(usb.panel);
-	usb.panel = usb.state = usb.vol = usb.vol_bar = NULL;
+	if (sl.done == usb_return)
+		slide_close();
+	int was = usb.src;
+	usb.dac = usb.src = 0;
+	player_set_dac(0, NULL, NULL, NULL, NULL);
+	if (was)
+		dac_mini_off();
 }
 
 bool xmb_usb_end_requested(void)
@@ -5019,6 +5085,15 @@ int xmb_input_name(const char *name)
 		xmb_storage_prepare();
 		return 1;
 	}
+	if (!strcmp(name, "usb:dac")) {
+		xmb_dac_prepare();
+		xmb_set_usb_link(XMB_USB_DAC);
+		return 1;
+	}
+	if (!strncmp(name, "usb:link", 8)) {   /* значок подключения: usb:link1 … usb:link4, usb:link0 — нет */
+		xmb_set_usb_link(atoi(name + 8));
+		return 1;
+	}
 	if (!strncmp(name, "btn:", 4) && name[4] && name[5]) {   /* кнопка на корпусе: btn:<кнопка><жест>, как в настройках */
 		xmb_button(name[4] - '0', name[5] - '0');
 		return 1;
@@ -5065,18 +5140,6 @@ void xmb_input(xmb_input_t in)
 	s.kin = 0;
 	if (in == XMB_POWER || (in == XMB_SELECT && !s.screen_on)) {   /* экран будят кнопка питания и клик колеса */
 		screen(!s.screen_on);
-		return;
-	}
-	if (usb.dac) {   /* режим ЦАПа: колесо — громкость, клик — выйти (ползунком), остальное не действует */
-		if (slide_input(in))
-			return;
-		if (in == XMB_WHEEL_UP || in == XMB_WHEEL_DOWN) {
-			s.volume = volume_seg(s.volume, in == XMB_WHEEL_UP ? 1 : -1);
-			audio_set_volume(s.volume);
-			dac_update();
-		} else if (in == XMB_SELECT || in == XMB_BACK) {
-			dac_exit_ask();
-		}
 		return;
 	}
 	if (!s.screen_on && (in == XMB_WHEEL_UP || in == XMB_WHEEL_DOWN)) {   /* погашенный экран: колесо — громкость */
@@ -5577,6 +5640,8 @@ static void touch_cb(lv_event_t *e)
 			} else if (act == PA_ALBUM) {
 				show_hint(1);   /* отклик, как у тапа «выбрать»: плеер закрывается, альбом открыт на треке */
 				reveal_album();
+			} else if (m == PM_DAC_EXIT) {
+				dac_exit_ask();
 			} else if (m >= 0) {
 				toggle_mode(m);
 			} else if (player_shown()) {
@@ -5629,7 +5694,7 @@ static void touch_cb(lv_event_t *e)
 			if (dy > 80 && abs(dy) > abs(dx)) {
 				player_release(0);
 				player_show(0);
-			} else if (abs(dx) > 60 && switch_album(dir)) {
+			} else if (abs(dx) > 60 && !dac_shown() && switch_album(dir)) {
 				player_release(dir);
 			} else {
 				player_release(0);
@@ -6020,9 +6085,9 @@ void xmb_init(const char *font_dir)
 	lv_obj_set_pos(s.mini_thumb, 10, 9);
 	lv_obj_set_style_bg_opa(s.mini_thumb, LV_OPA_COVER, 0);
 	lv_obj_set_style_bg_color(s.mini_thumb, lv_color_hex(EMPTY_BG), 0);
-	lv_obj_t *note = label(s.mini_thumb, &lv_font_montserrat_16, LV_SYMBOL_AUDIO);
-	lv_obj_set_style_text_color(note, lv_color_hex(EMPTY_FG), 0);
-	lv_obj_center(note);
+	s.mini_note = label(s.mini_thumb, &lv_font_montserrat_16, LV_SYMBOL_AUDIO);
+	lv_obj_set_style_text_color(s.mini_note, lv_color_hex(EMPTY_FG), 0);
+	lv_obj_center(s.mini_note);
 	s.mini_img = lv_image_create(s.mini_thumb);
 	lv_obj_set_size(s.mini_img, 36, 36);
 	lv_obj_set_hidden(s.mini_img, true);
@@ -6101,6 +6166,10 @@ void xmb_init(const char *font_dir)
 	lv_obj_set_width(s.tb_right, 160);
 	lv_obj_set_style_text_align(s.tb_right, LV_TEXT_ALIGN_RIGHT, 0);
 	lv_obj_set_pos(s.tb_right, SCR_W - 210, 7);
+	s.tb_usb = lv_image_create(tb);
+	lv_obj_set_style_image_recolor(s.tb_usb, lv_color_white(), 0);
+	lv_obj_set_style_image_recolor_opa(s.tb_usb, LV_OPA_COVER, 0);
+	lv_obj_set_hidden(s.tb_usb, true);
 	s.tb_bat = plain(tb);
 	lv_obj_set_size(s.tb_bat, 34, 16);
 	lv_obj_set_pos(s.tb_bat, SCR_W - 44, 6);

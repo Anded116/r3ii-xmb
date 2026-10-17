@@ -46,12 +46,15 @@ uint32_t xmb_last_input(void);
  * сохранить и закрыть; экран режима накопителя (on = 0 — убрать); выход из него касанием */
 void xmb_usb_host(int connected, int offer);
 bool xmb_usb_storage_requested(void);
-/* USB-ЦАП: заявка из меню; на время режима — его экран (колесо — громкость), после — обычный интерфейс */
+/* USB-ЦАП: заявка из меню; режим идёт в фоне — в плеере источник «Компьютер» */
 bool xmb_usb_dac_requested(void);
 void xmb_dac_prepare(void);
 void xmb_dac_end(void);
 void xmb_storage_prepare(void);
 bool xmb_usb_end_requested(void);
+/* значок подключения к компьютеру в статус-баре — для режимов, при которых плеером можно пользоваться */
+enum { XMB_USB_NONE, XMB_USB_PC, XMB_USB_ADB, XMB_USB_DAC, XMB_USB_MTP };
+void xmb_set_usb_link(int link);
 
 /* кнопки на корпусе: платформа распознаёт жест, что делать — решают настройки */
 enum { XMB_BTN_NEXT, XMB_BTN_PLAY, XMB_BTN_SCREEN, XMB_BTN_COUNT };
