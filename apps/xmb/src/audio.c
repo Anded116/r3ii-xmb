@@ -46,6 +46,28 @@
 #endif
 
 #define CHUNK 1024   /* кадров за одну запись */
+/* внутри тракта — 24 бита в int32 (как S24_LE у ALSA): 24-битные FLAC и WAV — без потерь, 16-битные — сдвигом */
+#define S24_MAX 8388607
+
+static inline int32_t clip24(int64_t v)
+{
+	return (int32_t)(v > S24_MAX ? S24_MAX : v < -S24_MAX - 1 ? -S24_MAX - 1 : v);
+}
+
+/* 24 → 16 бит: треугольный дизеринг (TPDF, ±1 младший разряд) вместо простого отбрасывания — ошибка округления
+ * становится ровным шумом, а не искажением тихих мест */
+static void to_s16(const int32_t *in, int16_t *out, unsigned frames)
+{
+	static uint32_t rng = 22222;
+	for (unsigned i = 0; i < frames * 2; i++) {
+		rng = rng * 1664525u + 1013904223u;
+		int d = (int)(rng >> 24) + (int)((rng >> 16) & 255) - 255;   /* сумма двух равномерных: −255…255 */
+		int32_t v = (in[i] + d + 128) >> 8;
+		out[i] = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
+	}
+}
+
+
 
 enum { C_NONE, C_FLAC, C_MP3, C_WAV, C_ALAC, C_AAC };
 
@@ -111,6 +133,7 @@ static struct {
 	int bt_rate, bt_bits, bt_rq, bt_rq_rate, bt_rq_bits, bt_gain;   /* bt_gain — Q15 */
 	uint32_t rs_ph;
 	int16_t rs_last[2];
+	int out_bits, s24_bad;   /* формат открытого PCM; s24_bad — драйвер 24 бита не принял, дальше только 16 */
 #else
 	SDL_AudioDeviceID dev;
 #endif
@@ -326,7 +349,7 @@ static int aac_next_packet(dec_t *d)
 	return 0;
 }
 
-static unsigned aac_read(dec_t *d, int16_t *dst, unsigned n)
+static unsigned aac_read(dec_t *d, int32_t *dst, unsigned n)
 {
 	unsigned got = 0;
 	while (got < n) {
@@ -335,7 +358,9 @@ static unsigned aac_read(dec_t *d, int16_t *dst, unsigned n)
 		unsigned take = (unsigned)(d->pcm_n - d->pcm_pos);
 		if (take > n - got)
 			take = n - got;
-		memcpy(dst + (size_t)got * 2, d->aac_pcm + (size_t)d->pcm_pos * 2, take * 4);
+		const int16_t *s = d->aac_pcm + (size_t)d->pcm_pos * 2;
+		for (unsigned i = 0; i < take * 2; i++)
+			dst[(size_t)got * 2 + i] = s[i] * 256;
 		got += take;
 		d->pcm_pos += (int)take;
 	}
@@ -363,7 +388,7 @@ static int alac_next_packet(dec_t *d)
 	return 0;
 }
 
-static unsigned alac_read(dec_t *d, int16_t *dst, unsigned n, unsigned ch)
+static unsigned alac_read(dec_t *d, int32_t *dst, unsigned n, unsigned ch)
 {
 	unsigned got = 0;
 	while (got < n) {
@@ -374,17 +399,18 @@ static unsigned alac_read(dec_t *d, int16_t *dst, unsigned n, unsigned ch)
 			take = n - got;
 		const int32_t *s = d->alac_pcm + (size_t)d->pcm_pos * d->channels;
 		for (unsigned i = 0; i < take * ch; i++)
-			dst[(size_t)got * ch + i] = (int16_t)(s[i] >> 16);
+			dst[(size_t)got * ch + i] = s[i] >> 8;
 		got += take;
 		d->pcm_pos += (int)take;
 	}
 	return got;
 }
 
-/* читает до n кадров в buf как 16 бит стерео; 0 — конец */
-static unsigned dec_read(dec_t *d, int16_t *buf, unsigned n)
+/* читает до n кадров в buf как 24 бита стерео; 0 — конец */
+static unsigned dec_read(dec_t *d, int32_t *buf, unsigned n)
 {
-	int16_t tmp[CHUNK * 8];
+	static int32_t tmp[CHUNK * 8];
+	static int16_t t16[CHUNK * 2];
 	if (d->end_f) {
 		if (d->frame >= d->end_f)
 			return 0;
@@ -392,14 +418,17 @@ static unsigned dec_read(dec_t *d, int16_t *buf, unsigned n)
 			n = (unsigned)(d->end_f - d->frame);
 	}
 	unsigned ch = d->channels > 8 ? 8 : d->channels, got = 0;
-	int16_t *dst = ch == 2 ? buf : tmp;
-	if (d->codec == C_FLAC)
-		got = (unsigned)drflac_read_pcm_frames_s16(d->flac, n, dst);
-	else if (d->codec == C_MP3)
-		got = (unsigned)drmp3_read_pcm_frames_s16(&d->mp3, n, dst);
-	else if (d->codec == C_WAV)
-		got = (unsigned)drwav_read_pcm_frames_s16(&d->wav, n, dst);
-	else if (d->codec == C_ALAC)
+	int32_t *dst = ch == 2 ? buf : tmp;
+	if (d->codec == C_FLAC || d->codec == C_WAV) {   /* 32 бита, выровнены влево */
+		got = d->codec == C_FLAC ? (unsigned)drflac_read_pcm_frames_s32(d->flac, n, dst)
+					 : (unsigned)drwav_read_pcm_frames_s32(&d->wav, n, dst);
+		for (unsigned i = 0; i < got * ch; i++)
+			dst[i] >>= 8;
+	} else if (d->codec == C_MP3) {   /* MP3 — моно или стерео, 16 бит */
+		got = (unsigned)drmp3_read_pcm_frames_s16(&d->mp3, n, t16);
+		for (unsigned i = 0; i < got * ch; i++)
+			dst[i] = t16[i] * 256;
+	} else if (d->codec == C_ALAC)
 		got = alac_read(d, dst, n, ch);
 	else if (d->codec == C_AAC)   /* уже стерео */
 		got = aac_read(d, dst, n);
@@ -655,10 +684,25 @@ static int out_open(int rate)
 		a.port = PORT_PHONES;
 		apply_volume();
 	}
+	/* 24 бита (контейнер 32, S24_LE — его AIC принимает; S32 через преобразование у Sonix роняло ядро); не открылся —
+	 * 16 бит с дизерингом */
 	struct pcm_config cfg = {
-		.channels = 2, .rate = rate, .period_size = CHUNK * 2, .period_count = 4, .format = PCM_FORMAT_S16_LE,
+		.channels = 2, .rate = rate, .period_size = CHUNK * 2, .period_count = 4, .format = PCM_FORMAT_S24_LE,
 	};
-	a.pcm = pcm_open(0, 0, PCM_OUT, &cfg);
+	a.pcm = a.s24_bad ? NULL : pcm_open(0, 0, PCM_OUT, &cfg);
+	a.out_bits = 24;
+	if (!a.s24_bad && (!a.pcm || !pcm_is_ready(a.pcm))) {
+		fprintf(stderr, "audio: S24_LE не открылся (%s) — дальше 16 бит\n", a.pcm ? pcm_get_error(a.pcm) : "?");
+		if (a.pcm)
+			pcm_close(a.pcm);
+		a.pcm = NULL;
+		a.s24_bad = 1;
+	}
+	if (a.s24_bad) {
+		cfg.format = PCM_FORMAT_S16_LE;
+		a.out_bits = 16;
+		a.pcm = pcm_open(0, 0, PCM_OUT, &cfg);
+	}
 	if (!a.pcm || !pcm_is_ready(a.pcm)) {
 		static time_t said;   /* поток повторяет попытку каждые 20 мс — в журнал не чаще раза в 10 с */
 		if (time(NULL) - said >= 10) {
@@ -679,11 +723,14 @@ static void out_drop(void)
 		pcm_stop(a.pcm);
 }
 
-static void out_write(const int16_t *buf, unsigned frames)
+static void out_write(const int32_t *buf, unsigned frames)
 {
+	static int16_t s16[CHUNK * 2];
+	if (a.bt_pipe || a.out_bits == 16)
+		to_s16(buf, s16, frames);
 	if (a.bt_pipe)
-		bt_write(buf, frames);
-	else if (a.pcm && pcm_writei(a.pcm, buf, frames) < 0)
+		bt_write(s16, frames);
+	else if (a.pcm && pcm_writei(a.pcm, a.out_bits == 16 ? (const void *)s16 : (const void *)buf, frames) < 0)
 		pcm_prepare(a.pcm);
 }
 
@@ -738,8 +785,10 @@ static int out_open(int rate)
 	return 0;
 }
 
-static void out_write(int16_t *buf, unsigned frames)
+static void out_write(const int32_t *b24, unsigned frames)
 {
+	static int16_t buf[CHUNK * 2];
+	to_s16(b24, buf, frames);
 	for (unsigned i = 0; i < frames * 2; i++)
 		buf[i] = (int16_t)(buf[i] * a.volume / 100);
 	/* очередь SDL держим около 4 периодов: этим поток и тормозится, как блокирующей записью */
@@ -766,7 +815,7 @@ void audio_set_bt(const char *path, int rate, int bits)
 #define FFT_N 1024
 
 /* БПФ по последнему куску звука (моно, окно Ханна) → AUDIO_BANDS логарифмических полос в дБ */
-static void spectrum(const int16_t *buf, unsigned frames, int rate)
+static void spectrum(const int32_t *buf, unsigned frames, int rate)
 {
 	static float win[FFT_N], cs[FFT_N / 2], sn[FFT_N / 2], re[FFT_N], im[FFT_N];
 	static int ready, lo[AUDIO_BANDS], hi[AUDIO_BANDS], band_rate;
@@ -825,7 +874,7 @@ static void spectrum(const int16_t *buf, unsigned frames, int rate)
 			}
 	}
 	/* 0 дБ — синус полной шкалы; мощность полосы — сумма по её бинам */
-	const float ref = (FFT_N / 4.0f) * 32768.0f;
+	const float ref = (FFT_N / 4.0f) * 8388608.0f;
 	for (int b = 0; b < AUDIO_BANDS; b++) {
 		float pw = 0;
 		for (int k = lo[b]; k < hi[b]; k++)
@@ -840,13 +889,13 @@ static void spectrum(const int16_t *buf, unsigned frames, int rate)
 
 const int eq_freq[EQ_BANDS] = { 31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000 };
 
-/* пиковые фильтры RBJ (Q ≈ 1.4 — октавные полосы) в фиксированной точке: коэффициенты Q2.29, сигнал — 16 бит
+/* пиковые фильтры RBJ (Q ≈ 1.4 — октавные полосы) в фиксированной точке: коэффициенты Q2.29, сигнал — 24 бита
  * с EQ_S дробными битами, прямая форма I, накопление в 64 бита (mult/madd/msub на MIPS32). Отброшенная при
  * округлении часть уходит в следующий сэмпл: у низких полос на 96 кГц полюса почти на единичной окружности, и без
  * этого ошибка округления раздувается. Точнее float (тот на 96 кГц ошибался до сотен единиц) и на треть быстрее.
- * Перед фильтрами — ослабление на самый большой подъём, чтобы усиленные полосы не перегружали 16 бит */
+ * Перед фильтрами — ослабление на самый большой подъём, чтобы усиленные полосы не перегружали 24 бита */
 #define EQ_Q 29
-#define EQ_S 10
+#define EQ_S 2
 static struct {
 	int on, n, rate;
 	int32_t pre;   /* Q15 */
@@ -878,12 +927,12 @@ static void eq_setup(int on, const float *gain, int rate)
 }
 
 /* полоса за полосой по всему куску, каждый канал отдельно: состояние фильтра — в регистрах */
-static void eq_process(int16_t *buf, unsigned frames)
+static void eq_process(int32_t *buf, unsigned frames)
 {
 	static int32_t x[2][CHUNK];
 	for (unsigned i = 0; i < frames; i++) {
-		x[0][i] = (buf[i * 2] * eq.pre) >> (15 - EQ_S);
-		x[1][i] = (buf[i * 2 + 1] * eq.pre) >> (15 - EQ_S);
+		x[0][i] = (int32_t)(((int64_t)buf[i * 2] * eq.pre) >> (15 - EQ_S));
+		x[1][i] = (int32_t)(((int64_t)buf[i * 2 + 1] * eq.pre) >> (15 - EQ_S));
 	}
 	for (int k = 0; k < eq.n; k++) {
 		const int32_t b0 = eq.f[k].b0, b1 = eq.f[k].b1, b2 = eq.f[k].b2, a1 = eq.f[k].a1, a2 = eq.f[k].a2;
@@ -909,8 +958,7 @@ static void eq_process(int16_t *buf, unsigned frames)
 		}
 	}
 	for (unsigned i = 0; i < frames * 2; i++) {
-		int32_t y = (x[i & 1][i >> 1] + (1 << (EQ_S - 1))) >> EQ_S;
-		buf[i] = (int16_t)(y > 32767 ? 32767 : y < -32768 ? -32768 : y);
+		buf[i] = clip24((x[i & 1][i >> 1] + (1 << (EQ_S - 1))) >> EQ_S);
 	}
 }
 
@@ -925,15 +973,13 @@ void audio_set_eq(int on, const float gain[EQ_BANDS])
 
 /* ---------- поток ---------- */
 
-static void apply_rg(int16_t *buf, unsigned n, float k)
+static void apply_rg(int32_t *buf, unsigned n, float k)
 {
 	if (k == 1.0f || k <= 0)
 		return;
 	int32_t g = (int32_t)(k * 65536 + 0.5f);   /* Q16, целиком: lrintf на каждом сэмпле — вызов функции */
-	for (unsigned i = 0; i < n * 2; i++) {
-		int32_t v = (int32_t)(((int64_t)buf[i] * g + 32768) >> 16);
-		buf[i] = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
-	}
+	for (unsigned i = 0; i < n * 2; i++)
+		buf[i] = clip24(((int64_t)buf[i] * g + 32768) >> 16);
 }
 
 /* Следующий трек открывается за PREP_S секунд до конца текущего (открытие и перемотка в образе — до долей секунды)
@@ -998,7 +1044,7 @@ static void *audio_thread(void *arg)
 {
 	(void)arg;
 
-	static int16_t buf[CHUNK * 2], nb[CHUNK * 2];
+	static int32_t buf[CHUNK * 2], nb[CHUNK * 2];
 	for (;;) {
 		pthread_mutex_lock(&a.mu);
 		take_cmds();
@@ -1038,7 +1084,7 @@ static void *audio_thread(void *arg)
 				w = w > 1 ? 1 : w;
 				for (int ch = 0; ch < 2; ch++) {
 					float v = buf[i * 2 + ch] * w + (i < m ? nb[i * 2 + ch] : 0) * (1 - w);
-					buf[i * 2 + ch] = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
+					buf[i * 2 + ch] = clip24((int64_t)v);
 				}
 			}
 		}
@@ -1064,7 +1110,7 @@ static void *audio_thread(void *arg)
 			double sum = 0;
 			for (unsigned i = 0; i < got * 2; i += 2)
 				sum += (double)buf[i] * buf[i];
-			float rms = (float)(sqrt(sum / got) / 32768.0);
+			float rms = (float)(sqrt(sum / got) / 8388608.0);
 			a.level = rms > 1 ? 1 : rms;
 			if (eq.on)
 				eq_process(buf, got);
