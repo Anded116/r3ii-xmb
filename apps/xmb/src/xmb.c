@@ -321,6 +321,7 @@ static void save_flush(void);
 static void last_file(char *out, size_t cap);
 static void last_load(void);
 static void size_metrics(void);
+static void font_xheight(const lv_font_t *f, int *asc, int *xh);
 static void about_fill(void);
 static void battery_guard(void);
 static void lyrics_refresh(void);
@@ -1139,7 +1140,7 @@ static void layout_column(column_t *c, double x, double fade, double tk, int act
 		}
 		int has_sub = lv_label_get_text(r->sub)[0] != 0;   /* без второй строки название — по центру строки */
 		if (c->big) {   /* три строки текста по высоте обложки */
-			int ty = yy - (has_sub ? s.h_title + 2 * s.h_sub : s.h_title) / 2;
+			int ty = has_sub ? yy - (s.h_title + 2 * s.h_sub) / 2 : yy + s.dy_title;
 			set_pos(r->title, (int)x + TEXT_DX + 2 * cdx, ty);
 			set_pos(r->sub, (int)x + TEXT_DX + 2 * cdx, ty + s.h_title);
 		} else {
@@ -1820,7 +1821,9 @@ static void update_np_labels(void)
 	if (s.track < 0) {
 		lv_label_set_text(s.mini_text, tx("Нет трека"));
 		lv_label_set_text(s.mini_artist, "");
-		lv_obj_set_y(s.mini_text, 16);   /* без второй строки — по центру */
+		int at, xh;   /* без второй строки — середина строчных на середине мини-плеера */
+		font_xheight(s.f_item, &at, &xh);
+		lv_obj_set_y(s.mini_text, lv_obj_get_height(s.mini) / 2 - (at - xh / 2));
 		refresh_subs();
 		return;
 	}
@@ -5637,13 +5640,26 @@ static void shade_create(lv_obj_t *parent)
 }
 
 /* смещения строк от центра пункта по высоте шрифтов меню */
+/* оптический центр строки — середина строчных букв (x-height): по ней глаз выравнивает текст со значком; заглавные и
+ * выносные (P, l, y) в счёт не идут. Возвращает: от верха строки до базовой линии и высоту строчных */
+static void font_xheight(const lv_font_t *f, int *asc, int *xh)
+{
+	lv_font_glyph_dsc_t g;
+	*asc = f->line_height - f->base_line;
+	*xh = lv_font_get_glyph_dsc(f, &g, 'x', 0) && g.box_h > 0 ? g.box_h + g.ofs_y : f->line_height / 3;
+}
+
 static void size_metrics(void)
 {
 	int lt = lv_font_get_line_height(s.m_item), ls = lv_font_get_line_height(s.m_sub);
+	int at, xt, as, xs;
+	font_xheight(s.m_item, &at, &xt);
+	font_xheight(s.m_sub, &as, &xs);
 	s.h_title = lt + 1;
 	s.h_sub = ls;
-	s.dy_title = -lt / 2;
-	s.dy_title_sel = -(lt + ls) / 2 + 2;
+	s.dy_title = -(at - xt / 2);   /* одна строка: середина строчных — на центре значка */
+	/* с подписью: блок от верха строчных названия до базовой линии подписи — по центру */
+	s.dy_title_sel = -((at - xt) + (lt - 1 + as)) / 2;
 	s.dy_sub = s.dy_title_sel + lt - 1;
 }
 
