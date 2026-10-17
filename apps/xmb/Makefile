@@ -9,7 +9,7 @@ FAAD_FLAGS := -Ithird_party/faad2/include -Ithird_party/faad2/libfaad -DHAVE_INT
 	-DHAVE_STRING_H=1 -DHAVE_STRINGS_H=1 -DHAVE_SYS_STAT_H=1 -DHAVE_SYS_TYPES_H=1 -DHAVE_LRINTF=1 -DAPPLY_DRC \
 	-DPACKAGE_VERSION=\"2.11.2\" -w
 WAVES := $(addprefix src/waves/wave_,ps3.c ribbon.c particles.c spectrum.c silk.c aurora.c dust.c pulse.c ripple.c psp.c)
-APP_SRC := src/xmb.c src/i18n.c src/filesave.c src/xmb_bg.c $(WAVES) src/xmb_player.c src/audio.c src/bt.c src/wifi.c src/spawn.c src/lyrics.c src/library.c src/playlist.c src/cover.c third_party/tjpgd/tjpgd.c $(SONIX) $(FAAD2)
+APP_SRC := src/xmb.c src/i18n.c src/filesave.c src/xmb_bg.c $(WAVES) src/xmb_player.c src/audio.c src/bt.c src/wifi.c src/spawn.c src/podcast.c src/lyrics.c src/library.c src/playlist.c src/cover.c third_party/tjpgd/tjpgd.c $(SONIX) $(FAAD2)
 TINYALSA := $(addprefix third_party/tinyalsa/src/,pcm.c pcm_hw.c mixer.c mixer_hw.c limits.c snd_card_plugin.c)
 COMMON := -Ilvgl/include -Ilvgl -Isrc -Isrc/waves -Ithird_party/dr_libs -Ithird_party/tjpgd -Ithird_party/stb -Ithird_party/sonix -Ithird_party/faad2/include -DLV_CONF_INCLUDE_SIMPLE -Wall -Wno-unused-parameter
 
@@ -26,9 +26,12 @@ DEV_OBJ := $(patsubst %.c,build/dev/%.o,$(LVGL_SRC) $(APP_SRC) $(TINYALSA) src/m
 PLAYTEST_OBJ := $(patsubst %.c,build/dev/%.o,src/audio.c $(SONIX) $(FAAD2) $(TINYALSA) src/playtest.c)
 LIBTEST_OBJ := $(patsubst %.c,build/dev/%.o,src/library.c third_party/sonix/mp4.c src/libtest.c)
 SEEKTEST_OBJ := $(patsubst %.c,build/dev/%.o,src/seektest.c)
+# xmbget — скачивание по HTTPS (mbedTLS) для подкастов и текстов: отдельная программа, XMB её запускает
+MBEDTLS := $(wildcard third_party/mbedtls/library/*.c)
+XMBGET_OBJ := $(patsubst %.c,build/dev/%.o,$(MBEDTLS) src/xmbget.c)
 
 host: build/xmb_host
-device: build/xmb
+device: build/xmb build/xmbget
 
 build/xmb_host: $(HOST_OBJ)
 	$(HOST_CC) -o $@ $^ $(HOST_LIBS)
@@ -53,6 +56,12 @@ build/xmb: $(DEV_OBJ)
 	$(TC)/bin/mipsel-unknown-linux-musl-strip -o $@.stripped $@
 
 build/host/third_party/faad2/%.o build/dev/third_party/faad2/%.o: XFLAGS := $(FAAD_FLAGS)
+# /dev/random у плеера не наполняется (энтропии ~30 бит, getrandom под musl mbedTLS не берёт) — читать urandom
+build/dev/third_party/mbedtls/%.o: XFLAGS := -Ithird_party/mbedtls/include -w -DMBEDTLS_PLATFORM_DEV_RANDOM=\"/dev/urandom\"
+build/dev/src/xmbget.o: XFLAGS := -Ithird_party/mbedtls/include
+
+build/xmbget: $(XMBGET_OBJ)
+	$(DEV_CC) -o $@ $^ -static -s
 
 build/host/%.o: %.c src/lv_conf.h
 	@mkdir -p $(dir $@)

@@ -8,6 +8,7 @@
 #define _GNU_SOURCE   /* nftw */
 #include "xmb.h"
 
+#include <ctype.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,6 +26,7 @@
 #include "xmb_player.h"
 #include "bt.h"
 #include "wifi.h"
+#include "podcast.h"
 #include <pthread.h>
 #include <strings.h>
 #include <errno.h>
@@ -87,7 +89,7 @@ static const ui_size_t *sz = &ui_sizes[1];
 #define SEG 30         /* сегментов в ползунке шторки */
 #define ACCENT 0xff7a1a /* оранжевый Walkman */
 
-enum { A_NONE, A_TRACK, A_EQ, A_BTN_RESET, A_SEARCH, A_STOCK, A_USB, A_NEWPL, A_BTDEV, A_BTSCAN, A_WIFINET, A_WIFISCAN };
+enum { A_NONE, A_TRACK, A_EQ, A_BTN_RESET, A_SEARCH, A_STOCK, A_USB, A_NEWPL, A_BTDEV, A_BTSCAN, A_WIFINET, A_WIFISCAN, A_PODUPDATE };
 enum { T_NONE, T_TAP, T_HCAT, T_VLIST, T_SWIPE_UP, T_PLAYER, T_PULL, T_SHADE, T_BACKSWIPE, T_INDEX, T_MINI, T_SEEK, T_EQ };
 
 /* ---------- данные ---------- */
@@ -307,6 +309,8 @@ static void about_fill(void);
 static void battery_guard(void);
 static void lyrics_refresh(void);
 static void lyrics_poll(void);
+static void pod_labels(void);
+static void podcast_poll(void);
 static void toast(const char *fmt, ...);
 static void seek_to(double sec);
 static void slide_tick(double dt);
@@ -417,7 +421,10 @@ static cat_t cats[] = {
 	{ LV_SYMBOL_LIST, "Плейлисты", scanning, 1 },
 	{ LV_SYMBOL_DIRECTORY, "Папки", scanning, 1 },
 };
-enum { MUSIC_QUEUE, MUSIC_ALBUMS, MUSIC_ARTISTS, MUSIC_ALL, MUSIC_SEARCH, MUSIC_COUNT };
+enum { MUSIC_QUEUE, MUSIC_ALBUMS, MUSIC_ARTISTS, MUSIC_ALL, MUSIC_PODCASTS, MUSIC_SEARCH, MUSIC_COUNT };
+static int nmusic;   /* альбомов-музыки: в порядке album_order они первые, за ними — подкасты */
+static node_t *pod_nodes;   /* «Подкасты»: [0] — «Обновить», дальше подкасты */
+static char pod_sub[96], pod_upd_sub[96];
 static node_t music[MUSIC_COUNT];
 static node_t *lib_artists, *lib_albums;   /* пункты «Исполнителей» и «Альбомов» — их же показывает поиск */
 #define NCAT N(cats)
@@ -588,6 +595,22 @@ static const char *node_sub(const node_t *n)
 	char *b = buf[k++ & 7];
 	if (n->opts)
 		return tx(n->opts[*n->val]);
+	if (n->action == A_TRACK && s.lib->albums[s.lib->tracks[n->track].aidx].podcast) {
+		/* выпуск: дата (из имени файла), длительность и сколько осталось */
+		const lib_track_t *tr = &s.lib->tracks[n->track];
+		const char *name = strrchr(tr->path, '/') ? strrchr(tr->path, '/') + 1 : tr->path;
+		char date[16] = "";
+		if (isdigit((unsigned char)name[0]) && name[4] == '-')
+			snprintf(date, sizeof(date), "%.2s.%.2s · ", name + 8, name + 5);
+		double left = tr->dur - pod_pos(tr->path);
+		if (pod_done(tr->path))
+			snprintf(b, 64, "%s%s", date, tx("прослушан"));
+		else if (left < tr->dur - 5)
+			snprintf(b, 64, tx("%sосталось %d мин"), date, (int)(left / 60 + 0.5));
+		else
+			snprintf(b, 64, tx("%s%d мин"), date, (int)(tr->dur / 60 + 0.5));
+		return b;
+	}
 	if (n->action == A_TRACK) {
 		const lib_track_t *tr = &s.lib->tracks[n->track];
 		if (n->cover)
@@ -1512,6 +1535,8 @@ static node_t *dir_nodes(const lib_dir_t *d, int *n)
 static int album_cmp(const void *a, const void *b)
 {
 	const lib_album_t *x = &s.lib->albums[*(const int *)a], *y = &s.lib->albums[*(const int *)b];
+	if (x->podcast != y->podcast)
+		return x->podcast - y->podcast;
 	int c = lib_strcmp(x->artist, y->artist);
 	if (c)
 		return c;
@@ -1535,9 +1560,17 @@ static void library_build(void)
 	s.album_nodes = malloc(sizeof(node_t *) * (na ? na : 1));
 	for (int a = 0; a < na; a++)
 		s.album_nodes[a] = track_nodes(L->albums[a].tracks, L->albums[a].ntracks);
+	nmusic = 0;
+	while (nmusic < na && !L->albums[s.album_order[nmusic]].podcast)
+		nmusic++;
+	int npod = na - nmusic;
+	pod_nodes = calloc(npod + 1, sizeof(node_t));
+	pod_nodes[0] = (node_t){ .icon = LV_SYMBOL_REFRESH, .title = "Обновить", .sub = pod_upd_sub, .action = A_PODUPDATE };
+	for (int i = 0; i < npod; i++)
+		album_node(&pod_nodes[1 + i], s.album_order[nmusic + i], NULL);
 
 	node_t *albums = calloc(na ? na : 1, sizeof(node_t));
-	for (int i = 0; i < na; i++) {   /* альбомы отсортированы по исполнителю — по нему и указатель */
+	for (int i = 0; i < nmusic; i++) {   /* альбомы отсортированы по исполнителю — по нему и указатель */
 		album_node(&albums[i], s.album_order[i], L->albums[s.album_order[i]].artist);
 		albums[i].key = L->albums[s.album_order[i]].artist;
 	}
@@ -1560,17 +1593,20 @@ static void library_build(void)
 			artists[i].cover = L->albums[ar->albums[0]].cover;
 	}
 
-	node_t *all = track_nodes(L->by_title, L->ntracks);
-	for (int i = 0; i < L->ntracks; i++) {   /* список из разных альбомов: у трека — обложка его альбома */
+	node_t *all = track_nodes(L->by_title, L->nby_title);
+	for (int i = 0; i < L->nby_title; i++) {   /* список из разных альбомов: у трека — обложка его альбома */
 		all[i].key = L->albums[L->tracks[L->by_title[i]].aidx].artist;
 		all[i].cover = L->albums[L->tracks[L->by_title[i]].aidx].cover;
 	}
 	if (L->ntracks) {
 		music[MUSIC_QUEUE] = (node_t){ .icon = LV_SYMBOL_NEXT, .title = "Очередь", .sub = "пусто" };   /* q_changed */
-		music[MUSIC_ALBUMS] = (node_t){ .icon = LV_SYMBOL_IMAGE, .title = "Альбомы", .kids = albums, .nkids = na, .grid = 1 };
+		music[MUSIC_ALBUMS] = (node_t){ .icon = LV_SYMBOL_IMAGE, .title = "Альбомы", .kids = albums, .nkids = nmusic, .grid = 1 };
 		music[MUSIC_ARTISTS] = (node_t){ .icon = LV_SYMBOL_AUDIO, .title = "Исполнители", .kids = artists, .nkids = L->nartists };
 		music[MUSIC_ALL] = (node_t){ .icon = LV_SYMBOL_LIST, .title = "Все треки", .kids = all,
-					     .nkids = L->ntracks };
+					     .nkids = L->nby_title };
+		music[MUSIC_PODCASTS] = (node_t){ .icon = LV_SYMBOL_DOWNLOAD, .title = "Подкасты", .sub = pod_sub, .kids = pod_nodes,
+						  .nkids = npod + 1 };
+		pod_labels();
 		music[MUSIC_SEARCH] = (node_t){ .icon = LV_SYMBOL_EYE_OPEN, .title = "Поиск", .sub = "исполнители, альбомы, треки",
 						.action = A_SEARCH };
 		lib_artists = artists;
@@ -1688,9 +1724,9 @@ static void update_np_labels(void)
 	lv_label_set_text(s.mini_artist, tx(tr->artist));
 	mini_cover();
 	/* соседние альбомы для карусели плеера */
-	int a = s.album_pos[tr->aidx];
-	const lib_album_t *pa = a > 0 ? &s.lib->albums[s.album_order[a - 1]] : NULL;
-	const lib_album_t *na = a + 1 < s.lib->nalbums ? &s.lib->albums[s.album_order[a + 1]] : NULL;
+	int a = s.album_pos[tr->aidx], lo = al->podcast ? nmusic : 0, hi = al->podcast ? s.lib->nalbums : nmusic;
+	const lib_album_t *pa = a > lo ? &s.lib->albums[s.album_order[a - 1]] : NULL;
+	const lib_album_t *na = a + 1 < hi ? &s.lib->albums[s.album_order[a + 1]] : NULL;
 	player_set_neighbors(pa ? pa->title : NULL, pa ? pa->cover : NULL, na ? na->title : NULL, na ? na->cover : NULL);
 	s.np = (track_t){ tr->title, tx(tr->artist), al->title, s.np_format, (int)s.dur };
 	player_set_track(&s.np);
@@ -2082,7 +2118,7 @@ static int search_run(node_t *out, int max, int cnt[3])
 			if (n < max)
 				out[n++] = lib_artists[i];
 		}
-	for (int i = 0; i < L->nalbums; i++) {
+	for (int i = 0; i < nmusic; i++) {
 		const lib_album_t *al = &L->albums[s.album_order[i]];
 		if (search_match(al->title, al->artist, NULL)) {
 			cnt[1]++;
@@ -2090,7 +2126,7 @@ static int search_run(node_t *out, int max, int cnt[3])
 				out[n++] = lib_albums[i];
 		}
 	}
-	for (int i = 0; i < L->ntracks; i++) {
+	for (int i = 0; i < L->nby_title; i++) {
 		int k = L->by_title[i];
 		const lib_track_t *tr = &L->tracks[k];
 		if (search_match(tr->title, tr->artist, L->albums[tr->aidx].title)) {
@@ -2603,6 +2639,10 @@ static void reveal_album(void)
 		return;
 	int a = s.lib->tracks[s.track].aidx, path[3] = { MUSIC_ALBUMS, s.album_pos[a], 0 };
 	const lib_album_t *al = &s.lib->albums[a];
+	if (al->podcast) {   /* «Подкасты»: [0] — «Обновить» */
+		path[0] = MUSIC_PODCASTS;
+		path[1] = 1 + s.album_pos[a] - nmusic;
+	}
 	for (int j = 0; j < al->ntracks; j++)
 		if (al->tracks[j] == s.track)
 			path[2] = j;
@@ -3130,6 +3170,8 @@ static void np_switch(const node_t *q, int qlen, int qi)
 	s.ended_seen = 0;
 	s.resume = 0;
 	ab_reset();
+	if (s.lib->albums[tr->aidx].podcast && pod_pos(tr->path) > 5)
+		seek_to(pod_pos(tr->path));   /* выпуск — с того места, где остановился */
 	update_np_labels();
 	last_save_later();
 	plan_next();
@@ -3281,9 +3323,10 @@ static int switch_album(int dir)
 {
 	if (s.track < 0)
 		return 0;
+	int pod = s.lib->albums[s.lib->tracks[s.track].aidx].podcast;
 	int a = s.album_pos[s.lib->tracks[s.track].aidx] + dir;
-	if (a < 0 || a >= s.lib->nalbums)
-		return 0;
+	if (a < (pod ? nmusic : 0) || a >= (pod ? s.lib->nalbums : nmusic))
+		return 0;   /* музыка и подкасты листаются отдельно */
 	const lib_album_t *al = &s.lib->albums[s.album_order[a]];
 	play_queue(s.album_nodes[s.album_order[a]], al->ntracks, 0);
 	return 1;
@@ -3421,6 +3464,67 @@ static void wifi_poll(void)
 	}
 }
 
+/* подписи «Подкастов»: сколько их и что сейчас с подписками */
+static void pod_labels(void)
+{
+	int npod = music[MUSIC_PODCASTS].nkids - 1;
+	if (npod > 0)
+		snprintf(pod_sub, sizeof(pod_sub), tx("подкастов: %d"), npod);
+	else
+		snprintf(pod_sub, sizeof(pod_sub), "%s", tx(pod_feeds() ? "выпусков пока нет" : "подписки — в Podcasts/подписки.txt"));
+	const char *st = pod_status();
+	snprintf(pod_upd_sub, sizeof(pod_upd_sub), "%s",
+		 st[0] ? st : tx(!pod_feeds() ? "ссылки на RSS — в Podcasts/подписки.txt" : wifi_online() ? "проверить новые выпуски"
+											  : "нужен Wi-Fi"));
+}
+
+/* где остановился в выпуске: раз в 10 с, при смене трека — и «прослушан», если дошёл почти до конца. Новые
+ * выпуски скачались — библиотека перечитывается перезапуском XMB, когда ничего не играет */
+static void podcast_poll(void)
+{
+	static int pt = -1, pending;
+	static double ppos, pdur;
+	static uint32_t pms, lms;
+	static unsigned mseq;
+	static char last_st[96];
+	uint32_t now = lv_tick_get();
+	if (!s.lib || cats[CAT_MUSIC].items != music)
+		return;
+	pod_tick(wifi_online());
+	if (strcmp(last_st, pod_status()) || now - lms > 5000) {
+		snprintf(last_st, sizeof(last_st), "%s", pod_status());
+		lms = now;
+		pod_labels();
+		refresh_subs();
+	}
+	unsigned seq;
+	const char *m = pod_message(&seq);
+	if (seq != mseq) {
+		mseq = seq;
+		if (s.screen_on)
+			toast("%s", m);
+	}
+	int cur = s.track >= 0 && !s.resume && s.lib->albums[s.lib->tracks[s.track].aidx].podcast ? s.track : -1;
+	if (pt >= 0 && pt != cur)
+		pod_save(s.lib->tracks[pt].path, ppos, ppos >= pdur - 30);
+	if (cur >= 0) {
+		if (cur != pt)
+			pms = now;
+		ppos = s.pos;
+		pdur = s.dur;
+		if (now - pms > 10000) {
+			pms = now;
+			pod_save(s.lib->tracks[cur].path, ppos, ppos >= pdur - 30);
+		}
+	}
+	pt = cur;
+	pending += pod_take_new();
+	if (pending && !s.playing && !s.kb_panel && !s.opt_open) {
+		pending = 0;
+		restart_req = 1;   /* перечитать библиотеку: место в меню восстановится */
+	}
+}
+
 static void bt_poll(void)
 {
 	static unsigned gen = ~0u, mseq;
@@ -3499,6 +3603,7 @@ static void frame_cb(lv_timer_t *t)
 	bt_poll();
 	wifi_poll();
 	lyrics_poll();
+	podcast_poll();
 	battery_guard();
 	/* гашение экрана без касаний и кнопок; пока тянут шторку или ползунок — не гаснет */
 	if (s.screen_on && screen_sec[s.screen_off] && s.t_mode == T_NONE &&
@@ -4269,6 +4374,13 @@ static void select_current(void)
 		bt_scan();
 	} else if (n->action == A_WIFISCAN) {
 		wifi_scan();
+	} else if (n->action == A_PODUPDATE) {
+		if (!wifi_online())
+			toast("%s", "Включите Wi-Fi: Настройки → Wi-Fi");
+		else if (!pod_feeds())
+			toast("%s", "Положите ссылки на RSS в Podcasts/подписки.txt");
+		else
+			pod_update();
 	} else if (n->action == A_WIFINET) {
 		const wifi_net_t *w = &wifi_list[n->track];
 		if (w->connected) {
@@ -4731,7 +4843,8 @@ uint32_t xmb_sleep_after_ms(void)
 	uint32_t d = (uint32_t)dev_sleep_sec[s.dev_sleep] * 1000u;
 	/* мгновенное «не играет» (стык треков, перемотка) не повод засыпать с открытым потоком: тишина — всё время d;
 	 * на внешнем питании не засыпаем вовсе (как в Compas) */
-	if (!d || s.playing || s.sleep_end || s.kb_panel || s.bat_chg || usb.storage || lv_tick_get() - s.active_ms < d)
+	if (!d || s.playing || s.sleep_end || s.kb_panel || s.bat_chg || usb.storage || pod_busy() ||
+	    lv_tick_get() - s.active_ms < d)
 		return 0;
 	return d;
 }
@@ -5318,6 +5431,7 @@ void xmb_init(const char *font_dir)
 	settings_load();
 	bt_init(!s.bt_off);
 	wifi_init(!s.wifi_off);
+	pod_init(music_root());
 	i18n_set(s.lang);
 	sz = &ui_sizes[s.ui_size];
 	size_metrics();

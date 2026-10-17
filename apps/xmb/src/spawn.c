@@ -76,6 +76,15 @@ int sp_pclose(FILE *f)
 	return st;
 }
 
+const char *sp_xmbget(void)
+{
+	static const char *const where[] = { "/tmp/xmb/xmbget", "/usr/data/xmb/xmbget", "/data/mnt/sd_0/hiby_dev/xmb/xmbget" };
+	for (unsigned i = 0; i < sizeof(where) / sizeof(where[0]); i++)
+		if (access(where[i], X_OK) == 0)
+			return where[i];
+	return NULL;
+}
+
 int sp_system(const char *cmd)
 {
 	pid_t pid = fork();

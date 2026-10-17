@@ -67,11 +67,12 @@ fi
 if [ -x /usr/bin/xmb_boot.sh ] && [ -f $DIR/xmb/xmb ]; then
 	mkdir -p /usr/data/xmb/fonts
 	n=0
-	for f in $DIR/xmb/xmb $DIR/xmb/inject $DIR/xmb/*.sh $DIR/xmb/fonts/*; do
+	for f in $DIR/xmb/xmb $DIR/xmb/xmbget $DIR/xmb/cacert.pem $DIR/xmb/inject $DIR/xmb/*.sh $DIR/xmb/fonts/*; do
+		[ -f $f ] || continue
 		t=/usr/data/xmb/${f#$DIR/xmb/}
 		cmp -s $f $t || { cp $f $t.new && mv $t.new $t && n=$((n+1)); }
 	done
-	chmod +x /usr/data/xmb/xmb /usr/data/xmb/inject
+	chmod +x /usr/data/xmb/xmb /usr/data/xmb/xmbget /usr/data/xmb/inject 2>/dev/null
 	sync
 	echo "== xmb: во внутренней памяти обновлено файлов: $n"
 fi

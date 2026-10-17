@@ -125,6 +125,14 @@
 ## Внешние команды из XMB (2026-10-17)
 - Всё, что XMB запускает (wpa_supplicant, udhcpc, bluetoothctl, bluealsa-cli, wget, adb_restart.sh), — через `spawn.c` (`sp_popen`/`sp_system`): в потомке закрыты все дескрипторы, кроме 0–2. С обычными popen/system долгоживущий `wpa_supplicant -B` унаследовал открытый PCM, и после закрытия тракта на паузе XMB уже не мог открыть его снова («Resource busy») — музыки не было, пока его не убили.
 
+## Сеть: Wi-Fi, HTTPS, подкасты (2026-10-17)
+- Wi-Fi — `wifi.c` над стоковыми wpa_supplicant/wpa_cli/udhcpc, конфиг общий со стоком (`/data/wpa_supplicant.conf`). После подключения — `ntpdate` и `hwclock -w`.
+- Связь у модуля Broadcom (`cywdhd`) рывками: то не отвечает DNS роутера, то пропадают пакеты. Отключить энергосбережение командами драйвера (`wpa_cli driver POWERMODE`) не вышло. Всё сетевое — с повторами.
+- busybox `wget` прошивки умеет HTTPS, но с CDN (Akamai, Spotify/podtrac, Cloudflare на больших ответах) рукопожатие или передача висят до таймаута. Системные libcurl/libssl — под glibc 2.22, к статическому XMB (musl) их не подключить.
+- Поэтому `xmbget` (`src/xmbget.c` + `third_party/mbedtls` 3.6.7): TLS 1.2/1.3, SNI, проверка по `cacert.pem` Mozilla (в прошивке `/etc/ssl/certs` пуст), Location, chunked. Лежит рядом с XMB (`/tmp/xmb`, `/usr/data/xmb`, `hiby_dev/xmb` на карте). Код возврата 2 — сервер ответил не 200.
+- mbedTLS под musl не берёт `getrandom()` и по умолчанию читает **`/dev/random`, который на плеере блокируется навсегда** (энтропии ~30 бит, пул не инициализируется) — собирается с `MBEDTLS_PLATFORM_DEV_RANDOM="/dev/urandom"`.
+- Подкасты — `podcast.c`: подписки в `Podcasts/подписки.txt` (или `.opml`), проверка при появлении Wi-Fi и раз в 6 ч; по 3 свежих выпуска в `Podcasts/<подкаст>/<дата> - <выпуск>.mp3`, обложка `cover.jpg`; прослушанные сверх трёх удаляются; позиция и «прослушан» — `Podcasts/.state`. В библиотеке подкасты — отдельные альбомы (`podcast`), не в «Альбомах», «Исполнителях», «Всех треках» и карусели музыки. Скачалось новое — XMB перезапускается, когда ничего не играет.
+
 ## USB-ЦАП (2026-10-16, проба)
 - Сток делает его скриптом `uac_device_config.sh`: вендорская функция гаджета `uac_sa` (атрибуты c_/p_chmask, srate, ssize). Новых `/dev/snd` при привязке не появляется — звук с компьютера, видимо, на захвате `pcmC0D1c`.
 - `uac_sa.a` в `android0` вместо `mass_storage.0` привязывается, Windows устройство видит. В одном гаджете с adb (класс 239/2/1) Windows даёт ошибку «USB Composite Device» — в режиме ЦАПа adb не будет.

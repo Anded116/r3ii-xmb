@@ -18,6 +18,7 @@ typedef struct {
 	int year;
 	int *tracks, ntracks;         /* по порядку диск/трек */
 	char *cover;                  /* файл обложки, «@смещение:длина:файл» (из тегов) или NULL */
+	int podcast;                  /* папка в Podcasts/: подкаст, выпуски — от новых к старым */
 } lib_album_t;
 
 typedef struct {
@@ -39,11 +40,15 @@ typedef struct {
 	int nalbums;
 	lib_artist_t *artists;
 	int nartists;
-	int *by_title;        /* все треки: исполнитель → альбом → номер */
+	int *by_title;        /* все треки, кроме подкастов: исполнитель → альбом → номер */
+	int nby_title;
 	lib_dir_t root;
 } library_t;
 
 #define LIB_RG_NONE 99.0f   /* ReplayGain: тега нет */
+
+/* подкасты — в этой папке корня: каждая подпапка — подкаст, без исполнителей и общего списка треков */
+#define LIB_PODCASTS "Podcasts"
 
 /* обход root; кэш тегов — в cache (файл), неизменившиеся файлы не перечитываются.
  * progress (может быть NULL) обновляется числом просмотренных файлов */

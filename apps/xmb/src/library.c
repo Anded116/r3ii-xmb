@@ -576,6 +576,8 @@ static library_t *L;
 static int captracks;
 static volatile int *prog;
 
+static int is_podcast(const char *path);
+
 static int is_audio(const char *name, const char **ext)
 {
 	const char *e = strrchr(name, '.');
@@ -659,8 +661,11 @@ static void add_track(const char *path, const char *name, const char *ext, struc
 	drop_url(t.albumartist);
 	lib_track_t *tr = new_track(dir);
 	char buf[MAX_TAG];
+	/* выпуск подкаста без тегов: «2026-10-15 - Название» — дата видна в подписи, в названии не нужна */
+	int dated = is_podcast(path) && strlen(name) > 13 && isdigit((unsigned char)name[0]) && name[4] == '-' &&
+		    !strncmp(name + 10, " - ", 3);
 	if (!t.title[0])
-		title_from_name(name, buf);
+		title_from_name(dated ? name + 13 : name, buf);
 	tr->path = strdup(path);
 	tr->title = xstrdup(t.title[0] ? t.title : buf);
 	tr->artist = xstrdup(t.artist[0] ? t.artist : "Неизвестный исполнитель");
@@ -1069,9 +1074,18 @@ static char *find_cover(const lib_album_t *al)
 	return res;
 }
 
+static char pod_prefix[320];   /* «корень/Podcasts/» */
+
+static int is_podcast(const char *path)
+{
+	return !strncmp(path, pod_prefix, strlen(pod_prefix));
+}
+
 static int cmp_track_in_album(const void *a, const void *b)
 {
 	const lib_track_t *x = &L->tracks[*(const int *)a], *y = &L->tracks[*(const int *)b];
+	if (is_podcast(x->path))   /* имена выпусков начинаются с даты — новые сверху */
+		return strcmp(y->path, x->path);
 	if (x->disc != y->disc) return x->disc - y->disc;
 	if (x->track != y->track) return x->track - y->track;
 	return strcmp(x->path, y->path);
@@ -1109,26 +1123,28 @@ static void build_albums(void)
 		char prim[MAX_TAG], aa[MAX_TAG];
 		snprintf(prim, sizeof(prim), "%s", primary_artist(t->artist));
 		snprintf(aa, sizeof(aa), "%s", t->albumartist[0] ? primary_artist(t->albumartist) : prim);
-		int found = -1;
+		int found = -1, pod = is_podcast(t->path);   /* подкаст — вся его папка, что бы ни было в тегах выпусков */
 		for (int a = L->nalbums - 1; a >= 0 && found < 0; a--) {
 			lib_album_t *al = &L->albums[a];
-			if (t->album[0] ? (!strcasecmp(al->title, t->album) && (!strcasecmp(al->artist, aa) || !strcmp(al->dir, dir)))
-					: !strcmp(al->dir, dir) && !strcmp(al->title, strrchr(dir, '/') ? strrchr(dir, '/') + 1 : dir))
+			if (pod || al->podcast ? pod && al->podcast && !strcmp(al->dir, dir)
+			    : t->album[0] ? (!strcasecmp(al->title, t->album) && (!strcasecmp(al->artist, aa) || !strcmp(al->dir, dir)))
+					  : !strcmp(al->dir, dir) && !strcmp(al->title, strrchr(dir, '/') ? strrchr(dir, '/') + 1 : dir))
 				found = a;
 		}
 		if (found < 0) {
 			L->albums = realloc(L->albums, (L->nalbums + 1) * sizeof(lib_album_t));
 			lib_album_t *al = &L->albums[L->nalbums];
 			memset(al, 0, sizeof(*al));
-			al->title = strdup(t->album[0] ? t->album : (strrchr(dir, '/') ? strrchr(dir, '/') + 1 : dir));
-			al->artist = strdup(aa);
+			al->title = strdup(t->album[0] && !pod ? t->album : (strrchr(dir, '/') ? strrchr(dir, '/') + 1 : dir));
+			al->artist = strdup(pod ? "Подкасты" : aa);
 			al->dir = dir;
 			al->year = t->year;
+			al->podcast = pod;
 			found = L->nalbums++;
 		} else {
 			lib_album_t *al = &L->albums[found];
 			/* у сборников разные исполнители треков, а тега исполнителя альбома нет */
-			if (!t->albumartist[0] && lib_strcmp(al->artist, prim) && strcmp(al->artist, "Разные исполнители")) {
+			if (!pod && !t->albumartist[0] && lib_strcmp(al->artist, prim) && strcmp(al->artist, "Разные исполнители")) {
 				free(al->artist);
 				al->artist = strdup("Разные исполнители");
 			}
@@ -1197,6 +1213,8 @@ static void build_artists(void)
 	qsort(order, L->nalbums, sizeof(int), cmp_album);
 	for (int k = 0; k < L->nalbums; k++) {
 		lib_album_t *al = &L->albums[order[k]];
+		if (al->podcast)
+			continue;
 		if (!L->nartists || lib_strcmp(L->artists[L->nartists - 1].name, al->artist)) {
 			L->artists = realloc(L->artists, (L->nartists + 1) * sizeof(lib_artist_t));
 			L->artists[L->nartists++] = (lib_artist_t){ strdup(al->artist), NULL, 0 };
@@ -1206,16 +1224,19 @@ static void build_artists(void)
 		ar->albums[ar->nalbums++] = order[k];
 	}
 	free(order);
-	L->by_title = malloc(L->ntracks * sizeof(int));
+	L->by_title = malloc((L->ntracks ? L->ntracks : 1) * sizeof(int));
+	L->nby_title = 0;
 	for (int i = 0; i < L->ntracks; i++)
-		L->by_title[i] = i;
-	qsort(L->by_title, L->ntracks, sizeof(int), cmp_all);
+		if (!L->albums[L->tracks[i].aidx].podcast)
+			L->by_title[L->nby_title++] = i;
+	qsort(L->by_title, L->nby_title, sizeof(int), cmp_all);
 }
 
 library_t *lib_scan(const char *root, const char *cachefile, volatile int *progress)
 {
 	L = calloc(1, sizeof(*L));
 	prog = progress;
+	snprintf(pod_prefix, sizeof(pod_prefix), "%s/%s/", root, LIB_PODCASTS);
 	captracks = 0;
 	ncache = nfresh = 0;
 	cache_load(cachefile);

@@ -238,7 +238,10 @@ static int pick(const char *json, char *out, int cap)
 static int get(const char *url, const char *file)
 {
 	char cmd[1300];
-	snprintf(cmd, sizeof(cmd), "wget -q -T 20 -U 'XMB (github.com/Anded116/r3ii-xmb)' -O %s '%s' 2>>/tmp/xmb_wget.log", file, url);
+	const char *get = sp_xmbget();
+	if (!get)
+		return -1;
+	snprintf(cmd, sizeof(cmd), "%s -T 20 -O %s '%s' 2>>/tmp/xmb_get.log", get, file, url);
 	return sp_system(cmd);
 }
 #else
@@ -265,7 +268,7 @@ static void *fetch_thread(void *arg)
 		int rc = get(lf.url[i], tmp);
 		FILE *f = fopen(tmp, "rb");
 		if (!f) {
-			st = rc ? LF_ERROR : LF_NONE;
+			st = rc == (2 << 8) ? LF_NONE : LF_ERROR;   /* xmbget: 2 — сервер ответил не 200 (нет текста) */
 			continue;
 		}
 		static char json[512 * 1024];

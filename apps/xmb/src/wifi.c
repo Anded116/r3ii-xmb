@@ -184,7 +184,7 @@ static void refresh_list(void)
 }
 
 /* подключились — адрес по DHCP (стоковый udhcpc сам пишет resolv.conf), потом время по NTP и в RTC */
-static void bring_up(const char *ssid)
+static void bring_up(const char *ssid, int announce)
 {
 	set_status("получение адреса…");
 	int ok = run("udhcpc -i wlan0 -q -n -t 6 > /dev/null 2>&1", NULL, NULL) == 0;
@@ -198,9 +198,11 @@ static void bring_up(const char *ssid)
 	fflush(stdout);
 	if (!ok)
 		return;
-	char m[96];
-	snprintf(m, sizeof(m), "Wi-Fi: %s", ssid);
-	set_msg(m);
+	if (announce) {   /* сам подключился при включении — без уведомления */
+		char m[96];
+		snprintf(m, sizeof(m), "Wi-Fi: %s", ssid);
+		set_msg(m);
+	}
 	if (run("ntpdate -p 2 -t 2 0.pool.ntp.org time.google.com > /dev/null 2>&1", NULL, NULL) == 0)
 		run("hwclock -w > /dev/null 2>&1", NULL, NULL);
 }
@@ -211,7 +213,7 @@ static void poll_state(void)
 	run(CLI "status 2>/dev/null", status_line, &s);
 	int up = !strcmp(s.state, "COMPLETED");
 	if (up && !w.online)
-		bring_up(s.ssid);
+		bring_up(s.ssid, 0);
 	else if (!up && w.online) {
 		pthread_mutex_lock(&w.mu);
 		w.online = 0;
@@ -293,7 +295,7 @@ static void do_op(int op, int on, const char *ssid, const char *psk)
 		if (!strcmp(s.state, "COMPLETED")) {
 			run(CLI "enable_network all > /dev/null", NULL, NULL);   /* select выключил остальные — вернуть */
 			run(CLI "save_config > /dev/null", NULL, NULL);
-			bring_up(s.ssid);
+			bring_up(s.ssid, 1);   /* подключали вручную — сказать */
 		} else {
 			set_msg(psk ? "Не подключилось — неверный пароль?" : "Не удалось подключить");
 			run(CLI "enable_network all > /dev/null", NULL, NULL);
