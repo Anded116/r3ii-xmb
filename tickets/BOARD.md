@@ -8,20 +8,20 @@
 
 | Статус | Тикетов |
 |---|---|
-| `open` | 5 |
+| `open` | 6 |
 | `in-progress` | 1 |
-| `fixed` | 15 |
+| `fixed` | 18 |
 | `verified` | 1 |
 | `accepted` | 2 |
-| **всего** | **24** |
+| **всего** | **28** |
 
 | Область | open | in-progress | fixed |
 |---|---|---|---|
-| ui | 0 | 0 | 4 |
-| player | 0 | 0 | 2 |
+| ui | 0 | 0 | 5 |
+| player | 1 | 0 | 2 |
 | audio | 1 | 0 | 1 |
-| library | 0 | 0 | 1 |
-| net | 1 | 0 | 2 |
+| library | 0 | 0 | 2 |
+| net | 1 | 0 | 3 |
 | power | 0 | 1 | 3 |
 | display | 1 | 0 | 1 |
 | input | 1 | 0 | 1 |
@@ -37,6 +37,7 @@
 | [XMB-0019](XMB-0019-skrugleniya-uglov-ekrana-ne-sovsem-kruglye.md) | P2 | open | display | Скругления углов экрана не совсем круглые |
 | [XMB-0011](XMB-0011-rezhim-usb-tsap.md) | P3 | open | audio | Режим USB-ЦАП |
 | [XMB-0015](XMB-0015-ekran-zagoraetsya-cherez-1-4-1-75-s-posle.md) | P3 | in-progress | power | Экран загорается через 1,4–1,75 с после пробуждения |
+| [XMB-0028](XMB-0028-pleer-na-pauze-posle-zapuska-xmb-stroka.md) | P3 | open | player | Плеер на паузе после запуска XMB: строка формата — только «FLAC», без разрядности и частоты |
 
 ## 🧪 Ждут проверки (fixed)
 
@@ -56,6 +57,9 @@
 - [ ] [XMB-0020](XMB-0020-nastroyki-klaviatury-angliyskaya-raskladka-po.md) `[P2/ui]` Настройки клавиатуры; английская раскладка по умолчанию
 - [ ] [XMB-0021](XMB-0021-svayp-vlevo-vo-vlozhennyh-menyu-na-uroven-vyshe.md) `[P2/input]` Свайп влево во вложенных меню — на уровень выше
 - [ ] [XMB-0022](XMB-0022-fonovye-protsessy-skan-zagruzka-podkastov-v.md) `[P2/ui]` Фоновые процессы (скан, загрузка подкастов) — в центре статус-бара с прогрессом
+- [ ] [XMB-0025](XMB-0025-status-bar-pri-fonovoy-rabote-sverhu-tekst.md) `[P2/ui]` Статус-бар при фоновой работе: сверху текст, что идёт, снизу полоса; остальные значки скрыть
+- [ ] [XMB-0026](XMB-0026-podkasty-proveryayutsya-slishkom-chasto-pri.md) `[P2/net]` Подкасты проверяются слишком часто — при каждом запуске XMB
+- [ ] [XMB-0027](XMB-0027-crystal-castles-ii-i-iii-slity-v-odin-albom.md) `[P2/library]` Crystal Castles: (II) и (III) слиты в один альбом, (III) играет одним 40-минутным треком
 - [ ] [XMB-0023](XMB-0023-fon-pleera-tsvetom-oblozhki-plavnaya-smena.md) `[P3/player]` Фон плеера цветом обложки: плавная смена оттенка
 
 **Проверить ТЕСТОМ**
