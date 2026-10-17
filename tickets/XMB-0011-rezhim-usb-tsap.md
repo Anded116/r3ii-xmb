@@ -2,13 +2,14 @@
 id: XMB-0011
 title: Режим USB-ЦАП
 type: feature
-status: open
+status: fixed
 priority: P3
 area: audio
 source: user
 verify-in: review
 created: 2026-10-17
-updated: 2026-10-17
+updated: 2026-10-18
+commits: 0b79ce8, d9f34a1
 labels: later
 ---
 
@@ -28,3 +29,5 @@ labels: later
 ## История
 
 - 2026-10-17 (agent): создан (feature, open).
+- 2026-10-18 (agent): status open -> in-progress
+- 2026-10-18 (agent): status in-progress -> fixed; commits 0b79ce8, d9f34a1 - Сделано по разбору стока в Sonix: гаджет uac_sa, звук из /dev/uac_sa в наш тракт, экран режима (частота, громкость колесом, удержание — выход). Проверено пользователем на Windows: 48 кГц, без недогрузок, выход возвращает накопитель и adb. Была заметная задержка — буфер вывода в режиме ЦАПа уменьшен со ~170 до ~50 мс. Проверить: задержку в игре, другие частоты (88,2–384 кГц), отсутствие щелчков.

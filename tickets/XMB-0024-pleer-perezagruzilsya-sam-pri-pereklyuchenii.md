@@ -8,8 +8,8 @@ area: firmware
 source: agent
 verify-in: review
 created: 2026-10-17
-updated: 2026-10-17
-commits: 28c871f
+updated: 2026-10-18
+commits: 28c871f, 37f9a4e, ac180b5, 0b79ce8
 labels: watch
 ---
 
@@ -35,3 +35,4 @@ labels: watch
 - 2026-10-17 (agent): создан (bug, open).
 - 2026-10-17 (agent): status open -> in-progress
 - 2026-10-17 (agent): status in-progress -> open; commits 28c871f - Второй случай 21:39 (уже без бага NaN): stress_player.sh, первый шаг «альбом назад» с Digitalism → Crystal Castles (FLAC-образ 192 кГц/24 бит, CUE). Последнее в журнале ядра: hbc3000_set_samplerate 192000 → es9219_dai_prepare → hbc3000_start, затем перезагрузка; kernel.panic=10 — похоже на панику ядра. Не повторилось: playtest 96/192 кГц в 24 и 16 бит, XMB 192 кГц напрямую, 800 шагов stress_player, 3 перезапуска XMB с игрой во время подключения Wi-Fi. Общее у обоих случаев — первые ~20 с после запуска XMB. Теперь run_xmb.sh пишет в xmb.log «сброс: 0x…» (CPM RSR: бит 0 — питание, бит 1 — сторожевой таймер, через него же reboot/паника) и обнуляет регистр. При следующем случае: xmb.log (строка «сброс»), xmb.log.prev, stress.log.
+- 2026-10-18 (agent): commits 28c871f, 37f9a4e, ac180b5, 0b79ce8 - Пойман ещё раз (00:55, «Пауза» на 192 кГц через 7 с после запуска XMB): «сброс: 0x2» — перезагрузка через сторожевой таймер (так ядро перезагружается после паники). Падение — в момент старта DMA звука (после es9219_dai_prepare нет обычного hbc3000_set_power_down). Во всех трёх случаях XMB в это время запускал внешнюю программу (xmbget, udhcpc) через fork. Не воспроизводится: playtest 192 кГц под нагрузкой ЦП, с загрузкой по Wi-Fi, 12 перезапусков XMB с немедленной игрой. Сделано: posix_spawn вместо fork (без копии адресного пространства и страниц PCM), микшер под блокировкой. Следить.
