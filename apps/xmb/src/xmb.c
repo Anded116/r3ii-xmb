@@ -4859,6 +4859,11 @@ void xmb_wake(void)
 	screen(1);
 }
 
+void xmb_screen_broken(void)
+{
+	toast("%s", "Экран сбоит — перезагрузите плеер");
+}
+
 static lv_obj_t *sleep_ov, *sleep_num, *sleep_hint;
 
 void xmb_sleep_countdown(int left, const char *hint)

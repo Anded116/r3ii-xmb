@@ -58,6 +58,7 @@ bool xmb_button_has_double(int button);   /* ждать ли второго на
  * идёт таймер сна или сон выключен в настройках); xmb_wake — после пробуждения */
 uint32_t xmb_sleep_after_ms(void);
 void xmb_wake(void);
+void xmb_screen_broken(void);   /* вывод кадров не восстанавливается */
 
 /* реализуются платформой (main_host.c / main_device.c) */
 int platform_battery(int *charging);   /* заряд в %, -1 — неизвестно */

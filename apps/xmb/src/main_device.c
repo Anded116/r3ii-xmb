@@ -303,7 +303,7 @@ static uint32_t tick_ms(void)
 	return (uint32_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
 }
 
-static int panel_on, slow_pans;
+static int panel_on, slow_pans, panel_fails;
 static uint32_t prof_copy, prof_pan, prof_rows, prof_areas, prof_px;   /* за 5 с: мс на копирование в страницу, ожидание pan, строк, областей и пикселей отрисовки */
 static uint32_t frame_t0, prof_slow, prof_max;   /* начало кадра; кадров дольше 20 мс (не успели к развёртке), самый долгий */
 static int full_copy = 2;
@@ -356,6 +356,8 @@ static void flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px)
 		pan_ms = tick_ms() - t0;
 		prof_pan += pan_ms;
 		slow_pans = tick_ms() - t0 > 200 ? slow_pans + 1 : 0;
+		if (!slow_pans)
+			panel_fails = 0;   /* кадр ушёл вовремя — панель жива */
 		frames++;
 	}
 	lv_display_flush_ready(disp);
@@ -739,9 +741,12 @@ int main(int argc, char **argv)
 				off_since = tick_ms();
 			}
 		}
-		if (panel_on && slow_pans >= 3) {
+		/* контроллер, сломанный сном с невыключенной панелью, перезапуск не лечит — только перезагрузка плеера */
+		if (panel_on && slow_pans >= 3 && panel_fails < 2) {
 			printf("pan timeouts, restarting panel\n");
 			panel_restart();
+			if (++panel_fails == 2)
+				xmb_screen_broken();
 		}
 
 		if (now - t_fps >= 5000) {
