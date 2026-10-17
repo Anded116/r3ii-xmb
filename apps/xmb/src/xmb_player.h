@@ -4,6 +4,7 @@
 #define PLAYER_DIM 170   /* затемнение фона под раскрытым плеером */
 
 #include "lvgl/lvgl.h"
+#include "lyrics.h"
 
 typedef struct {
 	const char *title, *artist, *album, *format;
@@ -11,7 +12,7 @@ typedef struct {
 } track_t;
 
 /* режимы воспроизведения в ряду под прогрессом */
-enum { PM_SHUFFLE, PM_REPEAT, PM_MORE, PM_COUNT };   /* частое — на экране, редкое — в «Ещё» */
+enum { PM_SHUFFLE, PM_REPEAT, PM_LYRICS, PM_MORE, PM_COUNT };   /* частое — на экране, редкое — в «Ещё» */
 
 void player_create(lv_obj_t *parent, const lv_font_t *f_big, const lv_font_t *f_mid, const lv_font_t *f_small);
 void player_set_track(const track_t *t);
@@ -26,6 +27,10 @@ void player_set_ab(double a, double b);   /* отметки повтора A-B �
 void player_set_icon_font(const lv_font_t *f);   /* Font Awesome — для сердечка */
 double player_bar_frac(int x);                   /* доля трека под пальцем, пока его тянут по полосе */
 void player_show_volume(void);
+/* текст песни на месте обложки: строки живут, пока не придёт новый (NULL — нет); текущая — по позиции трека */
+void player_set_lyrics(const lyrics_t *l);
+void player_show_lyrics(int on);
+int player_lyrics_shown(void);
 void player_show(int show);
 int player_shown(void);
 int player_covers(void);   /* плеер выехал полностью и закрывает меню */

@@ -8,6 +8,7 @@
 
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "cover.h"
@@ -32,6 +33,10 @@
 #define MODES_Y 418
 #define MODE_STEP (W / PM_COUNT)
 #define FA_MORE "\xEF\x85\x81"   /* U+F141, многоточие — меню «Ещё» */
+#define FA_LYRICS "\xEF\x80\xB6"   /* U+F036, строки текста */
+#define NLYR 11               /* строк текста на экране (переиспользуются при прокрутке) */
+#define LYR_Y (COVER_Y - 8)   /* текст — на месте обложки, чуть выше и ниже неё */
+#define LYR_H (COVER + 14)
 #define ACT_Y (BAR_Y - 24)        /* сердечко и «+» над шкалой времени, по краям */
 #define ACT_X 38
 #define VOL_SEG 30
@@ -53,6 +58,12 @@ static struct {
 	unsigned cover_gen;
 	int fav;
 	lv_obj_t *ab[2];
+	/* текст песни: строки по слотам (слот i — строка с номером ≡ i по модулю NLYR), прокрутка — плавная */
+	lv_obj_t *lyr, *lyr_line[NLYR];
+	const lyrics_t *lyr_src;
+	int lyr_on, lyr_idx[NLYR], lyr_cur, *lyr_y, lyr_total;
+	double lyr_k, lyr_scroll;
+	const lv_font_t *lyr_font;
 } p;
 
 static lv_obj_t *box(lv_obj_t *parent, int x, int y, int w, int h)
@@ -296,10 +307,11 @@ static void cover_refresh(void)
 		cover_apply();
 	if (lv_obj_is_hidden(p.cover) != !d)
 		lv_obj_set_hidden(p.cover, !d);
-	if (lv_obj_is_hidden(p.pending) != !wait)
-		lv_obj_set_hidden(p.pending, !wait);
-	if (lv_obj_is_hidden(p.cassette) != (d || wait))
-		lv_obj_set_hidden(p.cassette, d || wait);
+	int lyr = p.lyr_k > 0.5;   /* под текстом песни — ни кассеты, ни заглушки */
+	if (lv_obj_is_hidden(p.pending) != (!wait || lyr))
+		lv_obj_set_hidden(p.pending, !wait || lyr);
+	if (lv_obj_is_hidden(p.cassette) != (d || wait || lyr))
+		lv_obj_set_hidden(p.cassette, d || wait || lyr);
 	/* соседние альбомы — заранее в полном размере: при перелистывании обложка уже готова */
 	cover_get(p.prev_cover, COVER);
 	cover_get(p.next_cover, COVER);
@@ -354,6 +366,7 @@ void player_set_icon_font(const lv_font_t *f)
 {
 	lv_obj_set_style_text_font(p.heart, f, 0);
 	lv_obj_set_style_text_font(p.mode_icon[PM_MORE], f, 0);
+	lv_obj_set_style_text_font(p.mode_icon[PM_LYRICS], f, 0);
 	p.fav = -1;
 	player_set_fav(0);
 }
@@ -410,6 +423,21 @@ void player_create(lv_obj_t *parent, const lv_font_t *f_big, const lv_font_t *f_
 	lv_obj_set_size(p.cover, COVER, COVER);
 	lv_obj_set_hidden(p.cover, true);
 
+	p.lyr = box(p.content, 0, LYR_Y, W, LYR_H);   /* строки за краем обрезаются */
+	p.lyr_font = f_mid;
+	for (int i = 0; i < NLYR; i++) {
+		p.lyr_line[i] = lv_label_create(p.lyr);
+		lv_obj_set_style_text_font(p.lyr_line[i], f_mid, 0);
+		lv_obj_set_style_text_color(p.lyr_line[i], lv_color_white(), 0);
+		lv_obj_set_style_text_align(p.lyr_line[i], LV_TEXT_ALIGN_CENTER, 0);
+		lv_obj_set_width(p.lyr_line[i], W - 40);
+		lv_label_set_long_mode(p.lyr_line[i], LV_LABEL_LONG_MODE_WRAP);
+		lv_label_set_text(p.lyr_line[i], "");
+		lv_obj_set_hidden(p.lyr_line[i], true);
+		p.lyr_idx[i] = -1;
+	}
+	lv_obj_set_hidden(p.lyr, true);
+
 	p.title = text(p.content, f_big, COVER_Y + COVER + 14, LV_OPA_COVER);
 	p.artist = text(p.content, f_mid, COVER_Y + COVER + 38, 210);
 	p.album = text(p.content, f_small, COVER_Y + COVER + 58, 140);
@@ -459,7 +487,7 @@ void player_create(lv_obj_t *parent, const lv_font_t *f_big, const lv_font_t *f_
 	lv_label_set_text(p.add, LV_SYMBOL_PLUS);
 	lv_obj_set_pos(p.add, W - ACT_X - 16, ACT_Y - 11);
 
-	static const char *const icons[PM_COUNT] = { LV_SYMBOL_SHUFFLE, LV_SYMBOL_LOOP, FA_MORE };
+	static const char *const icons[PM_COUNT] = { LV_SYMBOL_SHUFFLE, LV_SYMBOL_LOOP, FA_LYRICS, FA_MORE };
 	for (int i = 0; i < PM_COUNT; i++) {
 		int cx = MODE_STEP / 2 + i * MODE_STEP;
 		p.mode_icon[i] = lv_label_create(p.content);
@@ -578,6 +606,90 @@ double player_bar_frac(int x)
 }
 
 
+/* высоты строк — один раз на текст: перенос по ширине; пустая строка — половина */
+void player_set_lyrics(const lyrics_t *l)
+{
+	p.lyr_src = l && l->n ? l : NULL;
+	free(p.lyr_y);
+	p.lyr_y = NULL;
+	p.lyr_total = 0;
+	for (int i = 0; i < NLYR; i++)
+		p.lyr_idx[i] = -1;
+	if (p.lyr_src) {
+		int lh = lv_font_get_line_height(p.lyr_font);
+		p.lyr_y = malloc(sizeof(int) * (l->n + 1));
+		for (int i = 0; i < l->n; i++) {
+			lv_point_t sz;
+			lv_text_get_size(&sz, l->v[i].text, p.lyr_font, 0, 2, W - 40, LV_TEXT_FLAG_NONE);
+			p.lyr_y[i] = p.lyr_total;
+			p.lyr_total += (l->v[i].text[0] ? sz.y : lh / 2) + 10;
+		}
+		p.lyr_y[l->n] = p.lyr_total;
+	}
+	p.lyr_cur = -2;
+	p.lyr_scroll = 0;
+}
+
+void player_show_lyrics(int on)
+{
+	p.lyr_on = on;
+}
+
+int player_lyrics_shown(void)
+{
+	return p.lyr_on;
+}
+
+/* строки вокруг текущей: позиция — от середины области, текущая яркая, дальние гаснут */
+static void lyrics_layout(void)
+{
+	const lyrics_t *l = p.lyr_src;
+	int cur = !l ? -1 : l->synced ? lyrics_at(l, p.pos + 0.3) : -1;
+	double target;
+	if (!l)
+		target = 0;
+	else if (l->synced)
+		target = cur < 0 ? 0 : p.lyr_y[cur] + (p.lyr_y[cur + 1] - p.lyr_y[cur]) / 2.0;
+	else   /* без меток — едет по ходу трека */
+		target = p.track && p.track->duration > 0 ? p.lyr_total * p.pos / p.track->duration : 0;
+	if (p.lyr_cur == -2)
+		p.lyr_scroll = target;
+	p.lyr_scroll += (target - p.lyr_scroll) * 0.18;
+	if (fabs(target - p.lyr_scroll) < 0.5)
+		p.lyr_scroll = target;
+	p.lyr_cur = cur;
+	int first = 0;
+	if (l)
+		while (first < l->n - 1 && p.lyr_y[first + 1] < p.lyr_scroll - LYR_H / 2)
+			first++;
+	for (int k = 0; k < NLYR; k++) {
+		int i = first + k;
+		lv_obj_t *o = p.lyr_line[i % NLYR];
+		if (!l || i >= l->n) {   /* NLYR подряд идущих строк занимают все слоты ровно по разу */
+			p.lyr_idx[i % NLYR] = -1;
+			if (!lv_obj_is_hidden(o))
+				lv_obj_set_hidden(o, true);
+			continue;
+		}
+		if (p.lyr_idx[i % NLYR] != i) {
+			p.lyr_idx[i % NLYR] = i;
+			lv_label_set_text(o, l->v[i].text);
+		}
+		int y = (int)(p.lyr_y[i] - p.lyr_scroll + LYR_H / 2.0);
+		if (lv_obj_get_y(o) != y || lv_obj_get_x(o) != 20)
+			lv_obj_set_pos(o, 20, y);
+		double d = fabs(p.lyr_y[i] + (p.lyr_y[i + 1] - p.lyr_y[i]) / 2.0 - p.lyr_scroll) / (LYR_H / 2.0);
+		int opa = i == cur ? 255 : (int)(150 * (1.0 - fmin(1.0, d * d)) + 20);
+		if (!l->synced)
+			opa = (int)(230 * (1.0 - fmin(1.0, d * d * 0.6)) + 25);
+		opa = (int)(opa * p.lyr_k);
+		if (lv_obj_get_style_text_opa(o, 0) != opa)
+			lv_obj_set_style_text_opa(o, (lv_opa_t)opa, 0);
+		if (lv_obj_is_hidden(o))
+			lv_obj_set_hidden(o, false);
+	}
+}
+
 void player_show_volume(void)
 {
 	p.vol_t = 1.4;
@@ -651,6 +763,18 @@ void player_tick(double dt)
 			lv_obj_invalidate_area(p.cassette, &win);
 		}
 	}
+	/* текст вместо обложки: обложка гаснет, строки проявляются */
+	double lk = p.lyr_on && p.lyr_src ? 1 : 0;
+	if (p.lyr_k != lk) {
+		p.lyr_k += (lk - p.lyr_k) * (1.0 - exp(-dt * 12));
+		if (fabs(lk - p.lyr_k) < 0.01)
+			p.lyr_k = lk;
+		lv_obj_set_style_image_opa(p.cover, (lv_opa_t)(255 * (1 - p.lyr_k)), 0);
+		lv_obj_set_hidden(p.cards, p.lyr_k > 0.5);   /* соседи рисуются сами: прозрачность объекта на них не действует */
+		lv_obj_set_hidden(p.lyr, p.lyr_k == 0);
+	}
+	if (p.t > 0 && p.lyr_k > 0)
+		lyrics_layout();
 	if (p.vol_t > 0) {
 		p.vol_t -= dt;
 		if (p.vol_t <= 0)

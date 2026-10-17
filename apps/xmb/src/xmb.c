@@ -302,6 +302,8 @@ static void last_load(void);
 static void size_metrics(void);
 static void about_fill(void);
 static void battery_guard(void);
+static void lyrics_refresh(void);
+static void toast(const char *fmt, ...);
 static void slide_tick(double dt);
 static void slide_open(const char *icon, const char *title, const char *sub, const char *hint, int dir,
 		       const char *cancel_text, void (*done)(void), void (*cancelled)(void));
@@ -1656,6 +1658,7 @@ static void update_np_labels(void)
 	player_set_cover(al->cover);
 	player_set_fav(s.pls && pl_find(&s.pls[PL_FAVORITES], s.track) >= 0);
 	player_set_state(s.playing, s.pos, s.volume);
+	lyrics_refresh();
 	refresh_subs();
 }
 
@@ -1668,8 +1671,8 @@ static void update_modes(void)
 		snprintf(left, sizeof(left), tx("Сон: %d:%02d"), sec / 60, sec % 60);
 	}
 	/* «Ещё» подсвечено, если там что-то включено: эквалайзер, таймер сна, повтор A-B */
-	int on[PM_COUNT] = { s.shuffle, s.repeat != 0, s.eq_on || s.sleep != SLEEP_OFF || s.ab };
-	const char *lab[PM_COUNT] = { tx("Случайно"), tx(repeat_names[s.repeat]), s.sleep_end ? left : tx("Ещё") };
+	int on[PM_COUNT] = { s.shuffle, s.repeat != 0, player_lyrics_shown(), s.eq_on || s.sleep != SLEEP_OFF || s.ab };
+	const char *lab[PM_COUNT] = { tx("Случайно"), tx(repeat_names[s.repeat]), tx("Текст"), s.sleep_end ? left : tx("Ещё") };
 	player_set_modes(on, lab);
 }
 
@@ -1682,12 +1685,44 @@ static void sleep_start(void)
 	update_modes();
 }
 
+/* текст играющего трека: файл .lrc рядом с ним; перечитывается при смене трека */
+static lyrics_t lyr;
+static int lyr_track = -1;
+
+static void lyrics_refresh(void)
+{
+	if (s.track == lyr_track)
+		return;
+	lyr_track = s.track;
+	if (s.track >= 0) {
+		const lib_track_t *tr = &s.lib->tracks[s.track];
+		char f[1100];
+		lyrics_path(f, sizeof(f), tr->path, tr->start > 0 || tr->end > 0, tr->artist, tr->title);
+		lyrics_load(&lyr, f);
+	} else {
+		lyrics_free(&lyr);
+	}
+	player_set_lyrics(&lyr);
+}
+
+static void lyrics_toggle(void)
+{
+	lyrics_refresh();
+	if (!player_lyrics_shown() && !lyr.n) {
+		toast("%s", "Для этого трека нет текста");
+		return;
+	}
+	player_show_lyrics(!player_lyrics_shown());
+}
+
 static void toggle_mode(int m)
 {
 	if (m == PM_SHUFFLE)
 		s.shuffle = !s.shuffle;
 	else if (m == PM_REPEAT)
 		s.repeat = (s.repeat + 1) % 3;
+	else if (m == PM_LYRICS)
+		lyrics_toggle();
 	else if (m == PM_MORE)
 		player_more();
 	plan_next();
@@ -4044,6 +4079,8 @@ static void select_current(void)
 		bt_scan();
 	} else if (n->action == A_NEWPL) {
 		kb_open(s.npl, "Новый плейлист", "");
+	} else if (n->action == A_TRACK && n->track == s.track && !s.resume) {
+		player_show(1);   /* играющий трек — открыть плеер, а не начать заново */
 	} else if (n->action == A_TRACK) {
 		play_queue(c->nodes, c->count, c->sel);
 	} else if (n->opts) {
@@ -4245,6 +4282,14 @@ int xmb_input_name(const char *name)
 	}
 	if (!strncmp(name, "btn:", 4) && name[4] && name[5]) {   /* кнопка на корпусе: btn:<кнопка><жест>, как в настройках */
 		xmb_button(name[4] - '0', name[5] - '0');
+		return 1;
+	}
+	if (!strcmp(name, "player")) {   /* в жизни — касанием мини-плеера */
+		player_show(1);
+		return 1;
+	}
+	if (!strcmp(name, "lyrics")) {
+		toggle_mode(PM_LYRICS);
 		return 1;
 	}
 	if (!strcmp(name, "prevalbum")) {   /* в жизни — кнопкой (BA_PREV_ALBUM) или свайпом */

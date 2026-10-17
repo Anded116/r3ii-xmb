@@ -109,6 +109,7 @@ static const char *const table[][LANG_COUNT] = {
 	{ "Конец очереди", "End of queue", "Fin de la cola" },
 	{ "Сон через %d мин", "Sleep in %d min", "Reposo en %d min" }, { "Один", "One", "Una" }, { "Все", "All", "Todas" },
 	{ "Сенсор", "Touch", "Táctil" },
+	{ "Текст", "Lyrics", "Letra" }, { "Для этого трека нет текста", "No lyrics for this track", "No hay letra para esta pista" },
 	{ "Батарея %d%% — подключите зарядку", "Battery %d%% — connect the charger", "Batería %d%% — conecta el cargador" },
 	{ "Зарядка — выключение отменено", "Charging — power-off cancelled", "Cargando — apagado cancelado" },
 	{ "Батарея села — выключение через %d с", "Battery empty — powering off in %d s", "Batería agotada — apagado en %d s" },
