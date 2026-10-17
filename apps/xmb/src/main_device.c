@@ -479,6 +479,20 @@ static int read_int(const char *path)
 	return v;
 }
 
+/* заряд по напряжению покоя Li-ion — когда датчику нельзя верить */
+static int mv_to_cap(int mv)
+{
+	static const int pts[][2] = { { 3400, 0 }, { 3600, 8 }, { 3700, 25 }, { 3750, 40 }, { 3800, 55 }, { 3900, 70 },
+				      { 4000, 82 }, { 4100, 92 }, { 4180, 100 } };
+	int n = sizeof(pts) / sizeof(pts[0]);
+	if (mv <= pts[0][0])
+		return 0;
+	for (int i = 1; i < n; i++)
+		if (mv < pts[i][0])
+			return pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * (mv - pts[i - 1][0]) / (pts[i][0] - pts[i - 1][0]);
+	return 100;
+}
+
 static void *bat_thread(void *arg)
 {
 	(void)arg;
@@ -500,6 +514,15 @@ static void *bat_thread(void *arg)
 			snprintf(path, sizeof(path), "/sys/class/power_supply/%s/voltage_now", names[i]);
 			int uv = read_int(path);
 			bat_mv = uv > 0 ? uv / 1000 : -1;
+			/* CW2015 бывает залипает на 0 % при живой батарее (Sonix сбрасывает его за это в своём драйвере) */
+			static int stuck_logged;
+			if (cap == 0 && bat_mv > 3600) {
+				bat_cap = mv_to_cap(bat_mv);
+				if (!stuck_logged) {
+					stuck_logged = 1;
+					printf("батарея: датчик показывает 0 %% при %d мВ — заряд по напряжению\n", bat_mv);
+				}
+			}
 			break;
 		}
 		sleep(10);
