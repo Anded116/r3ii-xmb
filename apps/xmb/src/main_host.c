@@ -6,6 +6,7 @@
  * Без окна (проверка без рабочего стола): XMB_HEADLESS=1 XMB_SCRIPT="esc,up,enter,shot:a.ppm,..."
  * — сценарий выполняется по шагу раз в 300 мс, shot:<файл> сохраняет кадр в PPM, в конце выход.
  * Касание: drag:x0:y0:x1:y1[:мс] — палец от точки до точки (150 мс), tap:x:y — тап.
+ * dac — экран режима USB-ЦАПа.
  */
 #include <SDL2/SDL.h>
 #include <stdio.h>
@@ -153,6 +154,10 @@ static void script_step(lv_timer_t *t)
 		drag.on = 1;
 		return;
 	}
+	if (!strcmp(tok, "dac")) {   /* экран режима USB-ЦАПа, как после выбора «Как ЦАП» */
+		xmb_dac_prepare();
+		return;
+	}
 	xmb_input_name(tok);
 }
 
@@ -186,6 +191,8 @@ int main(int argc, char **argv)
 
 	while (1) {
 		uint32_t wait = lv_timer_handler();
+		if (xmb_usb_end_requested())
+			xmb_dac_end();
 		usleep((wait > 1 && wait < 16 ? wait : 1) * 1000);
 	}
 	return 0;

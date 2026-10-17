@@ -779,8 +779,8 @@ int main(int argc, char **argv)
 						sel_long = 0;
 					} else if (ev.value == 0 && sel_down && (usb_storage || usb_dac)) {
 						sel_down = 0;   /* в режиме накопителя клик только будит экран; карта — прокруткой (или удержанием) */
-						if (!xmb_screen_on())
-							xmb_input(XMB_SELECT);
+						if (!xmb_screen_on() || usb_dac)
+							xmb_input(XMB_SELECT);   /* ЦАП: клик — подтверждение выхода */
 					} else if (ev.value == 0 && sel_down) {
 						if (now - sel_down >= SLEEP_HOLD_MS)
 							xmb_sleep_countdown(-1, NULL);   /* отпустили до конца отсчёта — не спим */
@@ -833,9 +833,11 @@ int main(int argc, char **argv)
 				break;
 			}
 			/* ЦАП: удержание колеса, кабель вынут или выход из интерфейса */
-			if (usb_dac && (usb_dac == 2 || !usb_power() || xmb_usb_end_requested()))
+			if (usb_dac && (usb_dac == 2 || !usb_power()))
 				usb_dac_end();
 		}
+		if (usb_dac && xmb_usb_end_requested())
+			usb_dac_end();
 		if (xmb_usb_dac_requested() && host && !usb_storage && !usb_dac && !usb_dac_begin())
 			usb_dac_end();   /* не вышло — вернуть всё как было */
 		if (xmb_usb_storage_requested() && host && !usb_storage && !usb_storage_begin()) {

@@ -4499,8 +4499,8 @@ static void slide_tick(double dt)
 /* ---------- USB-накопитель: карта отдаётся компьютеру, плеер ждёт на экране «USB» ---------- */
 
 static struct {
-	int host, req, end, storage, choice, dac_req, dac;
-	lv_obj_t *panel, *state, *vol;
+	int host, req, end, storage, choice, dac_req, dac, dac_vol;
+	lv_obj_t *panel, *state, *vol, *vol_bar;
 } usb;
 static const char *const usb_opts[] = { "Отдать карту", "Как ЦАП", "Только зарядка", NULL };
 
@@ -4557,7 +4557,10 @@ bool xmb_usb_dac_requested(void)
 	return r;
 }
 
-/* ЦАП: экран режима — что играет компьютер и громкость; выход — удержанием колеса или выдернуть кабель */
+/* ЦАП: экран режима — что играет компьютер и громкость (колесо, палец по шкале); выход — как у других смен
+ * режима, ползунком с отменой (клик колесом или тап по подсказке), или выдернуть кабель */
+static void slider_draw(lv_event_t *e);
+
 static void dac_update(void)
 {
 	if (!usb.panel)
@@ -4570,9 +4573,41 @@ static void dac_update(void)
 		snprintf(b, sizeof(b), "%s", tx("Ждёт звук с компьютера"));
 	if (strcmp(lv_label_get_text(usb.state), b))
 		lv_label_set_text(usb.state, b);
-	snprintf(b, sizeof(b), tx("Громкость %d"), s.volume);
-	if (strcmp(lv_label_get_text(usb.vol), b))
-		lv_label_set_text(usb.vol, b);
+	if (usb.dac_vol != s.volume) {
+		usb.dac_vol = s.volume;
+		lv_label_set_text_fmt(usb.vol, "%d", s.volume);
+		lv_obj_invalidate(usb.vol_bar);
+	}
+}
+
+static void dac_exit_ask(void)
+{
+	slide_open(LV_SYMBOL_USB, "Выйти из режима ЦАП?", tx("Звук с компьютера прервётся"), "выйти", -1, "Отмена",
+		   usb_return, NULL);
+}
+
+static void dac_exit_cb(lv_event_t *e)
+{
+	(void)e;
+	dac_exit_ask();
+}
+
+/* палец на шкале — громкость по делениям, как в шторке */
+static void dac_vol_cb(lv_event_t *e)
+{
+	lv_point_t p;
+	lv_indev_get_point(lv_indev_active(), &p);
+	lv_area_t a;
+	lv_obj_get_coords(usb.vol_bar, &a);
+	int w = lv_area_get_width(&a), k = ((p.x - a.x1) * SEG + w / 2) / w;
+	k = k < 0 ? 0 : k > SEG ? SEG : k;
+	int v = (k * 100 + SEG / 2) / SEG;
+	(void)e;
+	if (v != s.volume) {
+		s.volume = v;
+		audio_set_volume(s.volume);
+		dac_update();
+	}
 }
 
 void xmb_dac_prepare(void)
@@ -4584,24 +4619,40 @@ void xmb_dac_prepare(void)
 	if (!s.screen_on)
 		screen(1);
 	usb.dac = 1;
+	usb.dac_vol = -1;
 	usb.panel = plain(lv_layer_top());
 	lv_obj_set_size(usb.panel, SCR_W, SCR_H - TOP_H);
 	lv_obj_set_pos(usb.panel, 0, TOP_H);
-	lv_obj_set_style_bg_color(usb.panel, lv_color_black(), 0);
-	lv_obj_set_style_bg_opa(usb.panel, 235, 0);
+	lv_obj_set_style_bg_color(usb.panel, lv_color_hex(0x101114), 0);
+	lv_obj_set_style_bg_opa(usb.panel, LV_OPA_COVER, 0);
 	lv_obj_set_clickable(usb.panel, true);   /* касания не проходят в меню под ним */
 	lv_obj_t *icon = label(usb.panel, &lv_font_montserrat_40, LV_SYMBOL_USB);
-	lv_obj_align(icon, LV_ALIGN_TOP_MID, 0, 90);
+	lv_obj_align(icon, LV_ALIGN_TOP_MID, 0, 26);
 	lv_obj_t *t = label(usb.panel, s.f_title, tx("USB-ЦАП"));
-	lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 160);
+	lv_obj_align(t, LV_ALIGN_TOP_MID, 0, 84);
 	usb.state = label(usb.panel, s.f_item, "");
-	lv_obj_align(usb.state, LV_ALIGN_TOP_MID, 0, 200);
-	usb.vol = label(usb.panel, s.f_item, "");
-	lv_obj_set_style_text_opa(usb.vol, 200, 0);
-	lv_obj_align(usb.vol, LV_ALIGN_TOP_MID, 0, 230);
-	lv_obj_t *h = label(usb.panel, s.f_sub, tx("Колесо — громкость. Удержание колеса — выйти"));
+	lv_obj_set_style_text_opa(usb.state, 180, 0);
+	lv_obj_align(usb.state, LV_ALIGN_TOP_MID, 0, 118);
+
+	lv_obj_t *vt = label(usb.panel, s.f_sub, tx("Громкость"));
+	lv_obj_set_style_text_opa(vt, 150, 0);
+	lv_obj_align(vt, LV_ALIGN_TOP_MID, 0, 200);
+	usb.vol = label(usb.panel, &lv_font_montserrat_40, "");
+	lv_obj_align(usb.vol, LV_ALIGN_TOP_MID, 0, 222);
+	usb.vol_bar = plain(usb.panel);
+	lv_obj_set_size(usb.vol_bar, SEG * 9, 22);
+	lv_obj_align(usb.vol_bar, LV_ALIGN_TOP_MID, 1, 284);
+	lv_obj_set_ext_click_area(usb.vol_bar, 20);
+	lv_obj_set_clickable(usb.vol_bar, true);
+	lv_obj_add_event_cb(usb.vol_bar, slider_draw, LV_EVENT_DRAW_MAIN, (void *)(intptr_t)1);
+	lv_obj_add_event_cb(usb.vol_bar, dac_vol_cb, LV_EVENT_PRESSING, NULL);
+
+	lv_obj_t *h = label(usb.panel, s.f_item, tx("Нажмите колесо — выйти"));
 	lv_obj_set_style_text_opa(h, 150, 0);
-	lv_obj_align(h, LV_ALIGN_BOTTOM_MID, 0, -24);
+	lv_obj_set_style_pad_all(h, 10, 0);
+	lv_obj_align(h, LV_ALIGN_BOTTOM_MID, 0, -6);
+	lv_obj_set_clickable(h, true);
+	lv_obj_add_event_cb(h, dac_exit_cb, LV_EVENT_CLICKED, NULL);
 	dac_update();
 	lv_refr_now(NULL);
 }
@@ -4609,9 +4660,10 @@ void xmb_dac_prepare(void)
 void xmb_dac_end(void)
 {
 	usb.dac = 0;
+	slide_close();
 	if (usb.panel)
 		lv_obj_delete(usb.panel);
-	usb.panel = usb.state = usb.vol = NULL;
+	usb.panel = usb.state = usb.vol = usb.vol_bar = NULL;
 }
 
 bool xmb_usb_end_requested(void)
@@ -5015,11 +5067,15 @@ void xmb_input(xmb_input_t in)
 		screen(!s.screen_on);
 		return;
 	}
-	if (usb.dac) {   /* режим ЦАПа: колесо — громкость, остальное не действует */
+	if (usb.dac) {   /* режим ЦАПа: колесо — громкость, клик — выйти (ползунком), остальное не действует */
+		if (slide_input(in))
+			return;
 		if (in == XMB_WHEEL_UP || in == XMB_WHEEL_DOWN) {
 			s.volume = volume_seg(s.volume, in == XMB_WHEEL_UP ? 1 : -1);
 			audio_set_volume(s.volume);
 			dac_update();
+		} else if (in == XMB_SELECT || in == XMB_BACK) {
+			dac_exit_ask();
 		}
 		return;
 	}
