@@ -11,6 +11,7 @@
 /apps/touchtest/touchtest
 /apps/inject/inject
 /apps/inject/fbprobe
+/apps/inject/fbshow
 
 # модули ядра HiBy (пропатченные бинарники) и тестовые звуки
 /apps/lcdhz/

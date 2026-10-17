@@ -5,3 +5,6 @@ inject: inject.c
 
 fbprobe: fbprobe.c
 	$(CC) -O2 -march=mips32r2 -Wall -static -s -o $@ $<
+
+fbshow: fbshow.c
+	$(CC) -O2 -march=mips32r2 -Wall -static -s -o $@ $<
