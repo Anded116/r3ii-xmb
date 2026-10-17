@@ -10,14 +10,14 @@
 |---|---|
 | `open` | 5 |
 | `in-progress` | 1 |
-| `fixed` | 21 |
+| `fixed` | 22 |
 | `verified` | 1 |
 | `accepted` | 3 |
-| **всего** | **31** |
+| **всего** | **32** |
 
 | Область | open | in-progress | fixed |
 |---|---|---|---|
-| ui | 0 | 0 | 6 |
+| ui | 0 | 0 | 7 |
 | player | 1 | 0 | 2 |
 | audio | 1 | 0 | 1 |
 | library | 0 | 0 | 2 |
@@ -63,6 +63,7 @@
 - [ ] [XMB-0029](XMB-0029-varianty-oformleniya-mini-pleera-stroki-spiska.md) `[P2/ui]` Варианты оформления мини-плеера: строки списка не должны просвечивать сквозь него
 - [ ] [XMB-0031](XMB-0031-teksty-pesen-dlya-vsey-biblioteki-pleer-sam.md) `[P2/net]` Тексты песен для всей библиотеки — плеер сам скачивает в фоне и держит на карте
 - [ ] [XMB-0023](XMB-0023-fon-pleera-tsvetom-oblozhki-plavnaya-smena.md) `[P3/player]` Фон плеера цветом обложки: плавная смена оттенка
+- [ ] [XMB-0032](XMB-0032-punkt-bez-vtoroy-stroki-smeschen-vverh.md) `[P3/ui]` Пункт без второй строки смещён вверх — центрировать
 
 **Проверить ТЕСТОМ**
 
