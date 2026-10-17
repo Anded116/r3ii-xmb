@@ -268,7 +268,7 @@ static void *fetch_thread(void *arg)
 		int rc = get(lf.url[i], tmp);
 		FILE *f = fopen(tmp, "rb");
 		if (!f) {
-			st = rc == (2 << 8) ? LF_NONE : LF_ERROR;   /* xmbget: 2 — сервер ответил не 200 (нет текста) */
+			st = rc == (2 << 8) ? LF_NONE : LF_ERROR;   /* xmbget: 2 — сервер ответил «нет» (4xx), 3 — сбоит (5xx) */
 			continue;
 		}
 		static char json[512 * 1024];

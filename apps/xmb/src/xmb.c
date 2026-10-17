@@ -153,8 +153,9 @@ static const uint32_t theme_colors[12][2] = {
 static const char *const wave_names[] = { "Волна PS3", "Лента", "Частицы", "Спектр", "Шёлк", "Сияние", "Звёздная пыль",
 					    "Пульс", "Круги", "Волна PSP", "Выключен", NULL };
 static const char *const onoff[] = { "Включено", "Выключено", NULL };
-enum { MINI_CLEAR, MINI_DARK, MINI_BLACK, MINI_THEME, MINI_CARD };
-static const char *const mini_names[] = { "Прозрачный", "Тёмный", "Чёрный", "Цвет темы", "Карточка", NULL };
+enum { MINI_CLEAR, MINI_DARK, MINI_BLACK, MINI_THEME, MINI_CARD, MINI_FRAME };
+static const char *const mini_names[] = { "Прозрачный", "Тёмный", "Чёрный", "Цвет темы", "Карточка",
+					  "Чёрный со скруглением", NULL };
 #define EDGE_MAX 8
 static const char *const edge_names[] = { "0 px", "1 px", "2 px", "3 px", "4 px", "5 px", "6 px", "7 px", "8 px", NULL };
 static const char *const bright_names[] = { "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%", "100%", NULL };
@@ -293,6 +294,7 @@ static struct {
 static void apply_theme(void);
 static void apply_mini(void);
 static void apply_edges(void);
+static void corners_place(void);
 static void apply_wave(void);
 static void apply_bright(void);
 static void apply_size(void);
@@ -1159,7 +1161,9 @@ static void layout_column(column_t *c, double x, double fade, double tk, int act
 
 static void layout_options(void)
 {
-	int x = (int)(SCR_W - s.opt_w * s.opt_t);
+	/* правый край рамки подбирают на глаз — меню не должно его закрывать: выезжает слева */
+	int left = s.opt_item && s.opt_item->val == &s.edge_r;
+	int x = left ? (int)(s.opt_w * (s.opt_t - 1)) : (int)(SCR_W - s.opt_w * s.opt_t);
 	set_pos(s.opt_panel, x, 0);
 	set_hidden(s.opt_panel, s.opt_t < 0.01);
 	int sub = (int)(s.opt_sub * s.opt_w * 0.5);   /* вложенное меню: въезжает и проявляется */
@@ -1865,19 +1869,103 @@ static void sleep_start(void)
 static lyrics_t lyr;
 static int lyr_track = -1, lyr_wait = -1;   /* lyr_wait — для какого трека идёт поиск */
 
+static void lyrics_file_of(int t, char *f, int cap)
+{
+	const lib_track_t *tr = &s.lib->tracks[t];
+	lyrics_path(f, cap, tr->path, tr->start > 0 || tr->end > 0, tr->artist, tr->title);
+}
+
 static void lyrics_file(char *f, int cap)
 {
-	const lib_track_t *tr = &s.lib->tracks[s.track];
-	lyrics_path(f, cap, tr->path, tr->start > 0 || tr->end > 0, tr->artist, tr->title);
+	lyrics_file_of(s.track, f, cap);
+}
+
+/* тексты для всей библиотеки — в фоне, пока есть Wi-Fi: по одному треку, найденное — на карту рядом с треком.
+ * Чего в LRCLIB нет — в .xmb/lyrics_none.txt (время и путь .lrc) и 30 дней не спрашивается. Запрос из плеера —
+ * вне очереди: фоновый ждёт, пока он не кончится */
+#define LYR_MISS_DAYS 30
+static int lyr_bg = -1, lyr_scan;   /* трек, который ищется в фоне; с какого продолжать обход */
+static uint32_t lyr_next_ms;        /* следующий фоновый запрос — не раньше */
+static char **lyr_miss;
+static int lyr_nmiss;
+
+static int str_cmp(const void *a, const void *b)
+{
+	return strcmp(*(char *const *)a, *(char *const *)b);
+}
+
+static void lyr_miss_file(char *out, int cap)
+{
+	snprintf(out, cap, "%s/.xmb/lyrics_none.txt", music_root());
+}
+
+static void lyr_miss_load(void)
+{
+	char f[300], line[1200];
+	lyr_miss_file(f, sizeof(f));
+	FILE *fp = fopen(f, "r");
+	if (!fp)
+		return;
+	long long now = time(NULL);
+	while (fgets(line, sizeof(line), fp)) {
+		line[strcspn(line, "\n")] = 0;
+		char *tab = strchr(line, '\t');
+		if (!tab || now - atoll(line) > LYR_MISS_DAYS * 86400LL)
+			continue;
+		lyr_miss = realloc(lyr_miss, (lyr_nmiss + 1) * sizeof(char *));
+		lyr_miss[lyr_nmiss++] = strdup(tab + 1);
+	}
+	fclose(fp);
+	qsort(lyr_miss, lyr_nmiss, sizeof(char *), str_cmp);
+}
+
+static void lyr_miss_add(const char *lrc)
+{
+	char f[300];
+	lyr_miss_file(f, sizeof(f));
+	FILE *fp = fopen(f, "a");
+	if (fp) {
+		fprintf(fp, "%lld\t%s\n", (long long)time(NULL), lrc);
+		fclose(fp);
+	}
+}
+
+static void lyrics_prefetch(void)
+{
+	static int loaded;
+	if (!s.lib || !s.settings_path[0] || lyr_bg >= 0 || lyr_wait >= 0 || lyr_scan >= s.lib->ntracks ||
+	    !wifi_online() || (int32_t)(lv_tick_get() - lyr_next_ms) < 0)
+		return;
+	if (!loaded) {
+		loaded = 1;
+		lyr_miss_load();
+	}
+	for (int k = 0; k < 4 && lyr_scan < s.lib->ntracks; k++) {   /* пропуски — по нескольку за кадр */
+		int t = lyr_scan++;
+		const lib_track_t *tr = &s.lib->tracks[t];
+		if (s.lib->albums[tr->aidx].podcast || !tr->artist[0] || !tr->title[0])
+			continue;
+		char f[1100];
+		struct stat st;
+		lyrics_file_of(t, f, sizeof(f));
+		const char *key = f;
+		if (!stat(f, &st) || (lyr_nmiss && bsearch(&key, lyr_miss, lyr_nmiss, sizeof(char *), str_cmp)))
+			continue;
+		lyrics_fetch(tr->artist, tr->title, s.lib->albums[tr->aidx].title, tr->dur, f);
+		lyr_bg = t;
+		return;
+	}
 }
 
 static void lyrics_find(void)
 {
+	lyr_wait = s.track;
+	if (lyr_bg >= 0)
+		return;   /* фоновый запрос кончится — этот начнётся (lyrics_poll) */
 	const lib_track_t *tr = &s.lib->tracks[s.track];
 	char f[1100];
 	lyrics_file(f, sizeof(f));
 	lyrics_fetch(tr->artist, tr->title, s.lib->albums[tr->aidx].title, tr->dur, f);
-	lyr_wait = s.track;
 }
 
 static void lyrics_refresh(void)
@@ -1919,8 +2007,32 @@ static void lyrics_toggle(void)
 static void lyrics_poll(void)
 {
 	int st = lyrics_fetch_poll();
-	if (st == LF_IDLE || st == LF_BUSY)
+	if (st == LF_IDLE) {
+		lyrics_prefetch();
 		return;
+	}
+	if (st == LF_BUSY)
+		return;
+	if (lyr_bg >= 0) {   /* итог фонового поиска */
+		int t = lyr_bg;
+		lyr_bg = -1;
+		lyr_next_ms = lv_tick_get() + (st == LF_ERROR ? 60000 : 5000);   /* LRCLIB на частые запросы отвечает 503 */
+		if (st == LF_NONE) {
+			char f[1100];
+			lyrics_file_of(t, f, sizeof(f));
+			lyr_miss_add(f);
+		}
+		if (lyr_wait >= 0 && lyr_wait != t) {   /* пока шёл фоновый, текст попросили в плеере — теперь он */
+			int w = lyr_wait;
+			lyr_wait = -1;
+			if (w == s.track)
+				lyrics_find();
+			return;
+		}
+		if (t != s.track || (st != LF_FOUND && lyr_wait < 0))
+			return;   /* не играющий трек; у играющего, не найден, но в плеере не просили — молча */
+		lyr_wait = t;   /* дальше — как итог запроса из плеера */
+	}
 	int same = lyr_wait == s.track;
 	lyr_wait = -1;
 	if (!same)
@@ -3878,6 +3990,11 @@ static void frame_cb(lv_timer_t *t)
 		bg_set_dim((int)cur[3], c);
 	}
 	set_hidden(s.mini, player_progress() > 0);
+	static int covered = -1;
+	if (covered != (player_progress() > 0)) {
+		covered = player_progress() > 0;
+		corners_place();
+	}
 	/* плеер свернулся — содержимое мини-плеера проявляется, а не возникает за кадр. Фон мини-плеера не трогаем:
 	 * он такой же, как у свернувшегося плеера */
 	static double mini_t = 1;
@@ -3907,7 +4024,7 @@ static void apply_mini(void)
 	uint32_t c = theme_colors[s.theme][1];   /* низ фона темы, притемнённый: мини-плеер как часть фона */
 	uint32_t dark = ((c >> 16 & 255) * 2 / 5) << 16 | ((c >> 8 & 255) * 2 / 5) << 8 | (c & 255) * 2 / 5;
 	int card = s.mini_style == MINI_CARD;
-	uint32_t color = s.mini_style >= MINI_THEME ? dark : 0;
+	uint32_t color = s.mini_style == MINI_THEME || card ? dark : 0;
 	int opa = s.mini_style == MINI_CLEAR ? 77 : s.mini_style == MINI_DARK ? 217 : 255;
 	int x = card ? 6 : 0, w = SCR_W - 2 * x, h = card ? MINI_H - 4 : MINI_H, inset = card ? 12 : 0;
 	lv_obj_set_pos(s.mini, x, SCR_H - MINI_H);
@@ -3923,6 +4040,7 @@ static void apply_mini(void)
 	lv_obj_set_x(s.mini_time, w - 54);
 	lv_obj_set_x(s.mini_icon, w - 54);
 	player_set_mini_bg(color, opa);
+	corners_place();
 }
 
 static void spectrum_update(void);
@@ -5378,6 +5496,17 @@ static uint8_t corner_px[4][(CORNER_R + EDGE_MAX) * CORNER_R];
 static lv_image_dsc_t corner_img[4];
 static lv_obj_t *corner_obj[4], *edge_obj[2];
 
+/* нижние углы — у края экрана; при «Чёрном со скруглением» — на верхнем крае мини-плеера, как верхние у статус-бара
+ * (пока не раскрыт плеер: он во весь экран) */
+static void corners_place(void)
+{
+	int up = s.mini_style == MINI_FRAME && player_progress() <= 0;
+	for (int c = 0; c < 4; c++)
+		if (corner_obj[c])
+			lv_obj_set_pos(corner_obj[c], c & 1 ? SCR_W - (int)corner_img[c].header.w : 0,
+				       !(c & 2) ? TOP_H : up ? SCR_H - MINI_H - CORNER_R : SCR_H - CORNER_R);
+}
+
 /* рамка корпуса закрывает несколько пикселей экрана по бокам (Настройки → Экран → Рамка): там чёрная полоса,
  * а дуга угла касается видимого края, а не края кадра */
 static void apply_edges(void)
@@ -5400,9 +5529,9 @@ static void apply_edges(void)
 			lv_obj_set_style_image_recolor_opa(corner_obj[c], LV_OPA_COVER, 0);
 		}
 		lv_image_set_src(corner_obj[c], &corner_img[c]);
-		lv_obj_set_pos(corner_obj[c], c & 1 ? SCR_W - w : 0, c & 2 ? SCR_H - CORNER_R : TOP_H);
 		lv_obj_invalidate(corner_obj[c]);
 	}
+	corners_place();
 	for (int i = 0; i < 2; i++) {
 		int k = i ? s.edge_r : s.edge_l;
 		if (!edge_obj[i]) {
@@ -5526,7 +5655,7 @@ static const struct {
 	{ "ui_size", &s.ui_size, 3 }, { "volume", &s.volume, 100 }, { "screen_off", &s.screen_off, 5 },
 	{ "album_view", &s.album_view, 2 }, { "gain", &s.gain, 2 }, { "replaygain", &s.rg_mode, 2 }, { "xfade", &s.xfade, 3 }, { "lang", &s.lang, LANG_COUNT - 1 },
 	{ "kb_start", &s.kb_start, 2 }, { "kb_langs", &s.kb_langs, 1 },
-	{ "mini_style", &s.mini_style, MINI_CARD }, { "edge_l", &s.edge_l, EDGE_MAX }, { "edge_r", &s.edge_r, EDGE_MAX },
+	{ "mini_style", &s.mini_style, MINI_FRAME }, { "edge_l", &s.edge_l, EDGE_MAX }, { "edge_r", &s.edge_r, EDGE_MAX },
 	{ "btn_next_s", &s.btn[0][0], BA_COUNT - 1 }, { "btn_next_l", &s.btn[0][1], BA_COUNT - 1 },
 	{ "btn_next_d", &s.btn[0][2], BA_COUNT - 1 }, { "btn_play_s", &s.btn[1][0], BA_COUNT - 1 },
 	{ "btn_play_l", &s.btn[1][1], BA_COUNT - 1 }, { "btn_play_d", &s.btn[1][2], BA_COUNT - 1 },

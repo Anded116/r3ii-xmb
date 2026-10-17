@@ -134,7 +134,7 @@ static const char *const table[][LANG_COUNT] = {
 	{ "Сети", "Networks", "Redes" }, { "Wi-Fi выключен", "Wi-Fi is off", "Wi-Fi apagado" },
 	{ "Мини-плеер", "Mini player", "Minirreproductor" }, { "Прозрачный", "Transparent", "Transparente" },
 	{ "Тёмный", "Dark", "Oscuro" }, { "Чёрный", "Black", "Negro" }, { "Цвет темы", "Theme color", "Color del tema" },
-	{ "Карточка", "Card", "Tarjeta" }, { "Рамка: левый край", "Bezel: left edge", "Marco: borde izquierdo" },
+	{ "Карточка", "Card", "Tarjeta" }, { "Чёрный со скруглением", "Black, rounded", "Negro redondeado" }, { "Рамка: левый край", "Bezel: left edge", "Marco: borde izquierdo" },
 	{ "Рамка: правый край", "Bezel: right edge", "Marco: borde derecho" },
 	{ "Библиотека: просмотрено %d", "Library: %d files scanned", "Biblioteca: %d archivos" },
 	{ "Подкасты: проверка", "Podcasts: checking", "Podcasts: comprobando" },

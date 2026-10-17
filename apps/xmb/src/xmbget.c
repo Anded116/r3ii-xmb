@@ -2,7 +2,8 @@
  * busybox wget прошивки не договаривается по TLS с CDN (Akamai, Spotify — рукопожатие висит до таймаута), а системные
  * libcurl/libssl — под glibc, к статическому XMB их не подключить. Здесь — mbedTLS: TLS 1.2 и 1.3, SNI, проверка
  * сертификата по набору Mozilla (cacert.pem рядом с программой), переходы по Location, chunked.
- * Код возврата: 0 — скачано (200), 1 — ошибка (сообщение в stderr), 2 — сервер ответил не 200 (404 и т. п.). */
+ * Код возврата: 0 — скачано (200), 1 — ошибка (сообщение в stderr), 2 — сервер ответил «нет» (4xx: 404 и т. п.),
+ * 3 — сервер сбоит (5xx: 503 и т. п.) — стоит повторить позже. */
 #include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
@@ -309,7 +310,7 @@ static int get(const char *u, const char *out)
 		if (status != 200) {
 			fprintf(stderr, "xmbget: %s ответил %d\n", url.host, status);
 			c_close(&c);
-			return 2;
+			return status >= 500 ? 3 : 2;
 		}
 		FILE *f = fopen(out, "wb");
 		if (!f) {

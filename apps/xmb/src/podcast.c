@@ -331,7 +331,7 @@ static int fetch(const char *url, const char *file, int timeout)
 	if (!get)
 		return -1;
 	snprintf(cmd, sizeof(cmd), "nice -n 19 %s -T %d -O %s %s 2>>/tmp/xmb_get.log", get, timeout, qf, qu);
-	/* Wi-Fi плеера временами теряет DNS и пакеты: ещё две попытки; «сервер ответил не 200» (код 2) не повторять */
+	/* Wi-Fi плеера временами теряет DNS и пакеты: ещё две попытки; «сервер ответил нет» (код 2, 4xx) не повторять */
 	int rc = -1;
 	for (int i = 0; i < 3; i++) {
 		rc = sp_system(cmd);
