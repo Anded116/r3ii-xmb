@@ -28,7 +28,8 @@ void bg_set_wave(bg_wave_t w);
 void bg_tick(double dt);
 void bg_set_level(double level);            /* 0..1 — уровень звука для визуализатора */
 void bg_set_band(int player);               /* 1 — полоса волны под обложкой плеера */
-void bg_set_dim(int opa);                   /* затемнение чёрным 0..255 — фон под раскрытым плеером */
+/* фон под раскрытым плеером: смешать с цветом (0 — чёрный, затемнение) на opa 0..255; 0 — без смешивания */
+void bg_set_dim(int opa, uint32_t color);
 void bg_set_spectrum(const float *v, int n); /* полосы спектра 0..1, от низких частот к высоким */
 const lv_image_dsc_t *bg_glow(int size);    /* пятно свечения под выбранным элементом */
 

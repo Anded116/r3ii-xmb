@@ -304,12 +304,53 @@ static void cover_apply(void)
 	lv_obj_set_size(p.cover, sz, sz);
 }
 
+/* цвет обложки для фона: среднее с весом по насыщенности (краска важнее серого), яркость — около трети, чтобы
+ * белый текст читался */
+static uint32_t tint;
+static const lv_image_dsc_t *tint_src;
+
+static void tint_calc(const lv_image_dsc_t *d)
+{
+	tint_src = d;
+	tint = 0;
+	if (!d)
+		return;
+	const uint16_t *px = (const uint16_t *)d->data;
+	int w = d->header.w, h = d->header.h, stride = d->header.stride / 2;
+	double sr = 0, sg = 0, sb = 0, sw = 0;
+	for (int y = 0; y < h; y += 4)
+		for (int x = 0; x < w; x += 4) {
+			uint16_t v = px[y * stride + x];
+			int r = (v >> 11) << 3, g = ((v >> 5) & 63) << 2, b = (v & 31) << 3;
+			int mx = r > g ? (r > b ? r : b) : (g > b ? g : b), mn = r < g ? (r < b ? r : b) : (g < b ? g : b);
+			double wgt = (mx - mn) + 8.0;
+			sr += r * wgt;
+			sg += g * wgt;
+			sb += b * wgt;
+			sw += wgt;
+		}
+	double r = sr / sw, g = sg / sw, b = sb / sw, mx = fmax(r, fmax(g, b));
+	if (mx < 1)
+		mx = 1;
+	double k = 92.0 / mx;   /* самый яркий канал — к 92 из 255 */
+	tint = ((uint32_t)fmin(255, r * k) << 16) | ((uint32_t)fmin(255, g * k) << 8) | (uint32_t)fmin(255, b * k);
+	if (!tint)
+		tint = 0x010101;
+}
+
+uint32_t player_tint(void)
+{
+	return tint;
+}
+
 /* обложка, пока её нет (декодируется или не поддержана) — кассета */
 static void cover_refresh(void)
 {
 	const lv_image_dsc_t *d = cover_get(p.cover_path, COVER);
 	int wait = !d && p.cover_path && cover_ready(p.cover_path, COVER) == 0;
 	p.cover_full = d;
+	if (d != tint_src)
+		tint_calc(d);
 	if (d)
 		cover_apply();
 	if (lv_obj_is_hidden(p.cover) != !d)

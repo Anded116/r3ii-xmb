@@ -41,6 +41,7 @@ static float spec[NSPEC], level;
 static int band_y = BAND_Y;
 static int full = 1;        /* модулю — перерисовать всё (новый фон, стиль, место полосы) */
 static int dim, dim_done;   /* затемнение и для какого оно посчитано (0 — не посчитано) */
+static uint32_t dim_color, done_color;   /* с каким цветом смешивается (0xRRGGBB, 0 — чёрный) */
 static double t_sec;
 
 static const wave_t *module(void)
@@ -143,29 +144,36 @@ void bg_set_colors(uint32_t top, uint32_t bottom)
 	full = 1;
 	dim_done = 0;
 	if (dim)
-		bg_set_dim(dim);
+		bg_set_dim(dim, dim_color);
 	if (image)
 		lv_obj_invalidate(image);
 }
 
 /* та же формула, что у LVGL для заливки с прозрачностью (LV_COLOR_MIX_16_TO_16_PREPARED): вид — как у слоя поверх */
-static void make_dimmed(int opa)
+static void make_dimmed(int opa, uint32_t color)
 {
 	uint32_t mix5 = ((uint32_t)opa + 4) >> 3;
+	uint16_t c = lv_color_to_u16(lv_color_hex(color));
+	uint32_t fg = ((uint32_t)c | ((uint32_t)c << 16)) & 0x07E0F81Fu;
 	for (int i = 0; i < W * H; i++) {
 		uint32_t bg = ((uint32_t)pixels[i] | ((uint32_t)pixels[i] << 16)) & 0x07E0F81Fu;
-		uint32_t r = ((((0 - bg) * mix5) >> 5) + bg) & 0x07E0F81Fu;
+		uint32_t r = ((((fg - bg) * mix5) >> 5) + bg) & 0x07E0F81Fu;
 		dimmed[i] = (uint16_t)((r >> 16) | r);
 	}
 	dim_done = opa;
+	done_color = color;
 }
 
-void bg_set_dim(int opa)
+void bg_set_dim(int opa, uint32_t color)
 {
-	if (opa && dim_done != opa)
-		make_dimmed(opa);
-	if (opa == dim && image && lv_image_get_src(image) == (const void *)(opa ? &dim_img : &img))
+	int fresh = opa && (dim_done != opa || done_color != color);
+	if (fresh)
+		make_dimmed(opa, color);
+	dim_color = color;
+	if (!fresh && opa == dim && image && lv_image_get_src(image) == (const void *)(opa ? &dim_img : &img))
 		return;
+	if (fresh && image)
+		lv_obj_invalidate(image);
 	dim = opa;
 	lv_image_set_src(image, opa ? &dim_img : &img);
 	if (wave)
@@ -184,7 +192,7 @@ static void draw_cb(lv_event_t *e)
 	if (dim) {   /* полоса рисуется по незатемнённому фону — затемнить её, как всё остальное */
 		lv_draw_rect_dsc_t r;
 		lv_draw_rect_dsc_init(&r);
-		r.bg_color = lv_color_black();
+		r.bg_color = lv_color_hex(dim_color);
 		r.bg_opa = (lv_opa_t)dim;
 		lv_draw_rect(lv_event_get_layer(e), &r, &a);
 	}

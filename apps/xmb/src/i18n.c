@@ -109,6 +109,8 @@ static const char *const table[][LANG_COUNT] = {
 	{ "Конец очереди", "End of queue", "Fin de la cola" },
 	{ "Сон через %d мин", "Sleep in %d min", "Reposo en %d min" }, { "Один", "One", "Una" }, { "Все", "All", "Todas" },
 	{ "Сенсор", "Touch", "Táctil" },
+	{ "Фон плеера", "Player background", "Fondo del reproductor" }, { "Затемнение", "Dimmed", "Oscurecido" },
+	{ "Цвет обложки", "Cover color", "Color de la portada" },
 	{ "Текст", "Lyrics", "Letra" },
 	{ "Текста нет. С Wi-Fi найду его в LRCLIB", "No lyrics. With Wi-Fi I'll look in LRCLIB", "Sin letra. Con Wi-Fi la buscaré en LRCLIB" },
 	{ "Ищу текст…", "Looking for lyrics…", "Buscando la letra…" }, { "Текст не найден", "Lyrics not found", "Letra no encontrada" },

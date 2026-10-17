@@ -160,6 +160,7 @@ static const int screen_sec[] = { 15, 30, 60, 120, 300, 0 };
 static const char *const dev_sleep_names[] = { "Через 1 минуту", "Через 5 минут", "Выключен", NULL };
 static const int dev_sleep_sec[] = { 60, 300, 0 };
 static const char *const album_views[] = { "Сетка", "Список", "Список с обложками", NULL };
+static const char *const player_bg_names[] = { "Затемнение", "Цвет обложки", NULL };
 static const char *const gain_names[] = { "Высокое", "Среднее", "Низкое", NULL };
 static const char *const rg_names[] = { "Выключен", "По трекам", "По альбомам", NULL };
 static const char *const lang_names[] = { "Русский", "English", "Español", NULL };   /* каждый — на своём языке */
@@ -217,7 +218,7 @@ static struct {
 	double cat_pos, depth_t, focus_t, hint_t[2], bhint_t, slide;
 	/* настройки */
 	int theme, wave, touch_off, bright, sleep, bt_off, wifi_off, codec, shuffle, repeat, usb_dac, eq_on, ui_size;
-	int screen_off, album_view, dev_sleep, gain, rg_mode, xfade, lang;
+	int screen_off, album_view, dev_sleep, gain, rg_mode, xfade, lang, player_bg;
 	int btn[XMB_BTN_COUNT][XMB_G_COUNT];   /* действие кнопки на жест */
 	/* эквалайзер: пресет, свои полосы (дБ + 12, чтобы хранить в файле настроек), редактор */
 	int eq_preset, eq_custom[EQ_BANDS], eq_edit, eq_band, eq_adjust;
@@ -377,6 +378,7 @@ static const node_t screen_items[] = {
 	OPT(LV_SYMBOL_EDIT, "Размер интерфейса", size_names, &s.ui_size, apply_size),
 	OPT(LV_SYMBOL_IMAGE, "Вид альбомов", album_views, &s.album_view, NULL),
 	OPT(LV_SYMBOL_EYE_CLOSE, "Гашение экрана", screen_names, &s.screen_off, NULL),
+	OPT(LV_SYMBOL_AUDIO, "Фон плеера", player_bg_names, &s.player_bg, NULL),
 };
 static const node_t control_items[] = {
 	DIR(LV_SYMBOL_KEYBOARD, "Кнопки", "что делают кнопки на корпусе", btn_items),
@@ -3627,7 +3629,9 @@ static void frame_cb(lv_timer_t *t)
 			printf("кадр логики: раскладка %u мс, волна и верх %u мс\n", t1 - t0, t2 - t1);
 	}
 	set_hidden(s.main, player_covers());
-	bg_set_dim(player_covers() ? PLAYER_DIM : 0);
+	/* под плеером — затемнение или цвет обложки (гуще: краска вместо черноты) */
+	uint32_t tint = s.player_bg ? player_tint() : 0;
+	bg_set_dim(player_covers() ? (tint ? 215 : PLAYER_DIM) : 0, tint);
 	set_hidden(s.mini, player_progress() > 0);
 	/* плеер свернулся — содержимое мини-плеера проявляется, а не возникает за кадр. Фон мини-плеера не трогаем:
 	 * он такой же, как у свернувшегося плеера */
@@ -5190,7 +5194,7 @@ static const struct {
 	int *val, max;
 } settings[] = {
 	{ "theme", &s.theme, 11 }, { "bg", &s.wave, BG_WAVE_COUNT - 1 }, { "touch_off", &s.touch_off, 1 },
-	{ "bright", &s.bright, 9 }, { "bt_off", &s.bt_off, 1 }, { "wifi_off", &s.wifi_off, 1 },
+	{ "bright", &s.bright, 9 }, { "bt_off", &s.bt_off, 1 }, { "wifi_off", &s.wifi_off, 1 }, { "player_bg", &s.player_bg, 1 },
 	{ "codec", &s.codec, 5 }, { "shuffle", &s.shuffle, 1 }, { "repeat", &s.repeat, 2 }, { "eq_on", &s.eq_on, 1 },
 	{ "ui_size", &s.ui_size, 3 }, { "volume", &s.volume, 100 }, { "screen_off", &s.screen_off, 5 },
 	{ "album_view", &s.album_view, 2 }, { "gain", &s.gain, 2 }, { "replaygain", &s.rg_mode, 2 }, { "xfade", &s.xfade, 3 }, { "lang", &s.lang, LANG_COUNT - 1 },
