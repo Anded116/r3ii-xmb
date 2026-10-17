@@ -3,7 +3,7 @@
 # подряд при загрузке XMB не запускается. Проработал дольше минуты — счётчик сброшен. Флаги — во внутренней памяти
 # (/usr/data/xmb, прошивка с xmb_boot.sh), без неё — на карте (hiby_dev, для autorun.sh).
 # Журнал — на карте (hiby_dev/xmb.log, прошлый запуск — xmb.log.prev), без карты — /tmp/xmb.log.
-# Нет строки «xmb exit» в конце — перезагрузилось ядро, а не XMB. Код 3 — перезапуск XMB без перезагрузки.
+# Нет строки «xmb exit» в конце — перезагрузилось ядро, а не XMB. Код 3 — перезапуск XMB без перезагрузки, 4 — выключение.
 D=/data/mnt/sd_0/hiby_dev
 F=$D
 [ -x /usr/bin/xmb_boot.sh ] && F=/usr/data/xmb
@@ -24,6 +24,13 @@ while :; do
 	echo "=== $(date) перезапуск" >> $LOG
 	warm=1
 done
+if [ $rc -eq 4 ]; then   # батарея села: выключить, а не перезагрузить
+	echo "xmb exit 4: батарея села, выключение" >> $LOG
+	rm -f $F/xmb_fails
+	sync
+	poweroff
+	exit 0
+fi
 if [ $rc -eq 0 ]; then
 	rm -f $F/xmb_fails
 	touch $F/xmb_skip_once

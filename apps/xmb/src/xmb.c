@@ -301,6 +301,7 @@ static void last_file(char *out, size_t cap);
 static void last_load(void);
 static void size_metrics(void);
 static void about_fill(void);
+static void battery_guard(void);
 static void slide_tick(double dt);
 static void slide_open(const char *icon, const char *title, const char *sub, const char *hint, int dir,
 		       const char *cancel_text, void (*done)(void), void (*cancelled)(void));
@@ -3286,6 +3287,7 @@ static void frame_cb(lv_timer_t *t)
 	library_poll();
 	settings_poll();
 	bt_poll();
+	battery_guard();
 	/* гашение экрана без касаний и кнопок; пока тянут шторку или ползунок — не гаснет */
 	if (s.screen_on && screen_sec[s.screen_off] && s.t_mode == T_NONE &&
 	    now - s.input_ms > (uint32_t)screen_sec[s.screen_off] * 1000u)
@@ -3944,7 +3946,56 @@ void xmb_storage_prepare(void)
 }
 
 /* «Стоковый плеер»: перезагрузка в сток на одну загрузку (обновление прошивки — там) */
-static int quit_req;
+static int quit_req, power_off_req;
+
+bool xmb_power_off_requested(void)
+{
+	return power_off_req;
+}
+
+/* батарея, как в Sonix: на 5 % — одно предупреждение (снова — после 10 %); на 1 % три чтения подряд — отсчёт 10 с,
+ * зарядка его отменяет, потом всё сохраняется и плеер выключается. Датчик бывает врёт нулём: при напряжении от
+ * 3600 мВ не выключать. Работает и с погашенным экраном */
+static void battery_guard(void)
+{
+	static uint32_t last, cd_end;
+	static int warned, low;
+	uint32_t now = lv_tick_get();
+	if (now - last < (cd_end ? 1000u : 5000u))
+		return;
+	last = now;
+	int chg, cap = platform_battery(&chg), mv = platform_battery_mv();
+	if (cap < 0)
+		return;
+	if (chg || cap >= 10)
+		warned = 0;
+	if (!chg && cap <= 5 && cap > 1 && !warned) {
+		warned = 1;
+		if (!s.screen_on)
+			screen(1);
+		toast("Батарея %d%% — подключите зарядку", cap);
+	}
+	low = !chg && cap <= 1 && (mv < 0 || mv < 3600) ? low + 1 : 0;
+	if (cd_end && chg) {
+		cd_end = 0;
+		toast("%s", "Зарядка — выключение отменено");
+	} else if (!cd_end && low >= 3) {
+		cd_end = now + 10000;
+		if (!s.screen_on)
+			screen(1);
+	}
+	if (!cd_end)
+		return;
+	int left = (int)((int32_t)(cd_end - now) + 999) / 1000;
+	if (left > 0) {
+		toast("Батарея села — выключение через %d с", left);
+		return;
+	}
+	if (s.playing)
+		toggle_play();
+	save_flush();
+	power_off_req = 1;
+}
 
 static void stock_do(void)
 {

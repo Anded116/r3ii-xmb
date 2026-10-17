@@ -30,6 +30,8 @@ int xmb_input_name(const char *name);
 bool xmb_screen_on(void);
 /* пользователь выбрал «Стоковый плеер»: XMB завершается, следующая загрузка — в сток (run_xmb.sh) */
 bool xmb_quit_requested(void);
+/* батарея села: XMB завершается кодом 4, run_xmb.sh выключает плеер */
+bool xmb_power_off_requested(void);
 /* после удаления с карты: XMB перезапускается (библиотека перечитывается, место в меню восстанавливается) */
 bool xmb_restart_requested(void);
 /* перед перезапуском (после USB-накопителя, удаления, возврата карты): запомнить место в меню */
@@ -58,6 +60,7 @@ void xmb_wake(void);
 
 /* реализуются платформой (main_host.c / main_device.c) */
 int platform_battery(int *charging);   /* заряд в %, -1 — неизвестно */
+int platform_battery_mv(void);         /* напряжение, мВ; -1 — неизвестно */
 void platform_brightness(int percent);
 
 #endif

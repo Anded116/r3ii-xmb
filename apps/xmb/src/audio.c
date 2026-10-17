@@ -655,7 +655,7 @@ static int out_open(int rate)
 		apply_volume();
 	}
 	struct pcm_config cfg = {
-		.channels = 2, .rate = rate, .period_size = CHUNK, .period_count = 4, .format = PCM_FORMAT_S16_LE,
+		.channels = 2, .rate = rate, .period_size = CHUNK * 2, .period_count = 4, .format = PCM_FORMAT_S16_LE,
 	};
 	a.pcm = pcm_open(0, 0, PCM_OUT, &cfg);
 	if (!a.pcm || !pcm_is_ready(a.pcm)) {
@@ -665,6 +665,13 @@ static int out_open(int rate)
 	}
 	a.out_rate = rate;
 	return 0;
+}
+
+/* сбросить недоигранное в PCM; следующая запись подготовит его заново */
+static void out_drop(void)
+{
+	if (a.pcm)
+		pcm_stop(a.pcm);
 }
 
 static void out_write(const int16_t *buf, unsigned frames)
@@ -739,6 +746,7 @@ static void out_write(int16_t *buf, unsigned frames)
 static void apply_volume(void) {}
 static void out_power_off(void) {}
 static void bt_take(void) {}
+static void out_drop(void) {}
 
 void audio_set_bt(const char *path, int rate, int bits)
 {
@@ -930,6 +938,7 @@ static void apply_rg(int16_t *buf, unsigned n, float k)
 
 static volatile int spec_on = 1;   /* считать спектр: только пока экран включён */
 static void open_request(void);
+static void out_drop(void);
 
 /* заявки интерфейса — в том порядке, в каком их отменяют друг друга (под a.mu) */
 static void take_cmds(void)
@@ -968,12 +977,16 @@ static void take_cmds(void)
 		a.nx_xfade = c.next_xfade;
 		a.nx_rg = c.next_rg;
 	}
+	if (c.pause && c.pause_v && !a.paused)
+		out_drop();   /* пауза — сразу: накопленное в буфере PCM не доигрывать */
 	if (c.pause)
 		a.paused = c.pause_v;
 	if (c.seek) {
 		a.seek_to = c.seek_v;
 		a.ended = 0;
 	}
+	if (c.seek || c.play)
+		out_drop();   /* новое место или трек — без хвоста старого */
 }
 
 static void *audio_thread(void *arg)

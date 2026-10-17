@@ -36,6 +36,11 @@ int platform_battery(int *charging)
 	return 87;
 }
 
+int platform_battery_mv(void)
+{
+	return -1;
+}
+
 void platform_brightness(int percent)
 {
 	(void)percent;

@@ -152,6 +152,7 @@ static void deep_sleep(void)
 #define SD_MNT "/usr/data/mnt/sd_0"
 #define SD_OPTS "fmask=0022,dmask=0022,iocharset=utf8,namecase=0"
 #define XMB_RESTART 3
+#define XMB_POWER_OFF 4
 #define USB_HOLD_MS 1000   /* в режиме накопителя: удержание колеса — вернуть карту */
 
 static int usb_storage, usb_adb;   /* режим накопителя; до него контроллер держал adb_demo */
@@ -449,6 +450,18 @@ int platform_battery(int *charging)
 	return cap;
 }
 
+int platform_battery_mv(void)
+{
+	char buf[32];
+	int mv = -1;
+	FILE *f = fopen("/sys/class/power_supply/battery/voltage_now", "r");
+	if (f && fgets(buf, sizeof(buf), f))
+		mv = atoi(buf) / 1000;
+	if (f)
+		fclose(f);
+	return mv;
+}
+
 int main(int argc, char **argv)
 {
 	/* журнал открывает сам XMB (XMB_LOG): перенаправление в run_xmb.sh держит файл на карте открытым в shell,
@@ -537,8 +550,11 @@ int main(int argc, char **argv)
 			printf("медленно %u мс: %s +%u мс (рисование %u, из него pan %u)\n", t_p - t_h, script_tok, t_h - script_tok_ms,
 			       refr_ms, pan_ms);
 		refr_ms = pan_ms = 0;
-		/* экран погашен — кадров нет, просыпаться реже (кнопки будят poll сразу) */
-		int cap = screen ? 16 : 50;
+		/* экран погашен — кадров нет, просыпаться 4 раза в секунду (кнопки будят poll сразу); пока кнопка нажата или
+		 * ждёт второго нажатия — чаще: жест решается по времени */
+		int busy = b_next.held || b_next.pending || b_play.held || b_play.pending || b_screen.held || b_screen.pending ||
+			   sel_down || auto_cd;
+		int cap = screen ? 16 : busy ? 20 : 250;
 		poll(pfd, 3, screen && wait < 16 ? (int)wait : cap);
 		prof_poll += tick_ms() - t_p;
 
@@ -595,6 +611,10 @@ int main(int argc, char **argv)
 		}
 		if ((script_done && !usb_storage) || xmb_quit_requested())
 			break;
+		if (xmb_power_off_requested()) {
+			exit_code = XMB_POWER_OFF;
+			break;
+		}
 		if (xmb_restart_requested()) {
 			exit_code = XMB_RESTART;
 			break;
