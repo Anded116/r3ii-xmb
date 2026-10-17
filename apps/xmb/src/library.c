@@ -498,6 +498,40 @@ static int ncache, capcache;
 static cache_t *fresh;
 static int nfresh, capfresh;
 
+/* картинки-кандидаты в обложки: годится ли и сколько пикселей — чтобы не читать заголовок при каждом скане */
+typedef struct {
+	char *path;
+	long size, mtime, px;
+	int usable;
+} img_t;
+
+static img_t *imgs, *fresh_imgs;
+static int nimgs, capimgs, nfresh_imgs, capfresh_imgs;
+
+/* картинки, которые встретил обход: обложки ищутся по этому списку, папки второй раз не читаются */
+static char **seen;
+static int nseen, capseen;
+
+static int is_image(const char *name)
+{
+	const char *dot = strrchr(name, '.');
+	return dot && (!strcasecmp(dot, ".jpg") || !strcasecmp(dot, ".jpeg") || !strcasecmp(dot, ".png"));
+}
+
+static int img_cmp(const void *a, const void *b)
+{
+	return strcmp(((const img_t *)a)->path, ((const img_t *)b)->path);
+}
+
+static void img_push(img_t **arr, int *n, int *cap, img_t v)
+{
+	if (*n == *cap) {
+		*cap = *cap ? *cap * 2 : 256;
+		*arr = realloc(*arr, *cap * sizeof(**arr));
+	}
+	(*arr)[(*n)++] = v;
+}
+
 static int cache_cmp(const void *a, const void *b)
 {
 	return strcmp(((const cache_t *)a)->path, ((const cache_t *)b)->path);
@@ -515,6 +549,16 @@ static void cache_load(const char *file)
 	}
 	while (fgets(line, sizeof(line), f)) {
 		line[strcspn(line, "\n")] = 0;
+		if (!strncmp(line, "@img\t", 5)) {   /* @img путь размер время годится пикселей */
+			char *q = line + 5, *tab = strchr(q, '\t');
+			long size, mtime, px;
+			int usable;
+			if (tab && sscanf(tab + 1, "%ld\t%ld\t%d\t%ld", &size, &mtime, &usable, &px) == 4) {
+				*tab = 0;
+				img_push(&imgs, &nimgs, &capimgs, (img_t){ strdup(q), size, mtime, px, usable });
+			}
+			continue;
+		}
 		char *col[17];
 		int n = 0;
 		for (char *p = line; n < 17; n++) {
@@ -552,6 +596,7 @@ static void cache_load(const char *file)
 	}
 	fclose(f);
 	qsort(cache, ncache, sizeof(*cache), cache_cmp);
+	qsort(imgs, nimgs, sizeof(*imgs), img_cmp);
 }
 
 static void cache_save(const char *file)
@@ -566,6 +611,10 @@ static void cache_save(const char *file)
 			c->size, c->mtime, c->tags.dur, c->tags.track, c->tags.disc, c->tags.year, c->tags.title, c->tags.artist,
 			c->tags.album, c->tags.albumartist, c->tags.pic_off, c->tags.pic_len, c->tags.rg_track, c->tags.rg_album,
 			c->tags.rg_tpeak, c->tags.rg_apeak);
+	}
+	for (int i = 0; i < nfresh_imgs; i++) {
+		img_t *m = &fresh_imgs[i];
+		fprintf(f, "@img\t%s\t%ld\t%ld\t%d\t%ld\n", m->path, m->size, m->mtime, m->usable, m->px);
 	}
 	fclose(f);
 }
@@ -611,9 +660,9 @@ static void title_from_name(const char *name, char *out)
 		*dot = 0;
 }
 
-static int name_cmp(const void *a, const void *b)
+static int name_cmp(const void *a, const void *b)   /* имена в walk — с байтом типа впереди */
 {
-	return lib_strcmp(*(char *const *)a, *(char *const *)b);
+	return lib_strcmp(*(char *const *)a + 1, *(char *const *)b + 1);
 }
 
 /* теги файла: из кэша, если файл не менялся, иначе чтением; попадают в новый кэш */
@@ -843,11 +892,20 @@ static void walk(const char *path, lib_dir_t *dir)
 	while ((e = readdir(d))) {
 		if (skip_dir(e->d_name))
 			continue;
+		/* тип — первым байтом имени: папку видно без stat, stat нужен только звуку */
 		names = realloc(names, (n + 1) * sizeof(char *));
-		names[n++] = strdup(e->d_name);
+		names[n] = malloc(strlen(e->d_name) + 2);
+		names[n][0] = e->d_type == DT_DIR ? 'd' : e->d_type == DT_UNKNOWN ? '?' : 'f';
+		strcpy(names[n] + 1, e->d_name);
+		n++;
 	}
 	closedir(d);
 	qsort(names, n, sizeof(char *), name_cmp);
+	char kind[n ? n : 1];
+	for (int i = 0; i < n; i++) {
+		kind[i] = names[i][0];
+		memmove(names[i], names[i] + 1, strlen(names[i]));
+	}
 	char full[1024];
 	cue_t **cue_of = calloc(n ? n : 1, sizeof(cue_t *));   /* лист для файла-образа */
 	for (int i = 0; i < n; i++) {
@@ -866,14 +924,24 @@ static void walk(const char *path, lib_dir_t *dir)
 		snprintf(full, sizeof(full), "%s/%s", path, names[i]);
 		struct stat st;
 		const char *ext;
-		if (stat(full, &st) == 0 && S_ISDIR(st.st_mode)) {
+		int audio = is_audio(names[i], &ext);
+		if (kind[i] == '?' || audio)
+			if (stat(full, &st))
+				kind[i] = 'x';
+		if (kind[i] == 'd' || (kind[i] == '?' && S_ISDIR(st.st_mode))) {
 			lib_dir_t sub = { strdup(names[i]), NULL, 0, NULL, 0 };
 			walk(full, &sub);
 			if (sub.ndirs || sub.ntracks) {
 				dir->dirs = realloc(dir->dirs, (dir->ndirs + 1) * sizeof(lib_dir_t));
 				dir->dirs[dir->ndirs++] = sub;
 			}
-		} else if (is_audio(names[i], &ext)) {
+		} else if (!audio && is_image(names[i])) {
+			if (nseen == capseen) {
+				capseen = capseen ? capseen * 2 : 256;
+				seen = realloc(seen, capseen * sizeof(char *));
+			}
+			seen[nseen++] = strdup(full);
+		} else if (audio && kind[i] != 'x') {
 			if (cue_of[i])
 				add_cue_tracks(cue_of[i], full, ext, &st, dir);
 			else
@@ -960,7 +1028,26 @@ static int cover_score(const char *name)
 /* формат и размер по заголовку: 2 — baseline JPEG (любой размер, уменьшается при декодировании),
  * 1 — PNG или прогрессивный JPEG не больше COVER_MAX_PX (декодируются целиком), 0 — не годится */
 #define COVER_MAX_PX (2000 * 1000)
+static int cover_read(const char *path, long *px);
+
 static int cover_usable(const char *path, long *px)
+{
+	struct stat st;
+	if (stat(path, &st))
+		return 0;
+	img_t key = { .path = (char *)path }, *m = nimgs ? bsearch(&key, imgs, nimgs, sizeof(*imgs), img_cmp) : NULL;
+	int usable;
+	if (m && m->size == (long)st.st_size && m->mtime == (long)st.st_mtime) {
+		*px = m->px;
+		usable = m->usable;
+	} else {
+		usable = cover_read(path, px);
+	}
+	img_push(&fresh_imgs, &nfresh_imgs, &capfresh_imgs, (img_t){ strdup(path), (long)st.st_size, (long)st.st_mtime, *px, usable });
+	return usable;
+}
+
+static int cover_read(const char *path, long *px)
 {
 	FILE *f = fopen(path, "rb");
 	if (!f)
@@ -997,25 +1084,34 @@ typedef struct {
 	long px;
 } cand_t;
 
+static int str_cmp(const void *a, const void *b)
+{
+	return strcmp(*(char *const *)a, *(char *const *)b);
+}
+
+/* картинки прямо в папке dir — из списка обхода (он отсортирован: они идут подряд за «dir/») */
 static void add_cands(const char *dir, cand_t **c, int *n)
 {
-	DIR *d = opendir(dir);
-	if (!d)
-		return;
-	struct dirent *e;
-	while ((e = readdir(d))) {
-		const char *dot = strrchr(e->d_name, '.');
-		if (!dot || (strcasecmp(dot, ".jpg") && strcasecmp(dot, ".jpeg") && strcasecmp(dot, ".png")))
-			continue;
-		int s = cover_score(e->d_name);
+	size_t dl = strlen(dir);
+	int lo = 0, hi = nseen;
+	while (lo < hi) {
+		int mid = (lo + hi) / 2;
+		int r = strncmp(seen[mid], dir, dl);
+		if (r < 0 || (r == 0 && seen[mid][dl] < '/'))
+			lo = mid + 1;
+		else
+			hi = mid;
+	}
+	for (int i = lo; i < nseen && !strncmp(seen[i], dir, dl) && seen[i][dl] == '/'; i++) {
+		const char *name = seen[i] + dl + 1;
+		if (strchr(name, '/'))
+			continue;   /* во вложенной папке */
+		int s = cover_score(name);
 		if (s < 0)
 			continue;
-		char full[1024];
-		snprintf(full, sizeof(full), "%s/%s", dir, e->d_name);
 		*c = realloc(*c, (*n + 1) * sizeof(cand_t));
-		(*c)[(*n)++] = (cand_t){ strdup(full), s, -1, 0 };
+		(*c)[(*n)++] = (cand_t){ strdup(seen[i]), s, -1, 0 };
 	}
-	closedir(d);
 }
 
 /* лучше — по имени; при равенстве — то, что декодируется дёшево, и что меньше (но не мельче 250 px) */
@@ -1238,12 +1334,13 @@ library_t *lib_scan(const char *root, const char *cachefile, volatile int *progr
 	prog = progress;
 	snprintf(pod_prefix, sizeof(pod_prefix), "%s/%s/", root, LIB_PODCASTS);
 	captracks = 0;
-	ncache = nfresh = 0;
+	ncache = nfresh = nimgs = nfresh_imgs = nseen = 0;
 	cache_load(cachefile);
 	L->root.name = strdup("SD-карта");
 	walk(root, &L->root);
-	cache_save(cachefile);
+	qsort(seen, nseen, sizeof(char *), str_cmp);
 	build_albums();
+	cache_save(cachefile);   /* после альбомов: в кэш идут и проверенные картинки */
 	build_artists();
 	return L;
 }
