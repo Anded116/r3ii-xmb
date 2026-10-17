@@ -8,23 +8,23 @@
 
 | Статус | Тикетов |
 |---|---|
-| `open` | 4 |
-| `fixed` | 28 |
+| `open` | 5 |
+| `fixed` | 30 |
 | `verified` | 2 |
-| `accepted` | 3 |
-| **всего** | **37** |
+| `accepted` | 6 |
+| **всего** | **43** |
 
 | Область | open | in-progress | fixed |
 |---|---|---|---|
-| ui | 0 | 0 | 7 |
+| ui | 0 | 0 | 8 |
 | player | 0 | 0 | 3 |
-| audio | 1 | 0 | 4 |
+| audio | 1 | 0 | 5 |
 | library | 0 | 0 | 2 |
 | net | 1 | 0 | 4 |
 | power | 0 | 0 | 4 |
 | display | 0 | 0 | 3 |
 | input | 1 | 0 | 1 |
-| firmware | 1 | 0 | 0 |
+| firmware | 2 | 0 | 0 |
 
 ## 🔥 Открытые (open / in-progress)
 
@@ -34,6 +34,7 @@
 | [XMB-0006](XMB-0006-polnoekrannyy-pleer-ne-reagiroval-na-kasaniya.md) | P2 | open | input | Полноэкранный плеер не реагировал на касания до выключения и включения экрана 👀 |
 | [XMB-0010](XMB-0010-bluetooth-proverit-naushniki-zvuk-i-smenu-kodeka.md) | P2 | open | net | Bluetooth: проверить наушники, звук и смену кодека |
 | [XMB-0037](XMB-0037-usb-tsap-mozhno-li-menshe-50-ms-zaderzhki.md) | P3 | open | audio | USB-ЦАП: можно ли меньше 50 мс задержки |
+| [XMB-0041](XMB-0041-mtp-peredacha-faylov-bez-otdachi-karty.md) | P3 | open | firmware | MTP: передача файлов без отдачи карты |
 
 ## 🧪 Ждут проверки (fixed)
 
@@ -62,6 +63,8 @@
 - [ ] [XMB-0033](XMB-0033-kursor-v-polyah-vvoda-temnyy-hotya-zadan-belym.md) `[P2/ui]` Курсор в полях ввода тёмный, хотя задан белым
 - [ ] [XMB-0035](XMB-0035-okno-tsapa-vizualizirovat-gromkost.md) `[P2/audio]` Окно ЦАПа: визуализировать громкость
 - [ ] [XMB-0036](XMB-0036-okno-tsapa-vyhod-kak-v-ostalnoy-sisteme.md) `[P2/audio]` Окно ЦАПа: выход как в остальной системе
+- [ ] [XMB-0038](XMB-0038-status-bar-znachok-rezhima-usb-podklyucheniya.md) `[P2/ui]` Статус-бар: значок режима USB-подключения
+- [ ] [XMB-0040](XMB-0040-usb-tsap-v-fone-menyu-dostupno-okno-ne.md) `[P2/audio]` USB-ЦАП в фоне: меню доступно, окно не обязательно
 - [ ] [XMB-0011](XMB-0011-rezhim-usb-tsap.md) `[P3/audio]` Режим USB-ЦАП
 - [ ] [XMB-0023](XMB-0023-fon-pleera-tsvetom-oblozhki-plavnaya-smena.md) `[P3/player]` Фон плеера цветом обложки: плавная смена оттенка
 - [ ] [XMB-0028](XMB-0028-pleer-na-pauze-posle-zapuska-xmb-stroka.md) `[P3/player]` Плеер на паузе после запуска XMB: строка формата — только «FLAC», без разрядности и частоты
@@ -80,9 +83,12 @@
 
 | ID | Принято | Статус | Область | Решение |
 |---|---|---|---|---|
-| [XMB-0030](XMB-0030-stroki-spiska-u-mini-pleera-ne-uvodit-v.md) | 2026-10-17 | accepted | ui | Строки списка у мини-плеера не уводить в прозрачность — решать оформлением самого мини-плеера |
-| [XMB-0017](XMB-0017-podkasty-vybirayutsya-na-pk-pleer-tolko.md) | 2026-10-17 | accepted | net | Подкасты выбираются на ПК, плеер только подгружает новые выпуски |
+| [XMB-0042](XMB-0042-znachki-usb-nabor-a-shteker-znachok-rezhima.md) | 2026-10-18 | accepted | ui | Значки USB: набор A (штекер + значок режима) |
+| [XMB-0039](XMB-0039-usb-znachki-dlya-vseh-rezhimov-bez.md) | 2026-10-18 | accepted | ui | USB: значки для всех режимов без обязательного полноэкранного окна; ЦАП — в фон |
+| [XMB-0043](XMB-0043-tsap-v-fone-pleer-istochnik-kompyuter-svoya.md) | 2026-10-18 | accepted | audio | ЦАП в фоне: плеер-источник «Компьютер», своя музыка на паузе, буфер 50 мс |
 | [XMB-0016](XMB-0016-fon-volnu-v-pokoe-ne-trogaem-chastota-kadrov.md) | 2026-10-17 | accepted | display | Фон-волну в покое не трогаем: частота кадров фона не снижается |
+| [XMB-0017](XMB-0017-podkasty-vybirayutsya-na-pk-pleer-tolko.md) | 2026-10-17 | accepted | net | Подкасты выбираются на ПК, плеер только подгружает новые выпуски |
+| [XMB-0030](XMB-0030-stroki-spiska-u-mini-pleera-ne-uvodit-v.md) | 2026-10-17 | accepted | ui | Строки списка у мини-плеера не уводить в прозрачность — решать оформлением самого мини-плеера |
 
 ## ✅ Недавно закрытые (14 дней)
 
