@@ -1079,9 +1079,10 @@ static void layout_column(column_t *c, double x, double fade, double tk, int act
 		double k_text = k * tk;
 		int yy = (int)y;
 		/* у краёв списка строки появляются и уходят плавно, а не за один кадр */
-		/* сверху строка уходит под чёрную верхнюю панель — гаснет, только когда уже под ней */
-		int top = deep ? TOP_H - (int)(rh * 0.3) : TOP_H - 14, bot = SCR_H - MINI_H - 12;
-		double edge = clamp01((yy - top) / (rh * 0.7)) * clamp01((bot - yy) / (rh * 0.7));
+		/* сверху строка уходит под чёрную верхнюю панель — гаснет, только когда уже под ней; снизу так же уходит под
+		 * мини-плеер */
+		int top = deep ? TOP_H - (int)(rh * 0.3) : TOP_H - 14, bot = SCR_H - MINI_H + (int)(rh * 0.45);
+		double edge = clamp01((yy - top) / (rh * 0.7)) * clamp01((bot - yy) / (rh * 0.6));
 		/* на уровне категорий пункт, уезжающий вверх, пролетает сквозь иконку и название категории — там гаснет */
 		if (!deep && d < 0)
 			edge *= clamp01(fabs((double)(yy - CAT_Y)) / 46.0 - 0.3);
