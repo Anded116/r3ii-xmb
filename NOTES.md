@@ -122,6 +122,9 @@
 - `bt.c` — фоновый поток над `bluetoothctl` (power, scan с `--timeout`, pair/trust/connect) и `bluealsa-cli`. Раз в 2 с смотрит `list-pcms`: появился `…/a2dpsrc/sink` — `info` даёт частоту и формат, звук уходит туда (`audio_set_bt`), пропал — в разъём.
 - Вывод в `audio.c`: `popen("bluealsa-cli open PCM")` и запись сырого PCM в его вход; частота файла пересчитывается линейно под частоту кодека, громкость — программно по той же кривой, что у ES9219. SIGPIPE игнорируется: наушники ушли — ошибка записи и возврат в разъём.
 
+## Внешние команды из XMB (2026-10-17)
+- Всё, что XMB запускает (wpa_supplicant, udhcpc, bluetoothctl, bluealsa-cli, wget, adb_restart.sh), — через `spawn.c` (`sp_popen`/`sp_system`): в потомке закрыты все дескрипторы, кроме 0–2. С обычными popen/system долгоживущий `wpa_supplicant -B` унаследовал открытый PCM, и после закрытия тракта на паузе XMB уже не мог открыть его снова («Resource busy») — музыки не было, пока его не убили.
+
 ## USB-ЦАП (2026-10-16, проба)
 - Сток делает его скриптом `uac_device_config.sh`: вендорская функция гаджета `uac_sa` (атрибуты c_/p_chmask, srate, ssize). Новых `/dev/snd` при привязке не появляется — звук с компьютера, видимо, на захвате `pcmC0D1c`.
 - `uac_sa.a` в `android0` вместо `mass_storage.0` привязывается, Windows устройство видит. В одном гаджете с adb (класс 239/2/1) Windows даёт ошибку «USB Composite Device» — в режиме ЦАПа adb не будет.

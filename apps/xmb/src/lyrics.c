@@ -1,6 +1,7 @@
 /* lyrics.c — разбор LRC: у строки бывает несколько меток ([00:12.30][01:40.00]припев), метки [ar:], [ti:] и т. п.
  * пропускаются, [offset:+/-мс] сдвигает всё. Нет ни одной метки времени — простой текст. */
 #include "lyrics.h"
+#include "spawn.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -238,7 +239,7 @@ static int get(const char *url, const char *file)
 {
 	char cmd[1300];
 	snprintf(cmd, sizeof(cmd), "wget -q -T 20 -U 'XMB (github.com/Anded116/r3ii-xmb)' -O %s '%s' 2>>/tmp/xmb_wget.log", file, url);
-	return system(cmd);
+	return sp_system(cmd);
 }
 #else
 static int get(const char *url, const char *file)

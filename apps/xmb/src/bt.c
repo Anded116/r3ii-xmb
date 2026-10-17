@@ -3,6 +3,7 @@
  * звук уходит в него, пропал — в разъём. Список устройств перечитывается после операций и по просьбе интерфейса. */
 #define _GNU_SOURCE
 #include "bt.h"
+#include "spawn.h"
 
 #include "audio.h"
 
@@ -34,7 +35,7 @@ static struct {
 /* строки вывода команды — в cb; код возврата */
 static int run(const char *cmd, void (*cb)(const char *line, void *u), void *u)
 {
-	FILE *f = popen(cmd, "r");
+	FILE *f = sp_popen(cmd, "r");
 	if (!f)
 		return -1;
 	char line[256];
@@ -43,7 +44,7 @@ static int run(const char *cmd, void (*cb)(const char *line, void *u), void *u)
 		if (cb)
 			cb(line, u);
 	}
-	return pclose(f);
+	return sp_pclose(f);
 }
 
 static void set_status(const char *s)

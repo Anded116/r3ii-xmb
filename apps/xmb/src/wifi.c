@@ -2,6 +2,7 @@
  * сохраняются туда же), wpa_cli и udhcpc. Раз в 3 с — состояние; подключилось — адрес по DHCP и время по NTP. */
 #define _GNU_SOURCE
 #include "wifi.h"
+#include "spawn.h"
 
 #include <pthread.h>
 #include <sched.h>
@@ -32,7 +33,7 @@ static struct {
 #if XMB_DEVICE
 static int run(const char *cmd, void (*cb)(const char *line, void *u), void *u)
 {
-	FILE *f = popen(cmd, "r");
+	FILE *f = sp_popen(cmd, "r");
 	if (!f)
 		return -1;
 	char line[256];
@@ -41,7 +42,7 @@ static int run(const char *cmd, void (*cb)(const char *line, void *u), void *u)
 		if (cb)
 			cb(line, u);
 	}
-	return pclose(f);
+	return sp_pclose(f);
 }
 
 static void set_status(const char *s)
@@ -253,10 +254,10 @@ static void do_op(int op, int on, const char *ssid, const char *psk)
 		int id = -1;
 		FILE *f;
 		snprintf(cmd, sizeof(cmd), CLI "list_networks | awk -F'\\t' -v s=%s '$2==s{print $1; exit}'", qa);
-		if (psk && (f = popen(CLI "add_network", "r"))) {   /* новая сеть: добавить и сохранить в конфиг */
+		if (psk && (f = sp_popen(CLI "add_network", "r"))) {   /* новая сеть: добавить и сохранить в конфиг */
 			if (fscanf(f, "%d", &id) != 1)
 				id = -1;
-			pclose(f);
+			sp_pclose(f);
 			if (id >= 0) {
 				char qp[140];
 				quoted(qp, sizeof(qp), psk);
@@ -268,10 +269,10 @@ static void do_op(int op, int on, const char *ssid, const char *psk)
 					snprintf(cmd, sizeof(cmd), CLI "set_network %d key_mgmt NONE > /dev/null", id);
 				run(cmd, NULL, NULL);
 			}
-		} else if ((f = popen(cmd, "r"))) {   /* сохранённая */
+		} else if ((f = sp_popen(cmd, "r"))) {   /* сохранённая */
 			if (fscanf(f, "%d", &id) != 1)
 				id = -1;
-			pclose(f);
+			sp_pclose(f);
 		}
 		if (id < 0) {
 			set_status("");

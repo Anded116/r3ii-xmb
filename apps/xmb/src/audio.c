@@ -11,6 +11,7 @@
  * ПК (XMB_HOST): SDL2 audio, громкость программно.
  */
 #include "audio.h"
+#include "spawn.h"
 
 #include <math.h>
 #include <pthread.h>
@@ -569,7 +570,7 @@ static void out_close(void)
 		pcm_close(a.pcm);
 	a.pcm = NULL;
 	if (a.bt_pipe)
-		pclose(a.bt_pipe);
+		sp_pclose(a.bt_pipe);
 	a.bt_pipe = NULL;
 	a.out_rate = 0;
 }
@@ -583,7 +584,7 @@ static int bt_open(int rate)
 	}
 	char cmd[220];
 	snprintf(cmd, sizeof(cmd), "exec bluealsa-cli -q open %s", a.bt_path);
-	a.bt_pipe = popen(cmd, "w");
+	a.bt_pipe = sp_popen(cmd, "w");
 	if (!a.bt_pipe)
 		return -1;
 	a.rs_ph = 0;
@@ -659,7 +660,11 @@ static int out_open(int rate)
 	};
 	a.pcm = pcm_open(0, 0, PCM_OUT, &cfg);
 	if (!a.pcm || !pcm_is_ready(a.pcm)) {
-		fprintf(stderr, "audio: pcm_open: %s\n", a.pcm ? pcm_get_error(a.pcm) : "?");
+		static time_t said;   /* поток повторяет попытку каждые 20 мс — в журнал не чаще раза в 10 с */
+		if (time(NULL) - said >= 10) {
+			said = time(NULL);
+			fprintf(stderr, "audio: pcm_open: %s\n", a.pcm ? pcm_get_error(a.pcm) : "?");
+		}
 		out_close();
 		return -1;
 	}
