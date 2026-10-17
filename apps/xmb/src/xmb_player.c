@@ -41,7 +41,7 @@
 #define ACT_X 38
 #define VOL_SEG 30
 #define MINI_H 52             /* высота мини-плеера: с него начинается раскрытие */
-#define MINI_OPA 77           /* его затемнение (чёрный 30%) */
+#define MINI_OPA 77           /* его затемнение по умолчанию (чёрный 30%) */
 #define FULL_OPA PLAYER_DIM
 
 static struct {
@@ -64,7 +64,9 @@ static struct {
 	int lyr_on, lyr_idx[NLYR], lyr_cur, *lyr_y, lyr_total;
 	double lyr_k, lyr_scroll;
 	const lv_font_t *lyr_font;
-} p;
+	int mini_opa;                 /* фон мини-плеера: с него начинается раскрытие (вид — в настройках) */
+	uint32_t mini_color;
+} p = { .mini_opa = MINI_OPA };
 
 static lv_obj_t *box(lv_obj_t *parent, int x, int y, int w, int h)
 {
@@ -338,6 +340,17 @@ static void tint_calc(const lv_image_dsc_t *d)
 		tint = 0x010101;
 }
 
+void player_set_mini_bg(uint32_t color, int opa)
+{
+	p.mini_color = color;
+	p.mini_opa = opa;
+	if (p.root) {
+		lv_obj_set_style_bg_color(p.root, lv_color_hex(color), 0);
+		if (p.t < 1)
+			lv_obj_set_style_bg_opa(p.root, (lv_opa_t)(opa + (FULL_OPA - opa) * p.t), 0);
+	}
+}
+
 uint32_t player_tint(void)
 {
 	return tint;
@@ -453,8 +466,8 @@ void player_create(lv_obj_t *parent, const lv_font_t *f_big, const lv_font_t *f_
 {
 	/* плеер раскрывается из мини-плеера: та же полоса внизу растёт до полного экрана */
 	p.root = box(parent, 0, H - MINI_H, W, MINI_H);
-	lv_obj_set_style_bg_opa(p.root, MINI_OPA, 0);
-	lv_obj_set_style_bg_color(p.root, lv_color_black(), 0);
+	lv_obj_set_style_bg_opa(p.root, p.mini_opa, 0);
+	lv_obj_set_style_bg_color(p.root, lv_color_hex(p.mini_color), 0);
 	lv_obj_set_hidden(p.root, true);
 	p.content = box(p.root, 0, 0, W, H);
 
@@ -781,7 +794,7 @@ void player_tick(double dt)
 		lv_obj_set_pos(p.root, 0, y);
 		lv_obj_set_height(p.root, H - y);
 		/* раскрыт — затемнение уже в самом фоне (bg_set_dim) */
-		lv_obj_set_style_bg_opa(p.root, p.t >= 1 ? 0 : (lv_opa_t)(MINI_OPA + (FULL_OPA - MINI_OPA) * p.t), 0);
+		lv_obj_set_style_bg_opa(p.root, p.t >= 1 ? 0 : (lv_opa_t)(p.mini_opa + (FULL_OPA - p.mini_opa) * p.t), 0);
 		/* прозрачность содержимого — только на время перехода: она рендерится через слой */
 		lv_obj_set_style_opa(p.content, p.t >= 1 ? LV_OPA_COVER : (lv_opa_t)(255 * p.t * p.t), 0);
 		lv_obj_set_hidden(p.root, p.t <= 0);

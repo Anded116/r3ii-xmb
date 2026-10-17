@@ -41,6 +41,7 @@ void player_tick(double dt);
 /* карусель альбомов: соседние альбомы (или папки) выглядывают по краям, горизонтальный свайп — переход */
 void player_set_neighbors(const char *prev_album, const char *prev_cover, const char *next_album, const char *next_cover);
 void player_set_cover(const char *path);   /* обложка вместо кассеты; NULL — кассета */
+void player_set_mini_bg(uint32_t color, int opa);   /* фон мини-плеера: раскрытие плеера начинается с него */
 uint32_t player_tint(void);                /* цвет обложки, притемнённый под фон (0xRRGGBB); 0 — обложки нет */
 void player_drag(int dx);          /* палец тянет карусель */
 void player_release(int dir);      /* dir = ±1 — перешли на соседний альбом, 0 — вернуть на место */

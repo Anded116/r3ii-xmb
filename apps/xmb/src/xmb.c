@@ -153,6 +153,10 @@ static const uint32_t theme_colors[12][2] = {
 static const char *const wave_names[] = { "Волна PS3", "Лента", "Частицы", "Спектр", "Шёлк", "Сияние", "Звёздная пыль",
 					    "Пульс", "Круги", "Волна PSP", "Выключен", NULL };
 static const char *const onoff[] = { "Включено", "Выключено", NULL };
+enum { MINI_CLEAR, MINI_DARK, MINI_BLACK, MINI_THEME, MINI_CARD };
+static const char *const mini_names[] = { "Прозрачный", "Тёмный", "Чёрный", "Цвет темы", "Карточка", NULL };
+#define EDGE_MAX 8
+static const char *const edge_names[] = { "0 px", "1 px", "2 px", "3 px", "4 px", "5 px", "6 px", "7 px", "8 px", NULL };
 static const char *const bright_names[] = { "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%", "100%", NULL };
 static const char *const sleep_names[] = { "1 минута", "5 минут", "10 минут", "30 минут", "Выключен", NULL };
 static const int sleep_min[] = { 1, 5, 10, 30, 0 };
@@ -209,7 +213,8 @@ static struct {
 	char settings_path[300];
 	uint32_t settings_ms;
 	unsigned settings_sig;
-	lv_obj_t *cat_icons[8], *cat_title, *mini_icon, *mini_text, *mini_bar, *off;
+	lv_obj_t *cat_icons[8], *cat_title, *mini_icon, *mini_text, *mini_bar, *mini_track, *off;
+	int mini_bar_w;   /* ширина полосы прогресса мини-плеера */
 	lv_obj_t *tb, *tb_left, *tb_right, *tb_bat, *tb_act, *hint[2], *bhint, *bhint_lbl;
 	int bat, bat_chg;
 	lv_font_t *f_bat;
@@ -225,6 +230,7 @@ static struct {
 	/* настройки */
 	int theme, wave, touch_off, bright, sleep, bt_off, wifi_off, codec, shuffle, repeat, usb_dac, eq_on, ui_size;
 	int screen_off, album_view, dev_sleep, gain, rg_mode, xfade, lang, player_bg, kb_start, kb_langs;
+	int mini_style, edge_l, edge_r;   /* вид мини-плеера; сколько пикселей экрана слева и справа закрывает рамка */
 	int btn[XMB_BTN_COUNT][XMB_G_COUNT];   /* действие кнопки на жест */
 	/* эквалайзер: пресет, свои полосы (дБ + 12, чтобы хранить в файле настроек), редактор */
 	int eq_preset, eq_custom[EQ_BANDS], eq_edit, eq_band, eq_adjust;
@@ -285,6 +291,8 @@ static struct {
 } s;
 
 static void apply_theme(void);
+static void apply_mini(void);
+static void apply_edges(void);
 static void apply_wave(void);
 static void apply_bright(void);
 static void apply_size(void);
@@ -389,6 +397,9 @@ static const node_t screen_items[] = {
 	OPT(LV_SYMBOL_IMAGE, "Вид альбомов", album_views, &s.album_view, NULL),
 	OPT(LV_SYMBOL_EYE_CLOSE, "Гашение экрана", screen_names, &s.screen_off, NULL),
 	OPT(LV_SYMBOL_AUDIO, "Фон плеера", player_bg_names, &s.player_bg, NULL),
+	OPT(LV_SYMBOL_AUDIO, "Мини-плеер", mini_names, &s.mini_style, apply_mini),
+	OPT(LV_SYMBOL_LEFT, "Рамка: левый край", edge_names, &s.edge_l, apply_edges),
+	OPT(LV_SYMBOL_RIGHT, "Рамка: правый край", edge_names, &s.edge_r, apply_edges),
 };
 static const char *const kb_start_names[] = { "Английская", "Русская", "Последняя", NULL };
 static const char *const kb_langs_names[] = { "Английская и русская", "Только английская", NULL };
@@ -3804,7 +3815,7 @@ static void frame_cb(lv_timer_t *t)
 		}
 	}
 	if (s.playing && s.dur > 0) {
-		int w = (int)(SCR_W * s.pos / s.dur);
+		int w = (int)(s.mini_bar_w * s.pos / s.dur);
 		if (lv_obj_get_width(s.mini_bar) != w)
 			lv_obj_set_width(s.mini_bar, w);
 		static int last_sec = -1;
@@ -3885,6 +3896,33 @@ static void frame_cb(lv_timer_t *t)
 static void apply_theme(void)
 {
 	bg_set_colors(theme_colors[s.theme][0], theme_colors[s.theme][1]);
+	apply_mini();
+}
+
+/* вид мини-плеера: насколько он закрывает строки списка, которые уходят под него */
+static void apply_mini(void)
+{
+	if (!s.mini)
+		return;
+	uint32_t c = theme_colors[s.theme][1];   /* низ фона темы, притемнённый: мини-плеер как часть фона */
+	uint32_t dark = ((c >> 16 & 255) * 2 / 5) << 16 | ((c >> 8 & 255) * 2 / 5) << 8 | (c & 255) * 2 / 5;
+	int card = s.mini_style == MINI_CARD;
+	uint32_t color = s.mini_style >= MINI_THEME ? dark : 0;
+	int opa = s.mini_style == MINI_CLEAR ? 77 : s.mini_style == MINI_DARK ? 217 : 255;
+	int x = card ? 6 : 0, w = SCR_W - 2 * x, h = card ? MINI_H - 4 : MINI_H, inset = card ? 12 : 0;
+	lv_obj_set_pos(s.mini, x, SCR_H - MINI_H);
+	lv_obj_set_size(s.mini, w, h);
+	lv_obj_set_style_radius(s.mini, card ? 12 : 0, 0);
+	lv_obj_set_style_bg_color(s.mini, lv_color_hex(color), 0);
+	lv_obj_set_style_bg_opa(s.mini, (lv_opa_t)opa, 0);
+	/* у карточки полоса прогресса — не до краёв: углы скруглены */
+	s.mini_bar_w = w - 2 * inset;
+	lv_obj_set_pos(s.mini_track, inset, 0);
+	lv_obj_set_width(s.mini_track, s.mini_bar_w);
+	lv_obj_set_x(s.mini_bar, inset);
+	lv_obj_set_x(s.mini_time, w - 54);
+	lv_obj_set_x(s.mini_icon, w - 54);
+	player_set_mini_bg(color, opa);
 }
 
 static void spectrum_update(void);
@@ -5336,26 +5374,45 @@ static void touch_cb(lv_event_t *e)
 /* скругление углов, как у Palm: чёрная маска угла (A8, сглаженная) — под верхней панелью и внизу экрана, на
  * системном слое поверх всего */
 #define CORNER_R 12
-static uint8_t corner_px[4][CORNER_R * CORNER_R];
+static uint8_t corner_px[4][(CORNER_R + EDGE_MAX) * CORNER_R];
 static lv_image_dsc_t corner_img[4];
+static lv_obj_t *corner_obj[4], *edge_obj[2];
 
-static void corners_create(void)
+/* рамка корпуса закрывает несколько пикселей экрана по бокам (Настройки → Экран → Рамка): там чёрная полоса,
+ * а дуга угла касается видимого края, а не края кадра */
+static void apply_edges(void)
 {
 	for (int c = 0; c < 4; c++) {   /* 0 — левый верхний, 1 — правый верхний, 2 — левый нижний, 3 — правый нижний */
+		int k = c & 1 ? s.edge_r : s.edge_l, w = CORNER_R + k;
 		for (int y = 0; y < CORNER_R; y++)
-			for (int x = 0; x < CORNER_R; x++) {
-				double dx = (c & 1 ? x + 0.5 : CORNER_R - x - 0.5), dy = (c & 2 ? y + 0.5 : CORNER_R - y - 0.5);
+			for (int x = 0; x < w; x++) {
+				int xx = c & 1 ? x : x - k;   /* столбец внутри дуги; за ней — полоса рамки */
+				double dx = c & 1 ? xx + 0.5 : CORNER_R - xx - 0.5, dy = c & 2 ? y + 0.5 : CORNER_R - y - 0.5;
 				double d = sqrt(dx * dx + dy * dy) - CORNER_R + 0.5;
-				corner_px[c][y * CORNER_R + x] = (uint8_t)(255 * clamp01(d));
+				corner_px[c][y * w + x] = xx < 0 || xx >= CORNER_R ? 255 : (uint8_t)(255 * clamp01(d));
 			}
 		corner_img[c] = (lv_image_dsc_t){ .header = { .magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8,
-							      .w = CORNER_R, .h = CORNER_R, .stride = CORNER_R },
-						  .data_size = CORNER_R * CORNER_R, .data = corner_px[c] };
-		lv_obj_t *o = lv_image_create(lv_layer_sys());
-		lv_image_set_src(o, &corner_img[c]);
-		lv_obj_set_style_image_recolor(o, lv_color_black(), 0);
-		lv_obj_set_style_image_recolor_opa(o, LV_OPA_COVER, 0);
-		lv_obj_set_pos(o, c & 1 ? SCR_W - CORNER_R : 0, c & 2 ? SCR_H - CORNER_R : TOP_H);
+							      .w = w, .h = CORNER_R, .stride = w },
+						  .data_size = w * CORNER_R, .data = corner_px[c] };
+		if (!corner_obj[c]) {
+			corner_obj[c] = lv_image_create(lv_layer_sys());
+			lv_obj_set_style_image_recolor(corner_obj[c], lv_color_black(), 0);
+			lv_obj_set_style_image_recolor_opa(corner_obj[c], LV_OPA_COVER, 0);
+		}
+		lv_image_set_src(corner_obj[c], &corner_img[c]);
+		lv_obj_set_pos(corner_obj[c], c & 1 ? SCR_W - w : 0, c & 2 ? SCR_H - CORNER_R : TOP_H);
+		lv_obj_invalidate(corner_obj[c]);
+	}
+	for (int i = 0; i < 2; i++) {
+		int k = i ? s.edge_r : s.edge_l;
+		if (!edge_obj[i]) {
+			edge_obj[i] = plain(lv_layer_sys());
+			lv_obj_set_style_bg_color(edge_obj[i], lv_color_black(), 0);
+			lv_obj_set_style_bg_opa(edge_obj[i], LV_OPA_COVER, 0);
+		}
+		lv_obj_set_size(edge_obj[i], k ? k : 1, SCR_H);
+		lv_obj_set_pos(edge_obj[i], i ? SCR_W - k : 0, 0);
+		set_hidden(edge_obj[i], !k);
 	}
 }
 
@@ -5469,6 +5526,7 @@ static const struct {
 	{ "ui_size", &s.ui_size, 3 }, { "volume", &s.volume, 100 }, { "screen_off", &s.screen_off, 5 },
 	{ "album_view", &s.album_view, 2 }, { "gain", &s.gain, 2 }, { "replaygain", &s.rg_mode, 2 }, { "xfade", &s.xfade, 3 }, { "lang", &s.lang, LANG_COUNT - 1 },
 	{ "kb_start", &s.kb_start, 2 }, { "kb_langs", &s.kb_langs, 1 },
+	{ "mini_style", &s.mini_style, MINI_CARD }, { "edge_l", &s.edge_l, EDGE_MAX }, { "edge_r", &s.edge_r, EDGE_MAX },
 	{ "btn_next_s", &s.btn[0][0], BA_COUNT - 1 }, { "btn_next_l", &s.btn[0][1], BA_COUNT - 1 },
 	{ "btn_next_d", &s.btn[0][2], BA_COUNT - 1 }, { "btn_play_s", &s.btn[1][0], BA_COUNT - 1 },
 	{ "btn_play_l", &s.btn[1][1], BA_COUNT - 1 }, { "btn_play_d", &s.btn[1][2], BA_COUNT - 1 },
@@ -5646,7 +5704,7 @@ void xmb_init(const char *font_dir)
 	lv_obj_set_pos(np, 0, SCR_H - MINI_H);
 	lv_obj_set_style_bg_color(np, lv_color_black(), 0);
 	lv_obj_set_style_bg_opa(np, LV_OPA_30, 0);
-	lv_obj_t *track = plain(np);
+	lv_obj_t *track = s.mini_track = plain(np);
 	lv_obj_set_size(track, SCR_W, 2);
 	lv_obj_set_style_bg_color(track, lv_color_white(), 0);
 	lv_obj_set_style_bg_opa(track, 30, 0);
@@ -5809,6 +5867,7 @@ void xmb_init(const char *font_dir)
 	s.last_ms = s.input_ms = s.active_ms = lv_tick_get();
 	layout();
 	update_topbar();
-	corners_create();
+	apply_edges();
+	apply_mini();
 	lv_timer_create(frame_cb, 16, NULL);
 }
