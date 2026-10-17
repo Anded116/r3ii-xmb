@@ -845,7 +845,15 @@ static int cue_target(const cue_t *c, char **names, int n)
 	for (int i = 0; i < n; i++)
 		if (is_audio(names[i], &ext) && !strncasecmp(names[i], base, bl) && names[i][bl] == '.')
 			return i;
-	return -1;
+	/* в CUE опечатка в имени файла (бывает у рипов), а звуковой файл в папке один — значит, он */
+	int k = -1;
+	for (int i = 0; i < n; i++)
+		if (is_audio(names[i], &ext)) {
+			if (k >= 0)
+				return -1;
+			k = i;
+		}
+	return k;
 }
 
 static void add_cue_tracks(const cue_t *c, const char *path, const char *ext, struct stat *st, lib_dir_t *dir)
@@ -1222,8 +1230,10 @@ static void build_albums(void)
 		int found = -1, pod = is_podcast(t->path);   /* подкаст — вся его папка, что бы ни было в тегах выпусков */
 		for (int a = L->nalbums - 1; a >= 0 && found < 0; a--) {
 			lib_album_t *al = &L->albums[a];
+			/* одноимённые альбомы из разных папок с разным годом — разные (диски одного издания — один год) */
+			int other_year = strcmp(al->dir, dir) && al->year && t->year && al->year != t->year;
 			if (pod || al->podcast ? pod && al->podcast && !strcmp(al->dir, dir)
-			    : t->album[0] ? (!strcasecmp(al->title, t->album) && (!strcasecmp(al->artist, aa) || !strcmp(al->dir, dir)))
+			    : t->album[0] ? (!strcasecmp(al->title, t->album) && (!strcasecmp(al->artist, aa) || !strcmp(al->dir, dir)) && !other_year)
 					  : !strcmp(al->dir, dir) && !strcmp(al->title, strrchr(dir, '/') ? strrchr(dir, '/') + 1 : dir))
 				found = a;
 		}

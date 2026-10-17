@@ -1,6 +1,7 @@
 /* libtest <корень> <кэш> — проверка библиотеки: время сканирования, счётчики, примеры */
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 
 #include "library.h"
@@ -20,6 +21,13 @@ int main(int argc, char **argv)
 	library_t *L = lib_scan(argv[1], argv[2], NULL);
 	printf("scan %.2f s: %d tracks, %d albums, %d artists, %d top dirs\n", now() - t, L->ntracks, L->nalbums,
 	       L->nartists, L->root.ndirs);
+	if (getenv("LIBALBUMS")) {   /* альбомы, в папке которых есть подстрока: название, исполнитель, год, треков */
+		for (int a = 0; a < L->nalbums; a++)
+			if (strstr(L->albums[a].dir, getenv("LIBALBUMS")))
+				printf("%s | %s | %d | %d | %s\n", L->albums[a].title, L->albums[a].artist, L->albums[a].year,
+				       L->albums[a].ntracks, L->albums[a].dir);
+		return 0;
+	}
 	if (getenv("LIBCOVERS")) {   /* все обложки — сравнить выбор между версиями */
 		for (int a = 0; a < L->nalbums; a++)
 			printf("%s|%s\n", L->albums[a].dir, L->albums[a].cover ? L->albums[a].cover : "-");
