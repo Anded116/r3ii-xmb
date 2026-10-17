@@ -101,6 +101,8 @@ static int frames;
 
 static int fb_reprogram;
 static void screen_set(int on);
+static uint32_t tick_ms(void);
+static uint32_t woke_ms;   /* когда вернулась запись в /sys/power/state: время до включённого экрана — в журнал */
 
 /* число прерываний кнопки (строка /proc/interrupts с её именем): кто разбудил */
 static unsigned long irq_count(const char *name)
@@ -165,6 +167,7 @@ static int deep_sleep(void)
 		printf("woken by next-track, back to sleep\n");
 		usleep(300000);   /* дать кнопке отпуститься */
 	}
+	woke_ms = slept ? tick_ms() : 0;
 	xmb_sleep_end();
 	if (!slept) {   /* ядро отказало (кто-то держит блокировку сна): экран не трогать — сна не было */
 		printf("suspend не удался — экран остаётся погашенным, следующая попытка через 5 мин\n");
@@ -297,7 +300,6 @@ static char *script_pos;
 static int script_done;
 static char script_tok[24];   /* последнее нажатие сценария и когда — для журнала медленных кадров */
 static uint32_t script_tok_ms;
-static uint32_t tick_ms(void);
 
 static void script_step(lv_timer_t *t)
 {
@@ -435,6 +437,10 @@ static void screen_set(int on)
 		lv_obj_invalidate(lv_screen_active());
 		lv_refr_now(NULL);
 		backlight(1);
+		if (woke_ms) {
+			printf("экран после пробуждения: %u мс\n", tick_ms() - woke_ms);
+			woke_ms = 0;
+		}
 	} else {
 		bl_write(0);
 		panel_on = 0;
