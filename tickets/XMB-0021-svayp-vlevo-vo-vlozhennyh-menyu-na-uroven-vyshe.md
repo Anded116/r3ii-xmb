@@ -2,13 +2,14 @@
 id: XMB-0021
 title: Свайп влево во вложенных меню — на уровень выше
 type: feature
-status: open
+status: fixed
 priority: P2
 area: input
 source: user
 verify-in: review
 created: 2026-10-17
 updated: 2026-10-17
+commits: d7a8deb
 ---
 
 ## Описание
@@ -23,3 +24,4 @@ updated: 2026-10-17
 ## История
 
 - 2026-10-17 (agent): создан (feature, open).
+- 2026-10-17 (agent): status open -> fixed; commits d7a8deb - Свайп во вложенных списках работал, кроме старта на алфавитном указателе у правого края (список альбомов): там касание прыгало по буквам. Теперь горизонтальное движение с указателя — назад, выбор возвращается. Проверено на плеере через inject drag.

@@ -2,13 +2,14 @@
 id: XMB-0022
 title: Фоновые процессы (скан, загрузка подкастов) — в центре статус-бара с прогрессом
 type: feature
-status: open
+status: fixed
 priority: P2
 area: ui
 source: user
 verify-in: review
 created: 2026-10-17
 updated: 2026-10-17
+commits: 87a9e45
 ---
 
 ## Описание
@@ -23,3 +24,4 @@ updated: 2026-10-17
 ## История
 
 - 2026-10-17 (agent): создан (feature, open).
+- 2026-10-17 (agent): status open -> fixed; commits 87a9e45 - По центру статус-бара: значок (↻ скан, ↓ подкасты) и полоса. Доля — у загрузки выпуска (размер .part против enclosure length из RSS); скан и проверка подписок — бегущий отрезок. Проверено на плеере (загрузка выпуска) и на ПК (скан).
