@@ -4032,11 +4032,15 @@ static void apply_mini(void)
 	lv_obj_set_style_radius(s.mini, card ? 12 : 0, 0);
 	lv_obj_set_style_bg_color(s.mini, lv_color_hex(color), 0);
 	lv_obj_set_style_bg_opa(s.mini, (lv_opa_t)opa, 0);
-	/* у карточки полоса прогресса — не до краёв: углы скруглены */
+	/* у карточки полоса прогресса — не до краёв: углы скруглены; у «Чёрного со скруглением» — внизу, под текстом:
+	 * сверху она разделяла бы мини-плеер и скругления над ним */
+	int frame = s.mini_style == MINI_FRAME, bar_y = frame ? h - 5 : 0;
+	if (frame)
+		inset = 10;
 	s.mini_bar_w = w - 2 * inset;
-	lv_obj_set_pos(s.mini_track, inset, 0);
+	lv_obj_set_pos(s.mini_track, inset, bar_y);
 	lv_obj_set_width(s.mini_track, s.mini_bar_w);
-	lv_obj_set_x(s.mini_bar, inset);
+	lv_obj_set_pos(s.mini_bar, inset, bar_y);
 	lv_obj_set_x(s.mini_time, w - 54);
 	lv_obj_set_x(s.mini_icon, w - 54);
 	player_set_mini_bg(color, opa);
@@ -5494,7 +5498,7 @@ static void touch_cb(lv_event_t *e)
 #define CORNER_R 12
 static uint8_t corner_px[4][(CORNER_R + EDGE_MAX) * CORNER_R];
 static lv_image_dsc_t corner_img[4];
-static lv_obj_t *corner_obj[4], *edge_obj[2];
+static lv_obj_t *corner_obj[4];
 
 /* нижние углы — у края экрана; при «Чёрном со скруглением» — на верхнем крае мини-плеера, как верхние у статус-бара
  * (пока не раскрыт плеер: он во весь экран) */
@@ -5507,8 +5511,8 @@ static void corners_place(void)
 				       !(c & 2) ? TOP_H : up ? SCR_H - MINI_H - CORNER_R : SCR_H - CORNER_R);
 }
 
-/* рамка корпуса закрывает несколько пикселей экрана по бокам (Настройки → Экран → Рамка): там чёрная полоса,
- * а дуга угла касается видимого края, а не края кадра */
+/* рамка корпуса закрывает несколько пикселей экрана по бокам (Настройки → Экран → Рамка): дуга угла касается
+ * видимого края, а не края кадра */
 static void apply_edges(void)
 {
 	for (int c = 0; c < 4; c++) {   /* 0 — левый верхний, 1 — правый верхний, 2 — левый нижний, 3 — правый нижний */
@@ -5532,17 +5536,6 @@ static void apply_edges(void)
 		lv_obj_invalidate(corner_obj[c]);
 	}
 	corners_place();
-	for (int i = 0; i < 2; i++) {
-		int k = i ? s.edge_r : s.edge_l;
-		if (!edge_obj[i]) {
-			edge_obj[i] = plain(lv_layer_sys());
-			lv_obj_set_style_bg_color(edge_obj[i], lv_color_black(), 0);
-			lv_obj_set_style_bg_opa(edge_obj[i], LV_OPA_COVER, 0);
-		}
-		lv_obj_set_size(edge_obj[i], k ? k : 1, SCR_H);
-		lv_obj_set_pos(edge_obj[i], i ? SCR_W - k : 0, 0);
-		set_hidden(edge_obj[i], !k);
-	}
 }
 
 /* ползунок шторки: сегменты, как громкость на PSP; при регулировке колесом — оранжевые */
