@@ -5640,13 +5640,16 @@ static void shade_create(lv_obj_t *parent)
 }
 
 /* смещения строк от центра пункта по высоте шрифтов меню */
-/* оптический центр строки — середина строчных букв (x-height): по ней глаз выравнивает текст со значком; заглавные и
- * выносные (P, l, y) в счёт не идут. Возвращает: от верха строки до базовой линии и высоту строчных */
+/* оптический центр строки смешанного регистра — между серединой строчных (их в слове большинство) и серединой
+ * заглавных (заглавная в начале тянет вверх); выносные (р, у) в счёт не идут. Возвращает: от верха строки до базовой
+ * линии и высоту этого центра над базовой линией, умноженную на 2 */
 static void font_xheight(const lv_font_t *f, int *asc, int *xh)
 {
 	lv_font_glyph_dsc_t g;
 	*asc = f->line_height - f->base_line;
-	*xh = lv_font_get_glyph_dsc(f, &g, 'x', 0) && g.box_h > 0 ? g.box_h + g.ofs_y : f->line_height / 3;
+	int x = lv_font_get_glyph_dsc(f, &g, 'x', 0) && g.box_h > 0 ? g.box_h + g.ofs_y : f->line_height / 3;
+	int cap = lv_font_get_glyph_dsc(f, &g, 'H', 0) && g.box_h > 0 ? g.box_h + g.ofs_y : x * 4 / 3;
+	*xh = (x + cap) / 2;
 }
 
 static void size_metrics(void)
