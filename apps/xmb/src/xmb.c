@@ -313,6 +313,7 @@ static struct {
 	/* шторка */
 	lv_obj_t *sh_panel, *sh_bg[8], *sh_icon[8], *sh_label[8], *sh_slider;
 	int sh_open, sh_drag;   /* sh_drag — палец на ползунке яркости */
+	int sh_long;            /* долгое нажатие на плитку уже сработало — отпускание не тап */
 	double sh_t;
 	/* воспроизведение: очередь — список, из которого запущен трек */
 	int track, playing, volume, ended_seen;
@@ -5794,11 +5795,59 @@ static column_t *drag_column(void)
 	return s.at_cats ? NULL : cur_col();
 }
 
-/* тач в шторке: тап по плитке — переключить, ползунок — тянуть пальцем, свайп вверх или тап ниже — закрыть */
+/* тач в шторке: тап по плитке — переключить, долгое нажатие — её страница, ползунок — тянуть пальцем, свайп вверх или
+ * тап ниже — закрыть */
 /* быстрый короткий жест решается направлением, а не пройденным путём (как у Sonix) */
 static int t_flick(void)
 {
 	return lv_tick_get() - s.t_ms < 300;
+}
+
+/* плитка шторки под пальцем (py — от верха шторки) или −1 */
+static int tile_at(lv_point_t p, int py)
+{
+	for (int i = 0; i < NTILE; i++)
+		if (abs(p.x - TILE_X(i)) < 38 && py > TILE_Y(i) - TILE_R - 8 && py < TILE_Y(i) + TILE_R + 26)
+			return i;
+	return -1;
+}
+
+/* пункт меню с такими вложенными пунктами или с таким значением */
+static int item_at(const node_t *items, int n, const node_t *kids, const int *val)
+{
+	for (int i = 0; i < n; i++)
+		if ((kids && items[i].kids == kids) || (val && items[i].val == val))
+			return i;
+	return 0;
+}
+
+/* долгое нажатие на плитку — её страница: списки Bluetooth и Wi-Fi, полосы эквалайзера, время сна, пункт сенсора */
+static void tile_long(int i)
+{
+	int path[3];
+	shade_set(0);
+	switch (i) {
+	case TL_BT:   /* сразу список устройств / сетей */
+		path[0] = item_at(set_items, N(set_items), bt_items, NULL);
+		path[1] = item_at(bt_items, N(bt_items), bt_nodes, NULL);
+		path[2] = 0;
+		reveal(CAT_SETTINGS, path, 3);
+		break;
+	case TL_WIFI:
+		path[0] = item_at(set_items, N(set_items), wifi_items, NULL);
+		path[1] = item_at(wifi_items, N(wifi_items), wifi_nodes, NULL);
+		path[2] = 0;
+		reveal(CAT_SETTINGS, path, 3);
+		break;
+	case TL_EQ: eq_open(); break;
+	case TL_SLEEP: options_open(&px_sleep); break;
+	case TL_TOUCH:
+		path[0] = item_at(set_items, N(set_items), control_items, NULL);
+		path[1] = item_at(control_items, N(control_items), NULL, &s.touch_off);
+		reveal(CAT_SETTINGS, path, 2);
+		break;
+	case TL_USB: usb_menu(); break;
+	}
 }
 
 static void shade_touch(lv_event_code_t code, lv_point_t p, int dx, int dy)
@@ -5806,6 +5855,15 @@ static void shade_touch(lv_event_code_t code, lv_point_t p, int dx, int dy)
 	int top = (int)(-SHADE_H + SHADE_H * s.sh_t), py = p.y - top;
 	if (code == LV_EVENT_PRESSED) {   /* ползунок — только если палец лёг на него: шторка едет за пальцем */
 		s.sh_drag = abs(py - SLIDER_Y) < 22 && p.x > SLIDER_X - 16;
+		s.sh_long = 0;
+		return;
+	}
+	if (code == LV_EVENT_LONG_PRESSED) {
+		int i = tile_at(p, py);
+		if (!s.sh_drag && abs(dx) < 10 && abs(dy) < 10 && i >= 0) {
+			s.sh_long = 1;
+			tile_long(i);
+		}
 		return;
 	}
 	if (code == LV_EVENT_PRESSING) {
@@ -5818,14 +5876,14 @@ static void shade_touch(lv_event_code_t code, lv_point_t p, int dx, int dy)
 	if (code != LV_EVENT_RELEASED)
 		return;
 	int tap = abs(dx) < 10 && abs(dy) < 10;
-	if (s.sh_drag)
+	if (s.sh_long)
+		s.sh_long = 0;
+	else if (s.sh_drag)
 		s.sh_drag = 0;
 	else if (dy < -60 || (dy < -24 && t_flick()) || (tap && py > SHADE_H))
 		shade_set(0);
-	else if (tap)
-		for (int i = 0; i < NTILE; i++)
-			if (abs(p.x - TILE_X(i)) < 38 && py > TILE_Y(i) - TILE_R - 8 && py < TILE_Y(i) + TILE_R + 26)
-				tile_tap(i);
+	else if (tap && tile_at(p, py) >= 0)
+		tile_tap(tile_at(p, py));
 }
 
 static void touch_cb(lv_event_t *e)
@@ -5904,6 +5962,12 @@ static void touch_cb(lv_event_t *e)
 		ctx_open();
 		return;
 	}
+	if (s.t_mode == T_SHADE) {   /* до эквалайзера: долгое нажатие на плитку открывает его, отпускание — ещё шторки */
+		shade_touch(code, p, dx, dy);
+		if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST)
+			s.t_mode = T_NONE;
+		return;
+	}
 	if (s.eq_edit) {
 		if (code == LV_EVENT_PRESSED || code == LV_EVENT_PRESSING) {
 			if (p.y > EQ_MID - 12 * EQ_PX - 30 && p.y < EQ_MID + 12 * EQ_PX + 20) {
@@ -5922,12 +5986,6 @@ static void touch_cb(lv_event_t *e)
 			}
 			s.t_mode = T_NONE;
 		}
-		return;
-	}
-	if (s.t_mode == T_SHADE) {
-		shade_touch(code, p, dx, dy);
-		if (code == LV_EVENT_RELEASED || code == LV_EVENT_PRESS_LOST)
-			s.t_mode = T_NONE;
 		return;
 	}
 	if (code == LV_EVENT_PRESSING) {
