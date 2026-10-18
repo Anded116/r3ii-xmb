@@ -13,6 +13,7 @@
 #include "audio.h"
 #include "subproc.h"
 
+#include <fcntl.h>
 #include <math.h>
 #include <pthread.h>
 #include <stdint.h>
@@ -128,6 +129,8 @@ static struct {
 	struct mixer *mixer;
 	int port;
 	double idle;
+	char jack;   /* /sys/class/switch/headset/state при последней проверке */
+	uint32_t jack_ms;
 	/* Bluetooth: канал в «bluealsa-cli open» (pipe — открыт), частота и формат кодека, заявка интерфейса */
 	FILE *bt_pipe;
 	char bt_path[160], bt_rq_path[160];
@@ -695,6 +698,7 @@ static int out_open(int rate)
 		mixer_set("Output Port Switch", PORT_PHONES);   /* до открытия PCM: иначе ядро падает */
 		a.port = PORT_PHONES;
 		apply_volume();
+		usleep(150000);   /* включение тракта (ПЛИС HBC3000, ЦАП) — дать ему устояться, как сток и Sonix */
 	}
 	/* 24 бита (контейнер 32, S24_LE — его AIC принимает; S32 через преобразование у Sonix роняло ядро); не открылся —
 	 * 16 бит с дизерингом */
@@ -1144,6 +1148,33 @@ static int usb_step(int32_t *buf)
 	a.usb_rate = 0;
 	return 0;
 }
+
+/* разъём 3.5 вставили или вынули: как сток — закрыть вывод, дать контактам устояться, следующее открытие заново
+ * пишет выход. Вставка штекера даёт помеху (USB при этом переподключается) */
+static void jack_check(void)
+{
+	uint32_t now = now_ms();
+	if (now - a.jack_ms < 250)
+		return;
+	a.jack_ms = now;
+	char st = 0;
+	int fd = open("/sys/class/switch/headset/state", O_RDONLY);
+	if (fd >= 0) {
+		if (read(fd, &st, 1) != 1)
+			st = 0;
+		close(fd);
+	}
+	if (!st || st == a.jack)
+		return;
+	int first = !a.jack;
+	a.jack = st;
+	if (first || a.bt_path[0] || (!a.pcm && a.port != PORT_PHONES))
+		return;
+	fprintf(stderr, "audio: разъём 3.5 — %s, вывод заново\n", st == '1' ? "вставлен" : "вынут");
+	out_close();
+	a.port = -1;
+	usleep(300000);
+}
 #endif
 
 static void *audio_thread(void *arg)
@@ -1153,6 +1184,7 @@ static void *audio_thread(void *arg)
 	static int32_t buf[CHUNK * 2], nb[CHUNK * 2];
 	for (;;) {
 #if XMB_DEVICE
+		jack_check();
 		if (usb_step(buf))
 			continue;
 #endif
