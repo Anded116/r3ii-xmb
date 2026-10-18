@@ -9,14 +9,14 @@
 | Статус | Тикетов |
 |---|---|
 | `open` | 5 |
-| `fixed` | 31 |
-| `verified` | 2 |
+| `fixed` | 30 |
+| `verified` | 3 |
 | `accepted` | 7 |
 | **всего** | **45** |
 
 | Область | open | in-progress | fixed |
 |---|---|---|---|
-| ui | 0 | 0 | 9 |
+| ui | 0 | 0 | 8 |
 | player | 0 | 0 | 3 |
 | audio | 1 | 0 | 5 |
 | library | 0 | 0 | 2 |
@@ -68,7 +68,6 @@
 - [ ] [XMB-0011](XMB-0011-rezhim-usb-tsap.md) `[P3/audio]` Режим USB-ЦАП
 - [ ] [XMB-0023](XMB-0023-fon-pleera-tsvetom-oblozhki-plavnaya-smena.md) `[P3/player]` Фон плеера цветом обложки: плавная смена оттенка
 - [ ] [XMB-0028](XMB-0028-pleer-na-pauze-posle-zapuska-xmb-stroka.md) `[P3/player]` Плеер на паузе после запуска XMB: строка формата — только «FLAC», без разрядности и частоты
-- [ ] [XMB-0044](XMB-0044-ikonki-xmb-svoi-vmesto-dubliruyuschihsya.md) `[P3/ui]` Иконки XMB: свои вместо дублирующихся символов LVGL
 
 **Проверить ТЕСТОМ**
 
@@ -96,5 +95,6 @@
 
 | ID | Обновлён | Статус | Заголовок |
 |---|---|---|---|
+| [XMB-0044](XMB-0044-ikonki-xmb-svoi-vmesto-dubliruyuschihsya.md) | 2026-10-18 | verified | Иконки XMB: свои вместо дублирующихся символов LVGL |
 | [XMB-0032](XMB-0032-punkt-bez-vtoroy-stroki-smeschen-vverh.md) | 2026-10-18 | verified | Пункт без второй строки смещён вверх — центрировать |
 | [XMB-0014](XMB-0014-otpuskanie-kolesa-budilo-pleer-srazu-posle.md) | 2026-10-17 | verified | Отпускание колеса будило плеер сразу после засыпания |
