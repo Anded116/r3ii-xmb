@@ -302,7 +302,7 @@ static struct {
 	uint32_t seek_ms;
 	track_t np;
 	char np_format[48];
-	lv_obj_t *mini_img, *mini_note, *mini_ring, *tb_usb;
+	lv_obj_t *mini_img, *mini_note, *mini_ring, *mini_shape[2], *tb_usb;
 	int mini_ty;   /* верх названия в мини-плеере (у «Карточки» — свой) */
 	library_t *lib;
 	/* плейлисты: [0] — «Избранное» */
@@ -4158,11 +4158,11 @@ static void apply_theme(void)
 }
 
 /* вид мини-плеера: насколько он закрывает строки списка, которые уходят под него */
-/* что у мини-плеера справа и сверху: у «Карточки» — кнопка в кольце прогресса, у остальных — значок, время и
- * полоса; у источника «Компьютер» — без времени и полосы */
+/* что у мини-плеера справа и сверху: у «Карточки» и «Чёрного со скруглением» — кнопка в кольце прогресса, у остальных —
+ * значок, время и полоса; у источника «Компьютер» — без времени и полосы */
 static void mini_chrome(void)
 {
-	int card = s.mini_style == MINI_CARD, dac = dac_shown();
+	int card = s.mini_style == MINI_CARD || s.mini_style == MINI_FRAME, dac = dac_shown();
 	set_hidden(s.mini_ring, !card);
 	set_hidden(s.mini_icon, card);
 	set_hidden(s.mini_time, card || dac);
@@ -4210,18 +4210,60 @@ static void mini_ring_draw(lv_event_t *e)
 	g.opa = off ? 77 : LV_OPA_COVER;
 	g.align = LV_TEXT_ALIGN_CENTER;
 	g.text = on ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY;
-	int dx = on ? 0 : 1;   /* треугольник центрируется по массе — она левее */
+	int dx = on ? 1 : 2;   /* кольцо чётной ширины — центр между пикселями; треугольник ещё и центрируется по массе */
 	lv_area_t ga = { a.x1 + dx, d.center.y - 7, a.x2 + dx, d.center.y + 7 };
 	lv_draw_label(l, &g, &ga);
 }
 
-/* тап по мини-плееру: у «Карточки» по кнопке справа — пауза и продолжение, иначе — раскрыть плеер */
+/* тап по мини-плееру: по кнопке в кольце — пауза и продолжение, иначе — раскрыть плеер */
 static void mini_tap(lv_point_t p)
 {
-	if (s.mini_style == MINI_CARD && p.x >= lv_obj_get_x(s.mini) + lv_obj_get_width(s.mini) - 48)
+	if (!lv_obj_is_hidden(s.mini_ring) && p.x >= lv_obj_get_x(s.mini) + lv_obj_get_x(s.mini_ring) - 12)
 		toggle_play();
 	else
 		player_show(1);
+}
+
+/* «Карточка»: фон — маска со скруглением-суперэллипсом, как углы экрана (LVGL скругляет только дугой окружности),
+ * и вторая маска — светлая кромка по верху. Сторона кривой 14: по глубине — как окружность радиусом 8 */
+#define CARD_S 14
+static uint8_t card_px[2][SCR_W * MINI_H];
+static lv_image_dsc_t card_img[2];
+
+static int card_in(int w, int h, double x, double y)
+{
+	if (x < 0 || y < 0 || x > w || y > h)
+		return 0;
+	double a = x < CARD_S ? (CARD_S - x) / CARD_S : x > w - CARD_S ? (x - w + CARD_S) / CARD_S : 0;
+	double b = y < CARD_S ? (CARD_S - y) / CARD_S : y > h - CARD_S ? (y - h + CARD_S) / CARD_S : 0;
+	return a * a * a * a + b * b * b * b <= 1;
+}
+
+static void card_shape(int w, int h)
+{
+	if (card_img[0].header.w == (uint32_t)w && card_img[0].header.h == (uint32_t)h)
+		return;
+	for (int y = 0; y < h; y++)
+		for (int x = 0; x < w; x++) {
+			int n = 0, rim = 0;   /* сглаживание: 4×4 точки на пиксель; кромка — внутри, а на пиксель выше — уже нет */
+			for (int sy = 0; sy < 4; sy++)
+				for (int sx = 0; sx < 4; sx++) {
+					double fx = x + (sx + 0.5) / 4, fy = y + (sy + 0.5) / 4;
+					int in = card_in(w, h, fx, fy);
+					n += in;
+					rim += in && y < h / 2 && !card_in(w, h, fx, fy - 1);
+				}
+			card_px[0][y * w + x] = (uint8_t)(n * 255 / 16);
+			card_px[1][y * w + x] = (uint8_t)(rim * 255 / 16);
+		}
+	for (int i = 0; i < 2; i++) {
+		card_img[i] = (lv_image_dsc_t){ .header = { .magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8,
+							    .w = w, .h = h, .stride = w },
+						.data_size = w * h, .data = card_px[i] };
+		lv_image_set_src(s.mini_shape[i], &card_img[i]);
+		lv_obj_set_size(s.mini_shape[i], w, h);
+		lv_obj_invalidate(s.mini_shape[i]);
+	}
 }
 
 static void apply_mini(void)
@@ -4230,30 +4272,27 @@ static void apply_mini(void)
 		return;
 	uint32_t c = theme_colors[s.theme][1];   /* низ фона темы, притемнённый: мини-плеер как часть фона */
 	uint32_t dark = ((c >> 16 & 255) * 2 / 5) << 16 | ((c >> 8 & 255) * 2 / 5) << 8 | (c & 255) * 2 / 5;
-	int card = s.mini_style == MINI_CARD;
+	int card = s.mini_style == MINI_CARD, frame = s.mini_style == MINI_FRAME;
 	uint32_t color = s.mini_style == MINI_THEME ? dark : 0;
 	int opa = s.mini_style == MINI_CLEAR ? 77 : s.mini_style == MINI_DARK ? 217 : 255;
-	/* «Карточка»: видимый зазор 6 px снизу и по бокам (рамка экрана закрывает края — к ним прибавляется). Угол экрана
-	 * по глубине — как окружность радиусом 12: при отступе 6 параллельный ему угол карточки — радиус 6–8 */
+	/* «Карточка»: видимый зазор 6 px снизу и по бокам (рамка экрана закрывает края — к ним прибавляется) */
 	int x = card ? 6 + s.edge_l : 0, w = card ? SCR_W - 12 - s.edge_l - s.edge_r : SCR_W, h = card ? MINI_H - 6 : MINI_H;
-	int inset = 0;
 	lv_obj_set_pos(s.mini, x, SCR_H - MINI_H);
 	lv_obj_set_size(s.mini, w, h);
-	lv_obj_set_style_radius(s.mini, card ? 8 : 0, 0);
-	lv_obj_set_style_bg_opa(s.mini, (lv_opa_t)opa, 0);
 	/* «Карточка»: цвет темы, подмешанный к графиту (не притемнённый — тот грязнит), ровный — градиент в RGB565 идёт
-	 * ступенями; светлый кант по верхней кромке. Кант сдвигает содержимое на 1 px вниз — поэтому y на 1 меньше */
-	lv_obj_set_style_border_width(s.mini, card ? 1 : 0, 0);
+	 * ступенями; рисует его маска, сам мини-плеер прозрачный */
 	if (card) {
 		color = lv_color_to_u32(lv_color_mix(lv_color_hex(c), lv_color_hex(0x141418), 80)) & 0xffffff;
-		lv_obj_set_style_border_color(s.mini, lv_color_white(), 0);
-		lv_obj_set_style_border_opa(s.mini, 36, 0);
-		lv_obj_set_style_border_side(s.mini, LV_BORDER_SIDE_TOP, 0);   /* блик по верхней кромке */
+		card_shape(w, h);
+		lv_obj_set_style_image_recolor(s.mini_shape[0], lv_color_hex(color), 0);
 	}
+	for (int i = 0; i < 2; i++)
+		set_hidden(s.mini_shape[i], !card);
+	lv_obj_set_style_bg_opa(s.mini, card ? 0 : (lv_opa_t)opa, 0);
 	lv_obj_set_style_bg_color(s.mini, lv_color_hex(color), 0);
 	/* обложка: у «Карточки» — скруглённая, отступы ровные, заглушка — светлая */
-	int ts = card ? 34 : 36;
-	lv_obj_set_pos(s.mini_thumb, card ? 6 : 10, card ? 5 : 9);
+	int ts = card ? 34 : 36, pad = card ? 6 : 9;
+	lv_obj_set_pos(s.mini_thumb, card ? 6 : 10, card ? 6 : 9);
 	lv_obj_set_size(s.mini_thumb, ts, ts);
 	lv_obj_set_size(s.mini_img, ts, ts);
 	lv_obj_set_style_radius(s.mini_thumb, card ? 4 : 0, 0);
@@ -4262,25 +4301,20 @@ static void apply_mini(void)
 	lv_obj_set_style_bg_opa(s.mini_thumb, card ? 31 : LV_OPA_COVER, 0);
 	lv_obj_set_style_text_color(s.mini_note, card ? lv_color_white() : lv_color_hex(EMPTY_FG), 0);
 	lv_obj_set_style_text_opa(s.mini_note, card ? 179 : LV_OPA_COVER, 0);
+	/* кнопка в кольце: от правого края — как обложка от левого */
+	int rx = card ? w - 6 - 34 : w - 10 - 34;
+	lv_obj_set_pos(s.mini_ring, rx, card ? 6 : pad);
 	/* подписи: у «Карточки» название полужирное, мельче, исполнитель — ниже */
-	int rx = w - 6 - 34, tx0 = card ? 50 : 56, tw = card ? rx - 8 - tx0 : SCR_W - 56 - 58;
-	s.mini_ty = card ? 4 : 8;
+	int tx0 = card ? 50 : 56, tw = card || frame ? rx - 8 - tx0 : SCR_W - 56 - 58;
+	s.mini_ty = card ? 5 : 8;
 	lv_obj_set_style_text_font(s.mini_text, card ? s.f_clock : s.f_item, 0);
 	lv_obj_set_pos(s.mini_text, tx0, s.mini_ty);
 	lv_obj_set_width(s.mini_text, tw);
-	lv_obj_set_pos(s.mini_artist, tx0, card ? 24 : 28);
+	lv_obj_set_pos(s.mini_artist, tx0, card ? 25 : 28);
 	lv_obj_set_width(s.mini_artist, tw);
 	lv_obj_set_style_text_opa(s.mini_artist, card ? 153 : 160, 0);
-	lv_obj_set_pos(s.mini_ring, rx, 5);
-	/* у «Чёрного со скруглением» полоса прогресса — внизу, под текстом: сверху она разделяла бы мини-плеер и
-	 * скругления над ним */
-	int frame = s.mini_style == MINI_FRAME, bar_y = frame ? h - 5 : 0;
-	if (frame)
-		inset = 10;
-	s.mini_bar_w = w - 2 * inset;
-	lv_obj_set_pos(s.mini_track, inset, bar_y);
-	lv_obj_set_width(s.mini_track, s.mini_bar_w);
-	lv_obj_set_pos(s.mini_bar, inset, bar_y);
+	s.mini_bar_w = w;
+	lv_obj_set_width(s.mini_track, w);
 	lv_obj_set_x(s.mini_time, w - 54);
 	lv_obj_set_x(s.mini_icon, w - 54);
 	mini_chrome();
@@ -6227,6 +6261,13 @@ void xmb_init(const char *font_dir)
 	lv_obj_set_pos(np, 0, SCR_H - MINI_H);
 	lv_obj_set_style_bg_color(np, lv_color_black(), 0);
 	lv_obj_set_style_bg_opa(np, LV_OPA_30, 0);
+	for (int i = 0; i < 2; i++) {
+		s.mini_shape[i] = lv_image_create(np);
+		lv_obj_set_style_image_recolor(s.mini_shape[i], lv_color_white(), 0);
+		lv_obj_set_style_image_recolor_opa(s.mini_shape[i], LV_OPA_COVER, 0);
+		lv_obj_set_hidden(s.mini_shape[i], true);
+	}
+	lv_obj_set_style_image_opa(s.mini_shape[1], 36, 0);   /* светлая кромка */
 	lv_obj_t *track = s.mini_track = plain(np);
 	lv_obj_set_size(track, SCR_W, 2);
 	lv_obj_set_style_bg_color(track, lv_color_white(), 0);
