@@ -9,8 +9,7 @@
 | Статус | Тикетов |
 |---|---|
 | `open` | 5 |
-| `in-progress` | 1 |
-| `fixed` | 37 |
+| `fixed` | 38 |
 | `verified` | 3 |
 | `accepted` | 7 |
 | **всего** | **53** |
@@ -23,7 +22,7 @@
 | library | 0 | 0 | 2 |
 | net | 1 | 0 | 4 |
 | power | 0 | 0 | 4 |
-| display | 0 | 1 | 3 |
+| display | 0 | 0 | 4 |
 | input | 1 | 0 | 1 |
 | firmware | 2 | 0 | 0 |
 
@@ -32,7 +31,6 @@
 | ID | P | Статус | Область | Заголовок |
 |---|---|---|---|---|
 | [XMB-0024](XMB-0024-pleer-perezagruzilsya-sam-pri-pereklyuchenii.md) | P1 | open | firmware | Плеер перезагрузился сам при переключении трека в полноэкранном плеере 👀 |
-| [XMB-0053](XMB-0053-proizvoditelnost-prosela-nuzhno-stabilno-45-k.md) | P1 | in-progress | display | Производительность просела: нужно стабильно 45 к/с с самой тяжёлой анимацией и музыкой |
 | [XMB-0006](XMB-0006-polnoekrannyy-pleer-ne-reagiroval-na-kasaniya.md) | P2 | open | input | Полноэкранный плеер не реагировал на касания до выключения и включения экрана 👀 |
 | [XMB-0010](XMB-0010-bluetooth-proverit-naushniki-zvuk-i-smenu-kodeka.md) | P2 | open | net | Bluetooth: проверить наушники, звук и смену кодека |
 | [XMB-0037](XMB-0037-usb-tsap-mozhno-li-menshe-50-ms-zaderzhki.md) | P3 | open | audio | USB-ЦАП: можно ли меньше 50 мс задержки |
@@ -45,6 +43,7 @@
 **Проверить НА ПЛЕЕРЕ**
 
 - [ ] [XMB-0012](XMB-0012-silnye-tormoza-posle-sna-panel-slomana-snom.md) `[P0/power]` Сильные тормоза после сна: панель сломана сном, сон с Wi-Fi вешал плеер
+- [ ] [XMB-0053](XMB-0053-proizvoditelnost-prosela-nuzhno-stabilno-45-k.md) `[P1/display]` Производительность просела: нужно стабильно 45 к/с с самой тяжёлой анимацией и музыкой
 - [ ] [XMB-0001](XMB-0001-sbros-bufera-pcm-pri-pauze-peremotke-i-smene.md) `[P2/audio]` Сброс буфера PCM при паузе, перемотке и смене трека — проверить на щелчки
 - [ ] [XMB-0002](XMB-0002-wi-fi-podklyuchenie-k-novoy-seti-s-parolem.md) `[P2/net]` Wi-Fi: подключение к новой сети с паролем
 - [ ] [XMB-0003](XMB-0003-teksty-pesen-iz-lrclib-chetvertaya-knopka-pleera.md) `[P2/player]` Тексты песен из LRCLIB (четвёртая кнопка плеера)
