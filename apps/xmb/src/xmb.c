@@ -488,18 +488,19 @@ static char scan_sub[48];
 static const node_t scanning[] = { ACT(LV_SYMBOL_REFRESH, "Сканирование библиотеки…", scan_sub, A_NONE) };
 
 
-/* чаще всего слушают альбомы, избранное и папки: они в шаге от старта («Музыка») */
-enum { CAT_SETTINGS, CAT_MUSIC, CAT_PLAYLISTS, CAT_FOLDERS };
+/* чаще всего слушают альбомы, избранное и папки: они в шаге от старта («Музыка»); подкасты — своим разделом в конце */
+enum { CAT_SETTINGS, CAT_MUSIC, CAT_PLAYLISTS, CAT_FOLDERS, CAT_PODCASTS };
 static cat_t cats[] = {
 	{ LV_SYMBOL_SETTINGS, "Настройки", set_items, N(set_items) },
 	{ LV_SYMBOL_AUDIO, "Музыка", scanning, 1 },
 	{ ICON_PLAYLIST, "Плейлисты", scanning, 1 },
 	{ LV_SYMBOL_DIRECTORY, "Папки", scanning, 1 },
+	{ ICON_PODCASTS, "Подкасты", scanning, 1 },
 };
-enum { MUSIC_QUEUE, MUSIC_ALBUMS, MUSIC_ARTISTS, MUSIC_ALL, MUSIC_PODCASTS, MUSIC_SEARCH, MUSIC_COUNT };
+enum { MUSIC_QUEUE, MUSIC_ALBUMS, MUSIC_ARTISTS, MUSIC_ALL, MUSIC_SEARCH, MUSIC_COUNT };
 static int nmusic;   /* альбомов-музыки: в порядке album_order они первые, за ними — подкасты */
 static node_t *pod_nodes;   /* «Подкасты»: [0] — «Обновить», дальше подкасты */
-static char pod_sub[96], pod_upd_sub[96];
+static char pod_upd_sub[96];
 static node_t music[MUSIC_COUNT];
 static node_t *lib_artists, *lib_albums;   /* пункты «Исполнителей» и «Альбомов» — их же показывает поиск */
 #define NCAT N(cats)
@@ -1738,9 +1739,6 @@ static void library_build(void)
 		music[MUSIC_ARTISTS] = (node_t){ .icon = ICON_ARTISTS, .title = "Исполнители", .kids = artists, .nkids = L->nartists };
 		music[MUSIC_ALL] = (node_t){ .icon = ICON_TRACKS, .title = "Все треки", .kids = all,
 					     .nkids = L->nby_title };
-		music[MUSIC_PODCASTS] = (node_t){ .icon = ICON_PODCASTS, .title = "Подкасты", .sub = pod_sub, .kids = pod_nodes,
-						  .nkids = npod + 1 };
-		pod_labels();
 		music[MUSIC_SEARCH] = (node_t){ .icon = ICON_SEARCH, .title = "Поиск", .sub = "исполнители, альбомы, треки",
 						.action = A_SEARCH };
 		lib_artists = artists;
@@ -1756,6 +1754,10 @@ static void library_build(void)
 		cats[CAT_MUSIC].items = cats[CAT_FOLDERS].items = empty;
 		cats[CAT_MUSIC].count = cats[CAT_FOLDERS].count = 1;
 	}
+	cats[CAT_PODCASTS].items = pod_nodes;   /* и без музыки: подписки можно обновить */
+	cats[CAT_PODCASTS].count = npod + 1;
+	pod_labels();
+	column_fill(&s.cat_col[CAT_PODCASTS], cats[CAT_PODCASTS].items, cats[CAT_PODCASTS].count);
 	column_fill(&s.cat_col[CAT_MUSIC], cats[CAT_MUSIC].items, cats[CAT_MUSIC].count);
 	if (cats[CAT_MUSIC].items == music)
 		s.cat_col[CAT_MUSIC].sel = s.cat_col[CAT_MUSIC].pos = MUSIC_ALBUMS;
@@ -2998,13 +3000,15 @@ static void reveal_album(void)
 		return;
 	int a = s.lib->tracks[s.track].aidx, path[3] = { MUSIC_ALBUMS, s.album_pos[a], 0 };
 	const lib_album_t *al = &s.lib->albums[a];
-	if (al->podcast) {   /* «Подкасты»: [0] — «Обновить» */
-		path[0] = MUSIC_PODCASTS;
-		path[1] = 1 + s.album_pos[a] - nmusic;
-	}
 	for (int j = 0; j < al->ntracks; j++)
 		if (al->tracks[j] == s.track)
 			path[2] = j;
+	if (al->podcast) {   /* раздел «Подкасты»: [0] — «Обновить» */
+		path[0] = 1 + s.album_pos[a] - nmusic;
+		path[1] = path[2];
+		reveal(CAT_PODCASTS, path, 2);
+		return;
+	}
 	reveal(CAT_MUSIC, path, 3);
 }
 
@@ -3838,14 +3842,9 @@ static void wifi_poll(void)
 	}
 }
 
-/* подписи «Подкастов»: сколько их и что сейчас с подписками */
+/* подпись «Обновить» в «Подкастах»: что сейчас с подписками */
 static void pod_labels(void)
 {
-	int npod = music[MUSIC_PODCASTS].nkids - 1;
-	if (npod > 0)
-		snprintf(pod_sub, sizeof(pod_sub), tx("подкастов: %d"), npod);
-	else
-		snprintf(pod_sub, sizeof(pod_sub), "%s", tx(pod_feeds() ? "выпусков пока нет" : "подписки — в Podcasts/подписки.txt"));
 	const char *st = pod_status();
 	snprintf(pod_upd_sub, sizeof(pod_upd_sub), "%s",
 		 st[0] ? st : tx(!pod_feeds() ? "ссылки на RSS — в Podcasts/подписки.txt" : wifi_online() ? "проверить новые выпуски"
@@ -5043,7 +5042,7 @@ static void select_current(void)
 		wifi_scan();
 	} else if (n->action == A_PODUPDATE) {
 		if (!wifi_online())
-			toast("%s", "Включите Wi-Fi: Настройки → Wi-Fi");
+			toast("%s", "Включите Wi-Fi: Настройки › Wi-Fi");
 		else if (!pod_feeds())
 			toast("%s", "Положите ссылки на RSS в Podcasts/подписки.txt");
 		else

@@ -119,7 +119,7 @@ static const char *const table[][LANG_COUNT] = {
 	{ "подписки — в Podcasts/подписки.txt", "subscriptions: Podcasts/подписки.txt", "suscripciones: Podcasts/подписки.txt" },
 	{ "ссылки на RSS — в Podcasts/подписки.txt", "RSS links go in Podcasts/подписки.txt", "enlaces RSS en Podcasts/подписки.txt" },
 	{ "проверить новые выпуски", "check for new episodes", "buscar episodios nuevos" }, { "нужен Wi-Fi", "Wi-Fi needed", "se necesita Wi-Fi" },
-	{ "Включите Wi-Fi: Настройки → Wi-Fi", "Turn on Wi-Fi: Settings → Wi-Fi", "Activa el Wi-Fi: Ajustes → Wi-Fi" },
+	{ "Включите Wi-Fi: Настройки › Wi-Fi", "Turn on Wi-Fi: Settings › Wi-Fi", "Activa el Wi-Fi: Ajustes › Wi-Fi" },
 	{ "Положите ссылки на RSS в Podcasts/подписки.txt", "Put RSS links in Podcasts/подписки.txt", "Pon enlaces RSS en Podcasts/подписки.txt" },
 	{ "проверка подписок: %d из %d", "checking feeds: %d of %d", "revisando: %d de %d" },
 	{ "скачивается выпуск %d (подписка %d)", "downloading episode %d (feed %d)", "descargando episodio %d (fuente %d)" },
