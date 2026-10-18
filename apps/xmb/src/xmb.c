@@ -1377,6 +1377,11 @@ static void layout_index(void)
 
 /* колонка без видимых строк — скрыть контейнер целиком: иначе каждая перерисовка любой области обходит все его
  * строки (у LVGL цена области — обход дерева объектов, а колонок с пулами строк до десятка) */
+/* пустая колонка — на «стоянке»: экране, который никогда не показывается. Просто скрытую LVGL всё равно обходит
+ * при каждом пересчёте раскладки (несколько раз за кадр), а колонок десять по 65 объектов — это ~3 мс кадра.
+ * Обратно — на своё место: над колонками, созданными раньше, под мини-плеером */
+static lv_obj_t *park;
+
 static void column_cont_vis(column_t *c)
 {
 	int vis = 0;
@@ -1386,6 +1391,21 @@ static void column_cont_vis(column_t *c)
 		      !lv_obj_is_hidden(r->sub);
 	}
 	set_hidden(c->cont, !vis);
+	lv_obj_t *want = vis ? s.main : park;
+	if (lv_obj_get_parent(c->cont) == want)
+		return;
+	lv_obj_set_parent(c->cont, want);
+	if (!vis)
+		return;
+	int later = 0, after = 0;   /* колонки, созданные позже этой и стоящие на экране, — над ней */
+	for (int i = 0; i < NCAT + MAX_DEPTH - 1; i++) {
+		column_t *o = i < NCAT ? &s.cat_col[i] : &s.stack[i - NCAT + 1];
+		if (o == c)
+			after = 1;
+		else if (after && o->cont && lv_obj_get_parent(o->cont) == s.main)
+			later++;
+	}
+	lv_obj_move_to_index(c->cont, lv_obj_get_index(s.mini) - later);
 }
 
 static void layout(void)
@@ -6240,6 +6260,7 @@ void xmb_init(const char *font_dir)
 	lv_obj_set_style_text_align(s.cat_title, LV_TEXT_ALIGN_CENTER, 0);
 	lv_obj_set_pos(s.cat_title, CAT_X - 70, CAT_Y + sz->cat_icon_sel / 2 + 6);
 
+	park = lv_obj_create(NULL);
 	for (int i = 0; i < NCAT; i++) {
 		s.cat_col[i].cont = plain(s.main);
 		lv_obj_set_size(s.cat_col[i].cont, SCR_W, SCR_H);
@@ -6248,7 +6269,7 @@ void xmb_init(const char *font_dir)
 		s.stack[d].cont = plain(s.main);
 		lv_obj_set_size(s.stack[d].cont, SCR_W, SCR_H);
 		/* строки уровней — заранее: создание пула (64 объекта) в кадре первого входа давало рывок; пустая колонка
-		 * скрыта целиком (column_cont_vis), обход дерева их не задевает */
+		 * скрыта целиком и уходит на стоянку (column_cont_vis) */
 		column_pool(&s.stack[d]);
 		for (int i = 0; i < POOL; i++)
 			hide_row(&s.stack[d].rows[i]);
