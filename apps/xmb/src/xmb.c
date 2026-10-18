@@ -138,8 +138,9 @@ typedef struct {
 	const lv_image_dsc_t *img;   /* обложка пункта (из кэша) */
 	char title[160], sub[192];   /* подписи как есть и — под ширину, с многоточием */
 	char tdot[160], sdot[192];
+	lv_draw_buf_t *tbuf, *sbuf;   /* подписи, нарисованные заранее (A8); NULL — пусто */
 	const lv_font_t *dot_f;
-	int dot_w;
+	int dot_w, dot_th, dot_sh, dot_al;
 	unsigned tgen, dot_gen;
 	row_draw_t cur, next;   /* нарисовано и посчитано раскладкой на этот кадр */
 } row_t;
@@ -869,14 +870,55 @@ static void row_dots(char *dst, size_t cap, const char *src, const lv_font_t *f,
 }
 
 /* подписи строки под шрифт и ширину — пересчёт многоточия только при их смене */
-static void row_texts(row_t *r, const lv_font_t *tf, int w)
+/* подпись — заранее в картинку A8 (один раз на смену текста, шрифта, рамки): в кадре она выводится одним
+ * изображением, а не буква за буквой — в сетке это ~280 букв на кадр */
+static lv_draw_buf_t *bake_text(lv_draw_buf_t *buf, const char *txt, const lv_font_t *f, int w, int h, int align)
 {
-	if (r->dot_f == tf && r->dot_w == w && r->dot_gen == r->tgen + s.text_gen)
+	static lv_obj_t *canvas;
+	if (!txt[0] || w <= 0 || h <= 0) {
+		if (buf)
+			lv_draw_buf_destroy(buf);
+		return NULL;
+	}
+	if (buf && ((int)buf->header.w != w || (int)buf->header.h != h)) {
+		lv_draw_buf_destroy(buf);
+		buf = NULL;
+	}
+	if (!buf && !(buf = lv_draw_buf_create(w, h, LV_COLOR_FORMAT_A8, LV_STRIDE_AUTO)))
+		return NULL;
+	lv_draw_buf_clear(buf, NULL);
+	if (!canvas)
+		canvas = lv_canvas_create(lv_obj_create(NULL));   /* холст на экране, который не показывается */
+	lv_canvas_set_draw_buf(canvas, buf);
+	lv_layer_t l;
+	lv_canvas_init_layer(canvas, &l);
+	lv_draw_label_dsc_t d;
+	lv_draw_label_dsc_init(&d);
+	d.text = txt;
+	d.font = f;
+	d.color = lv_color_white();
+	d.align = (lv_text_align_t)align;
+	lv_area_t a = { 0, 0, w - 1, h - 1 };
+	lv_draw_label(&l, &d, &a);
+	lv_canvas_finish_layer(canvas, &l);
+	return buf;
+}
+
+/* подписи строки под шрифт и рамку — многоточие и картинки заново только при их смене */
+static void row_texts(row_t *r, const lv_font_t *tf, int w, int th, int sh, int align)
+{
+	if (r->dot_f == tf && r->dot_w == w && r->dot_th == th && r->dot_sh == sh && r->dot_al == align &&
+	    r->dot_gen == r->tgen + s.text_gen)
 		return;
 	row_dots(r->tdot, sizeof(r->tdot), r->title, tf, w);
 	row_dots(r->sdot, sizeof(r->sdot), r->sub, s.m_sub, w);
+	r->tbuf = bake_text(r->tbuf, r->tdot, tf, w, th, align);
+	r->sbuf = bake_text(r->sbuf, r->sdot, s.m_sub, w, sh, align);
 	r->dot_f = tf;
 	r->dot_w = w;
+	r->dot_th = th;
+	r->dot_sh = sh;
+	r->dot_al = align;
 	r->dot_gen = r->tgen + s.text_gen;
 }
 
@@ -890,24 +932,18 @@ static int area_cut(lv_area_t *res, const lv_area_t *a, const lv_area_t *b)
 	return res->x1 <= res->x2 && res->y1 <= res->y2;
 }
 
-static void draw_text(lv_layer_t *l, const char *t, const lv_font_t *f, int x, int y, int w, int h, int opa, int align)
+static void draw_baked(lv_layer_t *l, const lv_draw_buf_t *buf, int x, int y, int opa)
 {
-	if (!t[0] || opa < 3)
+	if (!buf || opa < 3)
 		return;
-	lv_draw_label_dsc_t d;
-	lv_draw_label_dsc_init(&d);
-	d.text = t;
-	d.font = f;
-	d.color = lv_color_white();
+	lv_draw_image_dsc_t d;
+	lv_draw_image_dsc_init(&d);
+	d.src = buf;
 	d.opa = (lv_opa_t)opa;
-	d.align = (lv_text_align_t)align;
-	lv_area_t a = { x, y, x + w - 1, y + h - 1 }, clip;
-	if (!area_cut(&clip, &a, &l->_clip_area))   /* как у метки: текст не выходит за свою рамку */
-		return;
-	lv_area_t ori = l->_clip_area;
-	l->_clip_area = clip;
-	lv_draw_label(l, &d, &a);
-	l->_clip_area = ori;
+	d.recolor = lv_color_white();
+	d.recolor_opa = LV_OPA_COVER;
+	lv_area_t a = { x, y, x + (int)buf->header.w - 1, y + (int)buf->header.h - 1 };
+	lv_draw_image(l, &d, &a);
 }
 
 /* строки колонки рисует сама колонка: у строки нет объектов LVGL — их перемещение (раскладка, области,
@@ -954,9 +990,9 @@ static void column_draw(lv_event_t *e)
 			lv_draw_label(l, &ld, &a);
 		}
 		if (d->vis & R_TITLE)
-			draw_text(l, r->tdot, d->tfont, d->tx, d->ty, d->tw, d->th, d->topa, d->talign);
+			draw_baked(l, r->tbuf, d->tx, d->ty, d->topa);
 		if (d->vis & R_SUB)
-			draw_text(l, r->sdot, s.m_sub, d->tx, d->sy, d->tw, d->sh, d->sopa, d->talign);
+			draw_baked(l, r->sbuf, d->tx, d->sy, d->sopa);
 	}
 }
 
@@ -1208,7 +1244,7 @@ static void layout_grid(column_t *c, double x, double fade, double tk, int activ
 		/* подпись под каждой обложкой: название, у выбранного — и исполнитель (год) */
 		if (tk > 0.5) {
 			double kt = k * (tk - 0.5) * 2;
-			row_texts(r, s.m_sub, tw);
+			row_texts(r, s.m_sub, tw, s.h_sub + 1, s.h_sub, LV_TEXT_ALIGN_CENTER);
 			d->vis |= R_TITLE | (sel ? R_SUB : 0);
 			d->tfont = s.m_sub;
 			d->talign = LV_TEXT_ALIGN_CENTER;
@@ -1323,7 +1359,7 @@ static void layout_column(column_t *c, double x, double fade, double tk, int act
 				    14 + (sz->icon - 14 + (sz->icon_sel - sz->icon) * near) * tk, (int)(255 * k_icon), 0xffffff);
 		}
 		if (k_text >= 0.02) {
-			row_texts(r, s.m_item, tw);
+			row_texts(r, s.m_item, tw, s.h_title, c->big ? 2 * s.h_sub : s.h_sub, LV_TEXT_ALIGN_LEFT);
 			int has_sub = r->sub[0] != 0;   /* без второй строки название — по центру строки */
 			dr->vis |= R_TITLE | ((sel || c->big) && has_sub ? R_SUB : 0);
 			dr->tfont = s.m_item;

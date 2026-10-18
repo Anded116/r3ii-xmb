@@ -926,7 +926,7 @@ const int eq_freq[EQ_BANDS] = { 31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 1
 static struct {
 	int on, n, rate;
 	int32_t pre;   /* Q15 */
-	struct { int32_t b0, b1, b2, a1, a2, x[2][2], y[2][2]; int64_t e[2]; } f[EQ_BANDS];
+	struct { int32_t b0, b1, b2, a2, x[2][2], y[2][2]; int64_t e[2]; } f[EQ_BANDS];
 } eq;
 
 static void eq_setup(int on, const float *gain, int rate)
@@ -945,7 +945,6 @@ static void eq_setup(int on, const float *gain, int rate)
 		eq.f[eq.n].b0 = (int32_t)lrint((1 + al * A) / a0 * q);
 		eq.f[eq.n].b1 = (int32_t)lrint(-2 * cos(w) / a0 * q);
 		eq.f[eq.n].b2 = (int32_t)lrint((1 - al * A) / a0 * q);
-		eq.f[eq.n].a1 = eq.f[eq.n].b1;
 		eq.f[eq.n].a2 = (int32_t)lrint((1 - al / A) / a0 * q);
 		eq.n++;
 	}
@@ -962,13 +961,14 @@ static void eq_process(int32_t *buf, unsigned frames)
 		x[1][i] = (int32_t)(((int64_t)buf[i * 2 + 1] * eq.pre) >> (15 - EQ_S));
 	}
 	for (int k = 0; k < eq.n; k++) {
-		const int32_t b0 = eq.f[k].b0, b1 = eq.f[k].b1, b2 = eq.f[k].b2, a1 = eq.f[k].a1, a2 = eq.f[k].a2;
+		/* у полосового фильтра a1 = b1: b1·x1 − a1·y1 = b1·(x1 − y1) — на умножение меньше */
+		const int32_t b0 = eq.f[k].b0, b1 = eq.f[k].b1, b2 = eq.f[k].b2, a2 = eq.f[k].a2;
 		for (int c = 0; c < 2; c++) {
 			int32_t x1 = eq.f[k].x[c][0], x2 = eq.f[k].x[c][1], y1 = eq.f[k].y[c][0], y2 = eq.f[k].y[c][1], *v = x[c];
 			int64_t e = eq.f[k].e[c];
 			for (unsigned i = 0; i < frames; i++) {
 				int32_t in = v[i];
-				int64_t acc = (int64_t)b0 * in + (int64_t)b1 * x1 + (int64_t)b2 * x2 - (int64_t)a1 * y1 - (int64_t)a2 * y2 + e;
+				int64_t acc = (int64_t)b0 * in + (int64_t)b1 * (x1 - y1) + (int64_t)b2 * x2 - (int64_t)a2 * y2 + e;
 				int32_t out = (int32_t)(acc >> EQ_Q);
 				e = acc - ((int64_t)out << EQ_Q);
 				x2 = x1;
