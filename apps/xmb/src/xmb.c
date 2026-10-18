@@ -4331,15 +4331,18 @@ static void frame_cb(lv_timer_t *t)
 		corners_place();
 	}
 	/* плеер свернулся — содержимое мини-плеера проявляется, а не возникает за кадр. Фон мини-плеера не трогаем:
-	 * он такой же, как у свернувшегося плеера */
+	 * он такой же, как у свернувшегося плеера (у «Карточки» фон — свои дочерние картинки, их тоже) */
 	static double mini_t = 1;
 	if (player_progress() > 0) {
 		mini_t = 0;
 	} else if (mini_t < 1) {
 		mini_t = fmin(1.0, mini_t + dt / 0.15);
 		lv_opa_t o = mini_t >= 1 ? LV_OPA_COVER : (lv_opa_t)(255 * mini_t);
-		for (uint32_t i = 0; i < lv_obj_get_child_count(s.mini); i++)
-			lv_obj_set_style_opa(lv_obj_get_child(s.mini, (int32_t)i), o, 0);
+		for (uint32_t i = 0; i < lv_obj_get_child_count(s.mini); i++) {
+			lv_obj_t *ch = lv_obj_get_child(s.mini, (int32_t)i);
+			if (ch != s.mini_shape[0] && ch != s.mini_shape[1])
+				lv_obj_set_style_opa(ch, o, 0);
+		}
 	}
 }
 
