@@ -9,14 +9,14 @@
 | Статус | Тикетов |
 |---|---|
 | `open` | 5 |
-| `fixed` | 39 |
+| `fixed` | 40 |
 | `verified` | 3 |
 | `accepted` | 7 |
-| **всего** | **54** |
+| **всего** | **55** |
 
 | Область | open | in-progress | fixed |
 |---|---|---|---|
-| ui | 0 | 0 | 12 |
+| ui | 0 | 0 | 13 |
 | player | 0 | 0 | 6 |
 | audio | 1 | 0 | 5 |
 | library | 0 | 0 | 2 |
@@ -74,6 +74,7 @@
 - [ ] [XMB-0050](XMB-0050-mini-pleer-kartochka-redizayn.md) `[P2/player]` Мини-плеер «Карточка»: редизайн
 - [ ] [XMB-0051](XMB-0051-raskrytie-pleera-iz-kartochki-ne-podhodit-k-ee.md) `[P2/player]` Раскрытие плеера из «Карточки» не подходит к её виду
 - [ ] [XMB-0052](XMB-0052-podkasty-otdelnyy-razdel-vmesto-punkta-v-muzyke.md) `[P2/ui]` Подкасты — отдельный раздел вместо пункта в «Музыке»
+- [ ] [XMB-0055](XMB-0055-shtorka-dolgoe-nazhatie-na-plitku-otkryvaet-ee.md) `[P2/ui]` Шторка: долгое нажатие на плитку открывает её страницу
 - [ ] [XMB-0011](XMB-0011-rezhim-usb-tsap.md) `[P3/audio]` Режим USB-ЦАП
 - [ ] [XMB-0023](XMB-0023-fon-pleera-tsvetom-oblozhki-plavnaya-smena.md) `[P3/player]` Фон плеера цветом обложки: плавная смена оттенка
 - [ ] [XMB-0028](XMB-0028-pleer-na-pauze-posle-zapuska-xmb-stroka.md) `[P3/player]` Плеер на паузе после запуска XMB: строка формата — только «FLAC», без разрядности и частоты
