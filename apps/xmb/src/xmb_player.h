@@ -42,7 +42,8 @@ void player_tick(double dt);
 void player_set_neighbors(const char *prev_album, const char *prev_cover, const char *next_album, const char *next_cover);
 void player_set_cover(const char *path);   /* обложка вместо кассеты; NULL — кассета */
 void player_set_mini_bg(uint32_t color, int opa);
-void player_set_full_bg(uint32_t color, int opa);   /* фон раскрытого плеера (цвет обложки или затемнение): им кончается */
+void player_set_full_bg(uint32_t color, int opa);
+void player_set_mini_rect(int x, int y, int w, int h, int radius);   /* где мини-плеер: раскрытие начинается с него */   /* фон раскрытого плеера (цвет обложки или затемнение): им кончается */
 /* источник «Компьютер» (USB-ЦАП): карточка вместо обложки, без полосы, карусели и текста, вместо режимов —
  * выход из ЦАПа (player_mode_at → PM_DAC_EXIT); подписи — уже переведённые. on = 0 — снова трек */
 #define PM_DAC_EXIT PM_COUNT

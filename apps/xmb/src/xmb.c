@@ -4320,6 +4320,7 @@ static void apply_mini(void)
 	mini_chrome();
 	lv_obj_invalidate(s.mini_ring);
 	player_set_mini_bg(color, opa);
+	player_set_mini_rect(x, SCR_H - MINI_H, w, h, card ? 8 : 0);
 	corners_place();
 }
 

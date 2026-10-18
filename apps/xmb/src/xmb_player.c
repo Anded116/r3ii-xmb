@@ -66,7 +66,8 @@ static struct {
 	int mini_opa, full_opa;       /* фон мини-плеера: с него начинается раскрытие (вид — в настройках); */
 	uint32_t mini_color, full_color;   /* раскрытого плеера — им кончается */
 	int dac;                      /* источник — компьютер (USB-ЦАП) */
-} p = { .mini_opa = MINI_OPA, .full_opa = PLAYER_DIM };
+	int mx, my, mw, mh, mr;       /* прямоугольник мини-плеера и его скругление */
+} p = { .my = H - MINI_H, .mw = W, .mh = MINI_H, .mini_opa = MINI_OPA, .full_opa = PLAYER_DIM };
 
 static lv_obj_t *box(lv_obj_t *parent, int x, int y, int w, int h)
 {
@@ -352,6 +353,15 @@ static void root_bg(void)
 	}
 	lv_obj_set_style_bg_color(p.root, lv_color_hex(c), 0);
 	lv_obj_set_style_bg_opa(p.root, (lv_opa_t)(p.mini_opa + (p.full_opa - p.mini_opa) * p.t), 0);
+}
+
+void player_set_mini_rect(int x, int y, int w, int h, int radius)
+{
+	p.mx = x;
+	p.my = y;
+	p.mw = w;
+	p.mh = h;
+	p.mr = radius;
 }
 
 void player_set_mini_bg(uint32_t color, int opa)
@@ -856,9 +866,13 @@ void player_tick(double dt)
 		p.t += (target - p.t) * (1.0 - exp(-dt * 12));
 		if (fabs(target - p.t) < 0.004)
 			p.t = target;
-		int y = (int)((H - MINI_H) * (1.0 - p.t));
-		lv_obj_set_pos(p.root, 0, y);
-		lv_obj_set_height(p.root, H - y);
+		/* из прямоугольника мини-плеера — во весь экран; содержимое стоит на месте экрана, а не едет вбок */
+		double k = 1.0 - p.t;
+		int x = (int)(p.mx * k + 0.5), y = (int)(p.my * k + 0.5), b = (int)(H - (H - p.my - p.mh) * k + 0.5);
+		lv_obj_set_pos(p.root, x, y);
+		lv_obj_set_size(p.root, W - (int)((W - p.mw) * k + 0.5), b - y);
+		lv_obj_set_style_radius(p.root, (int)(p.mr * k + 0.5), 0);
+		lv_obj_set_x(p.content, -x);
 		/* раскрыт — затемнение уже в самом фоне (bg_set_dim) */
 		if (p.t >= 1)
 			lv_obj_set_style_bg_opa(p.root, 0, 0);
