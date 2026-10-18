@@ -116,10 +116,32 @@ typedef struct {
 	int count;
 } cat_t;
 
+/* что рисует строка списка (координаты экранные): обложка, значок или пустая обложка, название, подпись */
+enum { R_IMG = 1, R_ICON = 2, R_TILE = 4, R_TITLE = 8, R_SUB = 16 };
 typedef struct {
-	lv_obj_t *icon, *title, *sub, *img;
+	int vis;
+	const lv_image_dsc_t *img;
+	int ix, iy, isz, iscale, iopa;
+	const char *glyph;
+	const lv_font_t *ifont;
+	uint32_t icolor;
+	int cx, cy, cw, ch, iconopa, tileopa;
+	const lv_font_t *tfont;
+	int talign, tx, ty, tw, th, topa, sy, sh, sopa;
+	unsigned gen;       /* текст строки: сменился — перерисовать */
+	lv_area_t box;      /* что закрывает строка */
+} row_draw_t;
+
+typedef struct {
 	int idx;            /* пункт, к которому привязана строка, -1 — свободна */
 	const char *icon_txt;
+	const lv_image_dsc_t *img;   /* обложка пункта (из кэша) */
+	char title[160], sub[192];   /* подписи как есть и — под ширину, с многоточием */
+	char tdot[160], sdot[192];
+	const lv_font_t *dot_f;
+	int dot_w;
+	unsigned tgen, dot_gen;
+	row_draw_t cur, next;   /* нарисовано и посчитано раскладкой на этот кадр */
 } row_t;
 
 typedef struct {
@@ -257,6 +279,7 @@ static struct {
 	char settings_path[300];
 	uint32_t settings_ms;
 	unsigned settings_sig;
+	unsigned text_gen;   /* растёт при смене размеров шрифтов: многоточие строк — пересчитать */
 	lv_obj_t *cat_icons[8], *cat_title, *mini_icon, *mini_text, *mini_bar, *mini_track, *off;
 	int mini_bar_w;   /* ширина полосы прогресса мини-плеера */
 	lv_obj_t *tb, *tb_left, *tb_right, *tb_bat, *tb_act, *hint[2], *bhint, *bhint_lbl;
@@ -785,16 +808,10 @@ static int cur_letter(const column_t *c)
 	return 0;
 }
 
-/* текст строк короче, когда справа полоса указателя */
-static void column_widths(column_t *c)
+/* ширина подписей строки: в сетке — ячейка, в списке — до правого края (короче, когда справа полоса указателя) */
+static int row_text_w(const column_t *c)
 {
-	int w = SCR_W - CAT_X - TEXT_DX - 6 - (c->nlet ? IDX_W : 0);
-	for (int i = 0; i < POOL && c->pool_ready; i++) {
-		if (lv_obj_get_width(c->rows[i].title) != w || lv_obj_get_height(c->rows[i].title) != s.h_title)
-			lv_obj_set_size(c->rows[i].title, w, s.h_title);
-		if (lv_obj_get_width(c->rows[i].sub) != w || lv_obj_get_height(c->rows[i].sub) != s.h_sub)
-			lv_obj_set_size(c->rows[i].sub, w, s.h_sub);
-	}
+	return c->grid ? GRID_CELL - 6 : SCR_W - CAT_X - TEXT_DX - 6 - (c->nlet ? IDX_W : 0) - (c->big ? BIG_COVER - ROW_COVER : 0);
 }
 
 static void show_bubble(const column_t *c)
@@ -807,32 +824,185 @@ static void show_bubble(const column_t *c)
 
 static void hide_row(row_t *r)
 {
-	set_hidden(r->icon, true);
-	set_hidden(r->img, true);
-	set_hidden(r->title, true);
-	set_hidden(r->sub, true);
+	r->next.vis = 0;
+}
+
+/* строка «в многоточие» под ширину w: по строкам текста (подпись бывает в две), «…» — если не влезает */
+static void row_dots(char *dst, size_t cap, const char *src, const lv_font_t *f, int w)
+{
+	int ew = lv_font_get_glyph_width(f, 0x2026, 0);
+	size_t o = 0;
+	while (*src && o + 1 < cap) {
+		const char *e = strchr(src, '\n');
+		size_t n = e ? (size_t)(e - src) : strlen(src);
+		int acc = 0, cut = -1;
+		size_t i = 0;
+		while (i < n) {   /* UTF-8: ширина по глифам */
+			unsigned char b = (unsigned char)src[i];
+			int len = b < 0x80 ? 1 : b < 0xe0 ? 2 : b < 0xf0 ? 3 : 4;
+			uint32_t cp = len == 1 ? b : len == 2 ? b & 0x1f : len == 3 ? b & 0x0f : b & 0x07;
+			for (int k = 1; k < len && i + k < n; k++)
+				cp = cp << 6 | ((unsigned char)src[i + k] & 0x3f);
+			int gw = lv_font_get_glyph_width(f, cp, 0);
+			if (cut < 0 && acc + gw + ew > w)
+				cut = (int)i;
+			acc += gw;
+			i += (size_t)len;
+		}
+		size_t take = acc <= w || cut < 0 ? n : (size_t)cut;
+		while (take < n && take > 0 && src[take - 1] == ' ')
+			take--;
+		if (take > cap - 1 - o - 4)
+			take = cap - 1 - o - 4;
+		memcpy(dst + o, src, take);
+		o += take;
+		if (take < n) {
+			memcpy(dst + o, "\xE2\x80\xA6", 3);
+			o += 3;
+		}
+		if (!e)
+			break;
+		dst[o++] = '\n';
+		src = e + 1;
+	}
+	dst[o] = 0;
+}
+
+/* подписи строки под шрифт и ширину — пересчёт многоточия только при их смене */
+static void row_texts(row_t *r, const lv_font_t *tf, int w)
+{
+	if (r->dot_f == tf && r->dot_w == w && r->dot_gen == r->tgen + s.text_gen)
+		return;
+	row_dots(r->tdot, sizeof(r->tdot), r->title, tf, w);
+	row_dots(r->sdot, sizeof(r->sdot), r->sub, s.m_sub, w);
+	r->dot_f = tf;
+	r->dot_w = w;
+	r->dot_gen = r->tgen + s.text_gen;
+}
+
+/* пересечение прямоугольников (в LVGL — приватное): 0 — не пересекаются */
+static int area_cut(lv_area_t *res, const lv_area_t *a, const lv_area_t *b)
+{
+	res->x1 = LV_MAX(a->x1, b->x1);
+	res->y1 = LV_MAX(a->y1, b->y1);
+	res->x2 = LV_MIN(a->x2, b->x2);
+	res->y2 = LV_MIN(a->y2, b->y2);
+	return res->x1 <= res->x2 && res->y1 <= res->y2;
+}
+
+static void draw_text(lv_layer_t *l, const char *t, const lv_font_t *f, int x, int y, int w, int h, int opa, int align)
+{
+	if (!t[0] || opa < 3)
+		return;
+	lv_draw_label_dsc_t d;
+	lv_draw_label_dsc_init(&d);
+	d.text = t;
+	d.font = f;
+	d.color = lv_color_white();
+	d.opa = (lv_opa_t)opa;
+	d.align = (lv_text_align_t)align;
+	lv_area_t a = { x, y, x + w - 1, y + h - 1 }, clip;
+	if (!area_cut(&clip, &a, &l->_clip_area))   /* как у метки: текст не выходит за свою рамку */
+		return;
+	lv_area_t ori = l->_clip_area;
+	l->_clip_area = clip;
+	lv_draw_label(l, &d, &a);
+	l->_clip_area = ori;
+}
+
+/* строки колонки рисует сама колонка: у строки нет объектов LVGL — их перемещение (раскладка, области,
+ * события) стоило ~3 мс кадра при прокрутке, обход дерева — ещё столько же */
+static void column_draw(lv_event_t *e)
+{
+	column_t *c = lv_event_get_user_data(e);
+	lv_layer_t *l = lv_event_get_layer(e);
+	for (int k = 0; k < POOL; k++) {
+		const row_t *r = &c->rows[k];
+		const row_draw_t *d = &r->cur;
+		lv_area_t tmp;
+		if (!d->vis || !area_cut(&tmp, &d->box, &l->_clip_area))
+			continue;
+		if (d->vis & R_IMG) {
+			lv_draw_image_dsc_t id;
+			lv_draw_image_dsc_init(&id);
+			id.src = d->img;
+			id.opa = (lv_opa_t)d->iopa;
+			id.scale_x = id.scale_y = d->iscale;
+			id.pivot.x = d->isz / 2;
+			id.pivot.y = d->isz / 2;
+			lv_area_t a = { d->ix, d->iy, d->ix + d->isz - 1, d->iy + d->isz - 1 };
+			lv_draw_image(l, &id, &a);
+		}
+		if (d->vis & R_TILE) {   /* пустая обложка: серый квадрат */
+			lv_draw_rect_dsc_t rd;
+			lv_draw_rect_dsc_init(&rd);
+			rd.bg_color = lv_color_hex(EMPTY_BG);
+			rd.bg_opa = (lv_opa_t)d->tileopa;
+			lv_area_t a = { d->cx, d->cy, d->cx + d->cw - 1, d->cy + d->ch - 1 };
+			lv_draw_rect(l, &rd, &a);
+		}
+		if ((d->vis & R_ICON) && d->iconopa > 2) {   /* значок: по центру рамки, глиф — с отступом под шрифт */
+			lv_draw_label_dsc_t ld;
+			lv_draw_label_dsc_init(&ld);
+			ld.text = d->glyph;
+			ld.font = d->ifont;
+			ld.color = lv_color_hex(d->icolor);
+			ld.opa = (lv_opa_t)d->iconopa;
+			ld.align = LV_TEXT_ALIGN_CENTER;
+			int pad = (d->ch - d->ifont->line_height) / 2;
+			lv_area_t a = { d->cx, d->cy + pad, d->cx + d->cw - 1, d->cy + d->ch - 1 };
+			lv_draw_label(l, &ld, &a);
+		}
+		if (d->vis & R_TITLE)
+			draw_text(l, r->tdot, d->tfont, d->tx, d->ty, d->tw, d->th, d->topa, d->talign);
+		if (d->vis & R_SUB)
+			draw_text(l, r->sdot, s.m_sub, d->tx, d->sy, d->tw, d->sh, d->sopa, d->talign);
+	}
+}
+
+/* раскладка заполнила next — изменившееся перерисовать: старое место и новое добавляются в inv (одна область на
+ * колонку: каждая отдельная область — свой проход отрисовки по всему дереву, с фоном и копированием) */
+static void row_commit(row_t *r, lv_area_t *inv)
+{
+	row_draw_t *n = &r->next;
+	lv_area_t b = { LV_COORD_MAX, LV_COORD_MAX, LV_COORD_MIN, LV_COORD_MIN };
+#define BOX(x, y, w, h)                         \
+	do {                                    \
+		b.x1 = LV_MIN(b.x1, (x));       \
+		b.y1 = LV_MIN(b.y1, (y));       \
+		b.x2 = LV_MAX(b.x2, (x) + (w) - 1); \
+		b.y2 = LV_MAX(b.y2, (y) + (h) - 1); \
+	} while (0)
+	if (n->vis & R_IMG)
+		BOX(n->ix, n->iy, n->isz, n->isz);
+	if (n->vis & (R_ICON | R_TILE))
+		BOX(n->cx, n->cy, n->cw, n->ch);
+	if (n->vis & R_TITLE)
+		BOX(n->tx, n->ty, n->tw, n->th);
+	if (n->vis & R_SUB)
+		BOX(n->tx, n->sy, n->tw, n->sh);
+#undef BOX
+	n->box = n->vis ? b : (lv_area_t){ 0, 0, -1, -1 };
+	n->gen = r->tgen + s.text_gen;
+	if (!memcmp(n, &r->cur, sizeof(*n)))
+		return;
+	for (int i = 0; i < 2; i++) {
+		const row_draw_t *d = i ? n : &r->cur;
+		if (!d->vis)
+			continue;
+		inv->x1 = LV_MIN(inv->x1, d->box.x1);
+		inv->y1 = LV_MIN(inv->y1, d->box.y1);
+		inv->x2 = LV_MAX(inv->x2, d->box.x2);
+		inv->y2 = LV_MAX(inv->y2, d->box.y2);
+	}
+	r->cur = *n;
 }
 
 /* строки создаются один раз на колонку; список любой длины — привязкой к видимым пунктам */
 static void column_pool(column_t *c)
 {
 	if (!c->pool_ready) {
-		for (int i = 0; i < POOL; i++) {
-			row_t *r = &c->rows[i];
-			r->img = lv_image_create(c->cont);   /* под иконкой: у играющего трека значок — поверх обложки */
-			lv_obj_set_size(r->img, ROW_COVER, ROW_COVER);
-			r->icon = label(c->cont, &lv_font_montserrat_16, "");
-			lv_obj_set_size(r->icon, 40, 30);
-			lv_obj_set_style_text_align(r->icon, LV_TEXT_ALIGN_CENTER, 0);
-			lv_obj_set_style_transform_pivot_x(r->icon, 20, 0);
-			lv_obj_set_style_transform_pivot_y(r->icon, 15, 0);
-			r->title = label(c->cont, s.m_item, "");
-			lv_obj_set_size(r->title, SCR_W - CAT_X - TEXT_DX - 6, s.h_title);
-			lv_label_set_long_mode(r->title, LV_LABEL_LONG_MODE_DOTS);
-			r->sub = label(c->cont, s.m_sub, "");
-			lv_obj_set_size(r->sub, SCR_W - CAT_X - TEXT_DX - 6, s.h_sub);
-			lv_label_set_long_mode(r->sub, LV_LABEL_LONG_MODE_DOTS);
-		}
+		lv_obj_add_event_cb(c->cont, column_draw, LV_EVENT_DRAW_MAIN, c);
 		c->pool_ready = 1;
 	}
 }
@@ -852,24 +1022,22 @@ static void column_fill(column_t *c, const node_t *nodes, int count)
 	c->big = 0;
 	c->rpos = 0;
 	column_index(c);
-	column_widths(c);
 }
 
-/* иконка строки: в сетке у альбома без обложки — пустая обложка (серый квадрат с серой нотой), в списке — значок */
-static void grid_tile(row_t *r, const node_t *n, int size)
+/* значок строки в рамке w×h: шрифт — ближайший готовый к px (шаг 2) */
+static void row_icon_at(row_draw_t *d, const char *glyph, int x, int y, int w, int h, double px, int opa, uint32_t color)
 {
-	int w = n ? size : 40, h = n ? size : 30;
-	if (lv_obj_get_width(r->icon) != w || lv_obj_get_height(r->icon) != h) {
-		lv_obj_set_size(r->icon, w, h);
-		lv_obj_set_style_transform_pivot_x(r->icon, w / 2, 0);
-		lv_obj_set_style_transform_pivot_y(r->icon, h / 2, 0);
-	}
-	lv_label_set_text(r->icon, n ? LV_SYMBOL_AUDIO : r->icon_txt);
-	lv_obj_set_style_text_color(r->icon, n ? lv_color_hex(EMPTY_FG) : lv_color_white(), 0);
-	if (n)
-		lv_obj_set_style_bg_color(r->icon, lv_color_hex(EMPTY_BG), 0);
-	else
-		lv_obj_set_style_bg_opa(r->icon, LV_OPA_TRANSP, 0);
+	int i = (int)lround((px - 14) / 2);
+	i = i < 0 ? 0 : i > 13 ? 13 : i;
+	d->vis |= R_ICON;
+	d->glyph = glyph;
+	d->ifont = icon_font(glyph, i);
+	d->icolor = color;
+	d->cx = x;
+	d->cy = y;
+	d->cw = w;
+	d->ch = h;
+	d->iconopa = opa < 0 ? 0 : opa > 255 ? 255 : opa;
 }
 
 /* у играющего трека в списке вместо ноты — «играет» или «пауза» */
@@ -896,23 +1064,12 @@ static void album_extra(const node_t *n, const char **artist, char *b, size_t ca
 		snprintf(b, cap, "%d %s", k, w);
 }
 
-/* шрифт, выравнивание и размер подписей — по виду колонки (пул строк общий для списков и сеток) */
-static void row_style(const column_t *c, row_t *r)
+static void row_set_sub(row_t *r, const char *t)
 {
-	const lv_font_t *f = c->grid ? s.m_sub : s.m_item;
-	lv_text_align_t al = c->grid ? LV_TEXT_ALIGN_CENTER : LV_TEXT_ALIGN_LEFT;
-	int w = c->grid ? GRID_CELL - 6 : SCR_W - CAT_X - TEXT_DX - 6 - (c->nlet ? IDX_W : 0) - (c->big ? BIG_COVER - ROW_COVER : 0);
-	int th = c->grid ? s.h_sub + 1 : s.h_title, sh = c->big ? 2 * s.h_sub : s.h_sub;
-	if (lv_obj_get_style_text_font(r->title, 0) != f)
-		lv_obj_set_style_text_font(r->title, f, 0);
-	if (lv_obj_get_style_text_align(r->title, 0) != al) {
-		lv_obj_set_style_text_align(r->title, al, 0);
-		lv_obj_set_style_text_align(r->sub, al, 0);
+	if (strcmp(r->sub, t)) {
+		snprintf(r->sub, sizeof(r->sub), "%s", t);
+		r->tgen++;
 	}
-	if (lv_obj_get_width(r->title) != w || lv_obj_get_height(r->title) != th)
-		lv_obj_set_size(r->title, w, th);
-	if (lv_obj_get_width(r->sub) != w || lv_obj_get_height(r->sub) != sh)
-		lv_obj_set_size(r->sub, w, sh);
 }
 
 static void bind_row(column_t *c, row_t *r, int i)
@@ -920,25 +1077,19 @@ static void bind_row(column_t *c, row_t *r, int i)
 	const node_t *n = &c->nodes[i];
 	r->idx = i;
 	r->icon_txt = row_icon(n);
-	row_style(c, r);
-	lv_label_set_text(r->icon, r->icon_txt);
-	lv_label_set_text(r->title, tx(n->title));
+	snprintf(r->title, sizeof(r->title), "%s", tx(n->title));
 	if (c->big && n->kids) {
 		const char *artist;
-		char extra[64];
+		char extra[64], b[sizeof(r->sub)];
 		album_extra(n, &artist, extra, sizeof(extra));
-		lv_label_set_text_fmt(r->sub, "%s\n%s", artist, extra);
+		snprintf(b, sizeof(b), "%s\n%s", artist, extra);
+		snprintf(r->sub, sizeof(r->sub), "%s", b);
 	} else {
-		lv_label_set_text(r->sub, node_sub(n));
+		snprintf(r->sub, sizeof(r->sub), "%s", node_sub(n));
 	}
+	r->tgen++;
 	int cs = c->grid ? GRID_COVER : c->big ? BIG_COVER : ROW_COVER;
-	grid_tile(r, c->grid ? n : NULL, GRID_COVER);
-	if (lv_obj_get_width(r->img) != cs)
-		lv_obj_set_size(r->img, cs, cs);
-	if (lv_image_get_scale(r->img) != 256)
-		lv_image_set_scale(r->img, 256);
-	const lv_image_dsc_t *d = n->cover ? cover_get(n->cover, cs) : NULL;
-	lv_image_set_src(r->img, d);
+	r->img = n->cover ? cover_get(n->cover, cs) : NULL;
 }
 
 static void hide_column(column_t *c)
@@ -952,8 +1103,8 @@ static void refresh_subs(void)
 	for (int d = 0; d <= s.depth; d++) {
 		column_t *c = col_at(d);
 		for (int i = 0; i < POOL; i++)
-			if (c->rows[i].idx >= 0 && c->rows[i].idx < c->count)
-				lv_label_set_text(c->rows[i].sub, node_sub(&c->nodes[c->rows[i].idx]));
+			if (c->rows[i].idx >= 0 && c->rows[i].idx < c->count && !(c->big && c->nodes[c->rows[i].idx].kids))
+				row_set_sub(&c->rows[i], node_sub(&c->nodes[c->rows[i].idx]));
 	}
 }
 
@@ -1014,9 +1165,11 @@ static void layout_grid(column_t *c, double x, double fade, double tk, int activ
 	int lim = SCR_H - MINI_H, tw = GRID_CELL - 6;
 	for (int i = lo; i <= hi; i++) {
 		row_t *r = &c->rows[i % POOL];
+		row_draw_t *d = &r->next;
 		const node_t *n = &c->nodes[i];
 		if (r->idx != i)
 			bind_row(c, r, i);
+		d->vis = 0;
 		int sel = i == c->sel;
 		double cx = grid_x0(x) + GRID_CELL / 2.0 + (i % GRID_COLS) * GRID_CELL;
 		double cy = grid_cy(c, top, i / GRID_COLS);
@@ -1031,52 +1184,42 @@ static void layout_grid(column_t *c, double x, double fade, double tk, int activ
 		} else {
 			k *= tk * edge;
 		}
-		if (k < 0.02 || t1 < TOP_H - 10 || t0 > lim) {
-			hide_row(r);
+		if (k < 0.02 || t1 < TOP_H - 10 || t0 > lim)
 			continue;
-		}
-		/* обложка: в сетке — GRID_COVER, в цепочке — ROW_COVER; масштаб — только на время сворачивания */
+		/* обложка: в сетке — GRID_COVER, в цепочке — ROW_COVER; масштаб — только у выбранной, уходящей в цепочку */
 		int cs = tk > 0.02 ? GRID_COVER : ROW_COVER;
 		const lv_image_dsc_t *cd = n->cover ? cover_get(n->cover, cs) : NULL;
-		if (lv_obj_get_width(r->img) != cs)
-			lv_obj_set_size(r->img, cs, cs);
-		if ((const void *)cd != lv_image_get_src(r->img))
-			lv_image_set_src(r->img, cd);
-		/* масштаб (трансформация через слой) — только у выбранной, уходящей в цепочку; остальные просто гаснут */
-		int sc = sel && cs == GRID_COVER && tk < 0.999 ? (int)(256 * (ROW_COVER + (GRID_COVER - ROW_COVER) * tk) / GRID_COVER) : 256;
-		if (lv_image_get_scale(r->img) != sc)
-			lv_image_set_scale(r->img, sc);
-		set_hidden(r->img, !cd);
-		set_hidden(r->icon, cd != NULL);
 		if (cd) {
-			set_pos(r->img, (int)cx - cs / 2, (int)cy - cs / 2);
-			int io = (int)(255 * fmin(1.0, k * 1.1));
-			if (lv_obj_get_style_image_opa(r->img, 0) != io)
-				lv_obj_set_style_image_opa(r->img, (lv_opa_t)io, 0);
+			d->vis |= R_IMG;
+			d->img = cd;
+			d->isz = cs;
+			d->ix = (int)cx - cs / 2;
+			d->iy = (int)cy - cs / 2;
+			d->iscale = sel && cs == GRID_COVER && tk < 0.999 ? (int)(256 * (ROW_COVER + (GRID_COVER - ROW_COVER) * tk) / GRID_COVER) : 256;
+			d->iopa = (int)(255 * fmin(1.0, k * 1.1));
+		} else if (tk > 0.5) {   /* в сетке — пустая обложка; в цепочке — обычный значок */
+			d->vis |= R_TILE;
+			d->tileopa = (int)(255 * fmin(1.0, k * 1.1));
+			row_icon_at(d, LV_SYMBOL_AUDIO, (int)cx - GRID_COVER / 2, (int)cy - GRID_COVER / 2, GRID_COVER, GRID_COVER, 32,
+				    (int)(255 * k), EMPTY_FG);
 		} else {
-			/* квадрат цвета альбома в сетке; в цепочке — обычный значок */
-			if ((tk > 0.5) != (lv_obj_get_width(r->icon) == GRID_COVER))   /* стили — только при смене вида */
-				grid_tile(r, tk > 0.5 ? n : NULL, GRID_COVER);
-			int w = lv_obj_get_width(r->icon), h = lv_obj_get_height(r->icon);
-			set_pos(r->icon, (int)cx - w / 2, (int)cy - h / 2);
-			set_icon_px(r->icon, tk > 0.5 ? 32 : 14);
-			set_opa(r->icon, (int)(255 * k));
-			/* прозрачность фона отдельно от текста: opa всего объекта рисовалась бы через слой */
-			int bo = tk > 0.5 ? (int)(255 * fmin(1.0, k * 1.1)) : 0;
-			if (lv_obj_get_style_bg_opa(r->icon, 0) != bo)
-				lv_obj_set_style_bg_opa(r->icon, (lv_opa_t)bo, 0);
+			row_icon_at(d, r->icon_txt, (int)cx - 20, (int)cy - 15, 40, 30, 14, (int)(255 * k), 0xffffff);
 		}
 		/* подпись под каждой обложкой: название, у выбранного — и исполнитель (год) */
-		int show_t = tk > 0.5;
-		set_hidden(r->title, !show_t);
-		set_hidden(r->sub, !(show_t && sel));
-		if (show_t) {
-			int ty = (int)(cy + GRID_COVER / 2.0 + 3);
+		if (tk > 0.5) {
 			double kt = k * (tk - 0.5) * 2;
-			set_pos(r->title, (int)cx - tw / 2, ty);
-			set_pos(r->sub, (int)cx - tw / 2, ty + s.h_sub);
-			set_opa(r->title, (int)(255 * fmin(1.0, kt * 1.1)));
-			set_opa(r->sub, (int)(190 * kt));
+			row_texts(r, s.m_sub, tw);
+			d->vis |= R_TITLE | (sel ? R_SUB : 0);
+			d->tfont = s.m_sub;
+			d->talign = LV_TEXT_ALIGN_CENTER;
+			d->tx = (int)cx - tw / 2;
+			d->tw = tw;
+			d->ty = (int)(cy + GRID_COVER / 2.0 + 3);
+			d->th = s.h_sub + 1;
+			d->sy = d->ty + s.h_sub;
+			d->sh = s.h_sub;
+			d->topa = (int)(255 * fmin(1.0, kt * 1.1));
+			d->sopa = (int)(190 * kt);
 		}
 		if (sel && active) {
 			s.glow_x = (int)cx;
@@ -1116,19 +1259,16 @@ static void layout_column(column_t *c, double x, double fade, double tk, int act
 			c->rows[k].idx = -1;
 			hide_row(&c->rows[k]);
 		}
+	int tw = row_text_w(c);
 	for (int i = lo; i <= hi; i++) {
 		row_t *r = &c->rows[i % POOL];
+		row_draw_t *dr = &r->next;
 		if (r->idx != i)
 			bind_row(c, r, i);
-		else if (c->nodes[i].cover) {   /* опрос каждый кадр держит обложку в кэше и подхватывает готовую */
-			const lv_image_dsc_t *cd = cover_get(c->nodes[i].cover, c->big ? BIG_COVER : ROW_COVER);
-			if ((const void *)cd != lv_image_get_src(r->img))
-				lv_image_set_src(r->img, cd);
-		}
-		if (row_icon(&c->nodes[i]) != r->icon_txt) {   /* сменился играющий трек или пауза */
-			r->icon_txt = row_icon(&c->nodes[i]);
-			lv_label_set_text(r->icon, r->icon_txt);
-		}
+		else if (c->nodes[i].cover)   /* опрос каждый кадр держит обложку в кэше и подхватывает готовую */
+			r->img = cover_get(c->nodes[i].cover, c->big ? BIG_COVER : ROW_COVER);
+		r->icon_txt = row_icon(&c->nodes[i]);   /* сменился играющий трек или пауза */
+		dr->vis = 0;
 		double d = i - c->pos, rh = c->big ? BIG_ROW : ROW;
 		double y;
 		if (deep)
@@ -1157,61 +1297,58 @@ static void layout_column(column_t *c, double x, double fade, double tk, int act
 			edge *= clamp01(fabs((double)(yy - CAT_Y)) / 46.0 - 0.3);
 		k_icon *= edge;
 		k_text *= edge;
-		if (yy < top || yy > bot || k_icon < 0.02) {
-			hide_row(r);
+		if (yy < top || yy > bot || k_icon < 0.02)
 			continue;
-		}
-		/* обложка вместо иконки, пока колонка не свернулась в цепочку */
-		int show_img = lv_image_get_src(r->img) && tk > 0.5;
-		/* играющий трек: значок «играет» / «пауза» вместо ноты или обложки */
-		if (r->icon_txt != c->nodes[i].icon)
-			show_img = 0;
-		set_hidden(r->img, !show_img);
-		set_hidden(r->icon, show_img);
+		/* обложка вместо иконки, пока колонка не свернулась в цепочку; у играющего трека — значок «играет» / «пауза» */
+		int show_img = r->img && tk > 0.5 && r->icon_txt == c->nodes[i].icon;
 		/* у списка с обложками обложка крупнее: левый край — тот же, текст — правее на разницу */
 		int cs = c->big && tk > 0.5 ? BIG_COVER : ROW_COVER, cdx = (cs - ROW_COVER) / 2;
 		if (show_img) {
-			if (lv_obj_get_width(r->img) != cs)
-				lv_obj_set_size(r->img, cs, cs);
-			set_pos(r->img, (int)x + cdx - cs / 2, yy - cs / 2);
-			int io = (int)(255 * fmin(1.0, k_icon * 1.15));
-			if (lv_obj_get_style_image_opa(r->img, 0) != io)
-				lv_obj_set_style_image_opa(r->img, (lv_opa_t)io, 0);
-		}
-		set_hidden(r->title, k_text < 0.02);
-		set_hidden(r->sub, !(sel || c->big) || k_text < 0.02);
-		/* список с обложками: у альбома без картинки — пустая обложка того же размера */
-		int tile = c->big && tk > 0.5 && !show_img && r->icon_txt == c->nodes[i].icon;
-		if (tile != (lv_obj_get_width(r->icon) == BIG_COVER))
-			grid_tile(r, tile ? &c->nodes[i] : NULL, BIG_COVER);
-		if (tile) {
-			set_pos(r->icon, (int)x + cdx - BIG_COVER / 2, yy - BIG_COVER / 2);
-			int bo = (int)(255 * fmin(1.0, k_icon * 1.15));
-			if (lv_obj_get_style_bg_opa(r->icon, 0) != bo)
-				lv_obj_set_style_bg_opa(r->icon, (lv_opa_t)bo, 0);
+			dr->vis |= R_IMG;
+			dr->img = r->img;
+			dr->isz = cs;
+			dr->ix = (int)x + cdx - cs / 2;
+			dr->iy = yy - cs / 2;
+			dr->iscale = 256;
+			dr->iopa = (int)(255 * fmin(1.0, k_icon * 1.15));
+		} else if (c->big && tk > 0.5 && r->icon_txt == c->nodes[i].icon) {
+			/* список с обложками: у альбома без картинки — пустая обложка того же размера */
+			dr->vis |= R_TILE;
+			dr->tileopa = (int)(255 * fmin(1.0, k_icon * 1.15));
+			row_icon_at(dr, LV_SYMBOL_AUDIO, (int)x + cdx - BIG_COVER / 2, yy - BIG_COVER / 2, BIG_COVER, BIG_COVER, 24,
+				    (int)(255 * k_icon), EMPTY_FG);
 		} else {
-			set_pos(r->icon, (int)x + cdx - 20, yy - 15);
+			/* выбранный — icon_sel, остальные — icon, звенья цепочки — 14 */
+			row_icon_at(dr, r->icon_txt, (int)x + cdx - 20, yy - 15, 40, 30,
+				    14 + (sz->icon - 14 + (sz->icon_sel - sz->icon) * near) * tk, (int)(255 * k_icon), 0xffffff);
 		}
-		int has_sub = lv_label_get_text(r->sub)[0] != 0;   /* без второй строки название — по центру строки */
-		if (c->big) {   /* три строки текста по высоте обложки */
-			int ty = has_sub ? yy - (s.h_title + 2 * s.h_sub) / 2 : yy + s.dy_title;
-			set_pos(r->title, (int)x + TEXT_DX + 2 * cdx, ty);
-			set_pos(r->sub, (int)x + TEXT_DX + 2 * cdx, ty + s.h_title);
-		} else {
-			set_pos(r->title, (int)x + TEXT_DX, yy + (sel && has_sub ? s.dy_title_sel : s.dy_title));
-			set_pos(r->sub, (int)x + TEXT_DX, yy + s.dy_sub);
+		if (k_text >= 0.02) {
+			row_texts(r, s.m_item, tw);
+			int has_sub = r->sub[0] != 0;   /* без второй строки название — по центру строки */
+			dr->vis |= R_TITLE | ((sel || c->big) && has_sub ? R_SUB : 0);
+			dr->tfont = s.m_item;
+			dr->talign = LV_TEXT_ALIGN_LEFT;
+			dr->tw = tw;
+			dr->th = s.h_title;
+			dr->sh = c->big ? 2 * s.h_sub : s.h_sub;
+			if (c->big) {   /* три строки текста по высоте обложки */
+				dr->tx = (int)x + TEXT_DX + 2 * cdx;
+				dr->ty = has_sub ? yy - (s.h_title + 2 * s.h_sub) / 2 : yy + s.dy_title;
+				dr->sy = dr->ty + s.h_title;
+			} else {
+				dr->tx = (int)x + TEXT_DX;
+				dr->ty = yy + (sel && has_sub ? s.dy_title_sel : s.dy_title);
+				dr->sy = yy + s.dy_sub;
+			}
+			dr->topa = (int)(255 * k_text);
+			dr->sopa = (int)(180 * k_text);
 		}
-		/* выбранный — icon_sel, остальные — icon, звенья цепочки — 14 */
-		set_icon_px(r->icon, tile ? 24 : 14 + (sz->icon - 14 + (sz->icon_sel - sz->icon) * near) * tk);
 		if (sel && active) {
 			s.glow_x = (int)x + (c->big && tk > 0.5 ? cdx : 0);
 			s.glow_y = yy;
 			s.glow_k = k_icon;
 			s.glow_sz = c->big && tk > 0.5 ? BIG_COVER + GLOW_PAD : GLOW;
 		}
-		set_opa(r->icon, (int)(255 * k_icon));
-		set_opa(r->title, (int)(255 * k_text));
-		set_opa(r->sub, (int)(180 * k_text));
 	}
 }
 
@@ -1385,11 +1522,13 @@ static lv_obj_t *park;
 static void column_cont_vis(column_t *c)
 {
 	int vis = 0;
-	for (int i = 0; i < POOL && c->pool_ready && !vis; i++) {
-		const row_t *r = &c->rows[i];
-		vis = !lv_obj_is_hidden(r->icon) || !lv_obj_is_hidden(r->img) || !lv_obj_is_hidden(r->title) ||
-		      !lv_obj_is_hidden(r->sub);
+	lv_area_t inv = { LV_COORD_MAX, LV_COORD_MAX, LV_COORD_MIN, LV_COORD_MIN };
+	for (int i = 0; i < POOL && c->pool_ready; i++) {
+		row_commit(&c->rows[i], &inv);
+		vis |= c->rows[i].cur.vis != 0;
 	}
+	if (inv.x1 <= inv.x2)
+		lv_obj_invalidate_area(c->cont, &inv);
 	set_hidden(c->cont, !vis);
 	lv_obj_t *want = vis ? s.main : park;
 	if (lv_obj_get_parent(c->cont) == want)
@@ -6079,10 +6218,7 @@ static void apply_size(void)
 		lv_tiny_ttf_set_size(s.m_sub, sz->f_sub);
 	}
 	size_metrics();
-	for (int i = 0; i < NCAT; i++)
-		column_widths(&s.cat_col[i]);
-	for (int d = 1; d < MAX_DEPTH; d++)
-		column_widths(&s.stack[d]);
+	s.text_gen++;   /* подписи строк — заново под новые размеры шрифтов */
 	lv_obj_set_pos(s.cat_title, CAT_X - 70, CAT_Y + sz->cat_icon_sel / 2 + 6);
 	lv_obj_report_style_change(NULL);   /* метки пересчитывают текст под новые размеры шрифтов */
 	layout();
