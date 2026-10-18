@@ -9,16 +9,15 @@
 | Статус | Тикетов |
 |---|---|
 | `open` | 5 |
-| `in-progress` | 1 |
-| `fixed` | 34 |
+| `fixed` | 37 |
 | `verified` | 3 |
 | `accepted` | 7 |
-| **всего** | **50** |
+| **всего** | **52** |
 
 | Область | open | in-progress | fixed |
 |---|---|---|---|
-| ui | 0 | 0 | 11 |
-| player | 0 | 1 | 4 |
+| ui | 0 | 0 | 12 |
+| player | 0 | 0 | 6 |
 | audio | 1 | 0 | 5 |
 | library | 0 | 0 | 2 |
 | net | 1 | 0 | 4 |
@@ -34,7 +33,6 @@
 | [XMB-0024](XMB-0024-pleer-perezagruzilsya-sam-pri-pereklyuchenii.md) | P1 | open | firmware | Плеер перезагрузился сам при переключении трека в полноэкранном плеере 👀 |
 | [XMB-0006](XMB-0006-polnoekrannyy-pleer-ne-reagiroval-na-kasaniya.md) | P2 | open | input | Полноэкранный плеер не реагировал на касания до выключения и включения экрана 👀 |
 | [XMB-0010](XMB-0010-bluetooth-proverit-naushniki-zvuk-i-smenu-kodeka.md) | P2 | open | net | Bluetooth: проверить наушники, звук и смену кодека |
-| [XMB-0050](XMB-0050-mini-pleer-kartochka-redizayn.md) | P2 | in-progress | player | Мини-плеер «Карточка»: редизайн |
 | [XMB-0037](XMB-0037-usb-tsap-mozhno-li-menshe-50-ms-zaderzhki.md) | P3 | open | audio | USB-ЦАП: можно ли меньше 50 мс задержки |
 | [XMB-0041](XMB-0041-mtp-peredacha-faylov-bez-otdachi-karty.md) | P3 | open | firmware | MTP: передача файлов без отдачи карты |
 
@@ -71,6 +69,9 @@
 - [ ] [XMB-0047](XMB-0047-shtorka-bez-polzunka-gromkosti-koleso-yarkost.md) `[P2/ui]` Шторка: без ползунка громкости, колесо — яркость
 - [ ] [XMB-0048](XMB-0048-shtorka-ubrat-knopki-kotorye-est-v-pleere.md) `[P2/ui]` Шторка: убрать кнопки, которые есть в плеере
 - [ ] [XMB-0049](XMB-0049-pleer-rezkaya-smena-tsveta-fona-pri-raskrytii.md) `[P2/player]` Плеер: резкая смена цвета фона при раскрытии мини-плеера
+- [ ] [XMB-0050](XMB-0050-mini-pleer-kartochka-redizayn.md) `[P2/player]` Мини-плеер «Карточка»: редизайн
+- [ ] [XMB-0051](XMB-0051-raskrytie-pleera-iz-kartochki-ne-podhodit-k-ee.md) `[P2/player]` Раскрытие плеера из «Карточки» не подходит к её виду
+- [ ] [XMB-0052](XMB-0052-podkasty-otdelnyy-razdel-vmesto-punkta-v-muzyke.md) `[P2/ui]` Подкасты — отдельный раздел вместо пункта в «Музыке»
 - [ ] [XMB-0011](XMB-0011-rezhim-usb-tsap.md) `[P3/audio]` Режим USB-ЦАП
 - [ ] [XMB-0023](XMB-0023-fon-pleera-tsvetom-oblozhki-plavnaya-smena.md) `[P3/player]` Фон плеера цветом обложки: плавная смена оттенка
 - [ ] [XMB-0028](XMB-0028-pleer-na-pauze-posle-zapuska-xmb-stroka.md) `[P3/player]` Плеер на паузе после запуска XMB: строка формата — только «FLAC», без разрядности и частоты
