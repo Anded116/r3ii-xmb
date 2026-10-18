@@ -4112,6 +4112,7 @@ static void frame_cb(lv_timer_t *t)
 	 * пересчитывается целиком (весь экран), поэтому шаг — не чаще раза в 60 мс */
 	uint32_t tint = s.player_bg ? player_tint() : 0;
 	double want[4] = { (tint >> 16) & 255, (tint >> 8) & 255, tint & 255, tint ? 215 : PLAYER_DIM };
+	player_set_full_bg(tint, (int)want[3]);   /* раскрытие плеера кончается этим же цветом — без скачка */
 	static double cur[4];
 	static uint32_t tint_ms;
 	if (!player_covers()) {

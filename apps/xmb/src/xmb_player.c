@@ -42,7 +42,6 @@
 #define VOL_SEG 30
 #define MINI_H 52             /* высота мини-плеера: с него начинается раскрытие */
 #define MINI_OPA 77           /* его затемнение по умолчанию (чёрный 30%) */
-#define FULL_OPA PLAYER_DIM
 
 static struct {
 	lv_obj_t *root, *content, *trk, *dacw, *cards, *cassette, *cover, *pending, *heart, *add, *title, *artist, *album, *format, *bar, *t_pos, *t_dur;
@@ -64,10 +63,10 @@ static struct {
 	int lyr_on, lyr_idx[NLYR], lyr_cur, *lyr_y, lyr_total;
 	double lyr_k, lyr_scroll;
 	const lv_font_t *lyr_font;
-	int mini_opa;                 /* фон мини-плеера: с него начинается раскрытие (вид — в настройках) */
+	int mini_opa, full_opa;       /* фон мини-плеера: с него начинается раскрытие (вид — в настройках); */
+	uint32_t mini_color, full_color;   /* раскрытого плеера — им кончается */
 	int dac;                      /* источник — компьютер (USB-ЦАП) */
-	uint32_t mini_color;
-} p = { .mini_opa = MINI_OPA };
+} p = { .mini_opa = MINI_OPA, .full_opa = PLAYER_DIM };
 
 static lv_obj_t *box(lv_obj_t *parent, int x, int y, int w, int h)
 {
@@ -341,15 +340,35 @@ static void tint_calc(const lv_image_dsc_t *d)
 		tint = 0x010101;
 }
 
+/* фон на раскрытии t: цвет и плотность — от мини-плеера к раскрытому плееру, без скачка на стыке */
+static void root_bg(void)
+{
+	if (!p.root || p.t >= 1)
+		return;
+	uint32_t c = 0;
+	for (int sh = 0; sh <= 16; sh += 8) {
+		int a = p.mini_color >> sh & 255, b = p.full_color >> sh & 255;
+		c |= (uint32_t)(a + (b - a) * p.t + 0.5) << sh;
+	}
+	lv_obj_set_style_bg_color(p.root, lv_color_hex(c), 0);
+	lv_obj_set_style_bg_opa(p.root, (lv_opa_t)(p.mini_opa + (p.full_opa - p.mini_opa) * p.t), 0);
+}
+
 void player_set_mini_bg(uint32_t color, int opa)
 {
 	p.mini_color = color;
 	p.mini_opa = opa;
-	if (p.root) {
-		lv_obj_set_style_bg_color(p.root, lv_color_hex(color), 0);
-		if (p.t < 1)
-			lv_obj_set_style_bg_opa(p.root, (lv_opa_t)(opa + (FULL_OPA - opa) * p.t), 0);
-	}
+	root_bg();
+}
+
+void player_set_full_bg(uint32_t color, int opa)
+{
+	if (color == p.full_color && opa == p.full_opa)
+		return;
+	p.full_color = color;
+	p.full_opa = opa;
+	if (p.t > 0)
+		root_bg();
 }
 
 uint32_t player_tint(void)
@@ -469,8 +488,7 @@ void player_create(lv_obj_t *parent, const lv_font_t *f_big, const lv_font_t *f_
 {
 	/* плеер раскрывается из мини-плеера: та же полоса внизу растёт до полного экрана */
 	p.root = box(parent, 0, H - MINI_H, W, MINI_H);
-	lv_obj_set_style_bg_opa(p.root, p.mini_opa, 0);
-	lv_obj_set_style_bg_color(p.root, lv_color_hex(p.mini_color), 0);
+	root_bg();
 	lv_obj_set_hidden(p.root, true);
 	p.content = box(p.root, 0, 0, W, H);
 	p.trk = box(p.content, 0, 0, W, H);   /* то, что есть только у трека */
@@ -842,7 +860,9 @@ void player_tick(double dt)
 		lv_obj_set_pos(p.root, 0, y);
 		lv_obj_set_height(p.root, H - y);
 		/* раскрыт — затемнение уже в самом фоне (bg_set_dim) */
-		lv_obj_set_style_bg_opa(p.root, p.t >= 1 ? 0 : (lv_opa_t)(p.mini_opa + (FULL_OPA - p.mini_opa) * p.t), 0);
+		if (p.t >= 1)
+			lv_obj_set_style_bg_opa(p.root, 0, 0);
+		root_bg();
 		/* прозрачность содержимого — только на время перехода: она рендерится через слой */
 		lv_obj_set_style_opa(p.content, p.t >= 1 ? LV_OPA_COVER : (lv_opa_t)(255 * p.t * p.t), 0);
 		lv_obj_set_hidden(p.root, p.t <= 0);
