@@ -86,8 +86,8 @@ static const ui_size_t *sz = &ui_sizes[1];
 #define MAX_OPTS 16
 #define MINI_H 52
 #define TOP_H 28
-#define SHADE_H 304
-#define SEG 30         /* сегментов в ползунке шторки */
+#define SHADE_H 260
+#define SEG 30         /* делений громкости: щелчок колеса — одно деление */
 #define ACCENT 0xff7a1a /* оранжевый Walkman */
 
 enum { A_NONE, A_TRACK, A_EQ, A_BTN_RESET, A_SEARCH, A_STOCK, A_USB, A_NEWPL, A_BTDEV, A_BTSCAN, A_WIFINET, A_WIFISCAN, A_PODUPDATE };
@@ -287,8 +287,8 @@ static struct {
 	int opt_open, opt_count, opt_sel, opt_orig, opt_w;
 	double opt_pos, opt_t, opt_sub;   /* opt_sub 1 → 0: вложенное меню въезжает справа поверх прежнего */
 	/* шторка */
-	lv_obj_t *sh_panel, *sh_bg[8], *sh_icon[8], *sh_label[8], *sh_slider[2];
-	int sh_open, sh_drag;   /* sh_drag — палец на ползунке: 1 + номер */
+	lv_obj_t *sh_panel, *sh_bg[8], *sh_icon[8], *sh_label[8], *sh_slider;
+	int sh_open, sh_drag;   /* sh_drag — палец на ползунке яркости */
 	double sh_t;
 	/* воспроизведение: очередь — список, из которого запущен трек */
 	int track, playing, volume, ended_seen;
@@ -507,7 +507,7 @@ static node_t *lib_artists, *lib_albums;   /* пункты «Исполните�
 static const char *const repeat_names[] = { "Повтор", "Повтор: все", "Повтор: один", NULL };
 
 /* плитки шторки: значок Font Awesome (без шрифта — символ LVGL) и подпись; включённая — оранжевым кругом */
-enum { TL_BT, TL_WIFI, TL_EQ, TL_SLEEP, TL_SHUFFLE, TL_REPEAT, TL_TOUCH, TL_USB, NTILE };
+enum { TL_BT, TL_WIFI, TL_EQ, TL_SLEEP, TL_TOUCH, TL_USB, NTILE };
 static const struct {
 	const char *fa, *sym, *name;
 } tiles[NTILE] = {
@@ -515,8 +515,6 @@ static const struct {
 	{ "\xEF\x87\xAB", LV_SYMBOL_WIFI, "Wi-Fi" },
 	{ "\xEF\x87\x9E", LV_SYMBOL_BARS, "Эквалайзер" },
 	{ "\xEF\x86\x86", LV_SYMBOL_POWER, "Таймер сна" },
-	{ "\xEF\x81\xB4", LV_SYMBOL_SHUFFLE, "Случайно" },
-	{ "\xEF\x80\x9E", LV_SYMBOL_LOOP, "Повтор" },
 	{ "\xEF\x89\x9A", LV_SYMBOL_GPS, "Сенсор" },
 	{ "\xEF\x8A\x87", LV_SYMBOL_USB, "Отдать карту" },
 };
@@ -1245,10 +1243,10 @@ static void layout_options(void)
 	}
 }
 
-#define TILE_X(i) (40 + (i) % 4 * 80)
-#define TILE_Y(i) (TOP_H + 34 + (i) / 4 * 82)
+#define TILE_X(i) (53 + (i) % 3 * 107)
+#define TILE_Y(i) (TOP_H + 34 + (i) / 3 * 82)
 #define TILE_R 26
-#define SLIDER_Y(i) (TOP_H + 206 + (i) * 44)
+#define SLIDER_Y (TOP_H + 206)
 #define SLIDER_X 56
 #define SLIDER_W 246
 
@@ -1259,8 +1257,6 @@ static int tile_on(int i)
 	case TL_WIFI: return !s.wifi_off;
 	case TL_EQ: return s.eq_on;
 	case TL_SLEEP: return s.sleep_end != 0;
-	case TL_SHUFFLE: return s.shuffle;
-	case TL_REPEAT: return s.repeat != 0;
 	case TL_TOUCH: return !s.touch_off;
 	default: return 0;
 	}
@@ -1275,8 +1271,6 @@ static const char *tile_label(int i)
 		snprintf(left, sizeof(left), "%d:%02d", sec / 60, sec % 60);
 		return left;
 	}
-	if (i == TL_REPEAT)
-		return tx(s.repeat == 2 ? "Один" : s.repeat == 1 ? "Все" : "Повтор");
 	return tx(tiles[i].name);
 }
 
@@ -4393,8 +4387,6 @@ static void tile_tap(int i)
 		if (s.sleep != SLEEP_OFF)
 			toast("Сон через %d мин", sleep_min[s.sleep]);
 		break;
-	case TL_SHUFFLE: toggle_mode(PM_SHUFFLE); break;
-	case TL_REPEAT: toggle_mode(PM_REPEAT); break;
 	case TL_TOUCH: s.touch_off = !s.touch_off; break;
 	case TL_USB:
 		shade_set(0);
@@ -4415,20 +4407,13 @@ static int volume_seg(int v, int dir)
 	return dir > 0 ? 100 : 0;
 }
 
-/* ползунок шторки по касанию: x — точка на дорожке; громкость — по делениям, как колесом */
-static void shade_slider(int i, int x)
+/* яркость в шторке: x — точка на дорожке ползунка */
+static void shade_slider(int x)
 {
-	int k = ((x - SLIDER_X) * (i ? SEG : 10) + SLIDER_W / 2) / SLIDER_W;
-	if (i == 0) {
-		s.bright = k - 1 < 0 ? 0 : k - 1 > 9 ? 9 : k - 1;
-		apply_bright();
-	} else {
-		k = k < 0 ? 0 : k > SEG ? SEG : k;
-		s.volume = (k * 100 + SEG / 2) / SEG;
-		audio_set_volume(s.volume);
-		player_set_state(s.playing, s.pos, s.volume);
-	}
-	lv_obj_invalidate(s.sh_slider[i]);
+	int k = ((x - SLIDER_X) * 10 + SLIDER_W / 2) / SLIDER_W;
+	s.bright = k - 1 < 0 ? 0 : k - 1 > 9 ? 9 : k - 1;
+	apply_bright();
+	lv_obj_invalidate(s.sh_slider);
 	refresh_subs();
 }
 
@@ -5264,12 +5249,13 @@ void xmb_input(xmb_input_t in)
 		return;
 	}
 
-	if (s.sh_open) {   /* шторка — пальцем; колесо — громкость, клик и «назад» закрывают */
+	if (s.sh_open) {   /* шторка — пальцем; колесо — яркость, клик и «назад» закрывают */
 		if (in == XMB_WHEEL_DOWN || in == XMB_WHEEL_UP) {
-			s.volume = volume_seg(s.volume, in == XMB_WHEEL_UP ? -1 : 1);
-			audio_set_volume(s.volume);
-			player_set_state(s.playing, s.pos, s.volume);
-			lv_obj_invalidate(s.sh_slider[1]);
+			int b = s.bright + (in == XMB_WHEEL_UP ? -1 : 1);
+			s.bright = b < 0 ? 0 : b > 9 ? 9 : b;
+			apply_bright();
+			lv_obj_invalidate(s.sh_slider);
+			refresh_subs();
 		} else if (in == XMB_SELECT || in == XMB_BACK) {
 			shade_set(0);
 		}
@@ -5473,15 +5459,22 @@ static column_t *drag_column(void)
 }
 
 /* тач в шторке: тап по плитке — переключить, ползунок — тянуть пальцем, свайп вверх или тап ниже — закрыть */
+/* быстрый короткий жест решается направлением, а не пройденным путём (как у Sonix) */
+static int t_flick(void)
+{
+	return lv_tick_get() - s.t_ms < 300;
+}
+
 static void shade_touch(lv_event_code_t code, lv_point_t p, int dx, int dy)
 {
-	int top = (int)(-SHADE_H + SHADE_H * s.sh_t), py = p.y - top, sy = s.t_start.y - top;
+	int top = (int)(-SHADE_H + SHADE_H * s.sh_t), py = p.y - top;
+	if (code == LV_EVENT_PRESSED) {   /* ползунок — только если палец лёг на него: шторка едет за пальцем */
+		s.sh_drag = abs(py - SLIDER_Y) < 22 && p.x > SLIDER_X - 16;
+		return;
+	}
 	if (code == LV_EVENT_PRESSING) {
-		for (int i = 0; i < 2 && !s.sh_drag; i++)
-			if (abs(sy - SLIDER_Y(i)) < 22 && s.t_start.x > SLIDER_X - 16)
-				s.sh_drag = 1 + i;
 		if (s.sh_drag)
-			shade_slider(s.sh_drag - 1, p.x);
+			shade_slider(p.x);
 		else if (dy < -10 && abs(dy) > abs(dx))
 			s.sh_t = clamp01(1.0 + dy / (double)SHADE_H);
 		return;
@@ -5491,7 +5484,7 @@ static void shade_touch(lv_event_code_t code, lv_point_t p, int dx, int dy)
 	int tap = abs(dx) < 10 && abs(dy) < 10;
 	if (s.sh_drag)
 		s.sh_drag = 0;
-	else if (dy < -60 || (tap && py > SHADE_H))
+	else if (dy < -60 || (dy < -24 && t_flick()) || (tap && py > SHADE_H))
 		shade_set(0);
 	else if (tap)
 		for (int i = 0; i < NTILE; i++)
@@ -5517,6 +5510,8 @@ static void touch_cb(lv_event_t *e)
 		s.t_start = p;
 		s.t_ms = now;
 		s.t_mode = s.sh_open ? T_SHADE : T_TAP;
+		if (s.sh_open)
+			shade_touch(code, p, 0, 0);
 		/* «тач выключен» отключает только навигацию по меню: шторка и плеер доступны всегда */
 		s.t_menu_off = s.touch_off && !s.sh_open && !player_shown();
 		double f;
@@ -5603,10 +5598,14 @@ static void touch_cb(lv_event_t *e)
 		if (s.t_mode == T_TAP && (abs(dx) > 10 || abs(dy) > 10)) {
 			int horiz = abs(dx) > abs(dy);
 			int in_mini = s.t_start.y > SCR_H - MINI_H && !player_shown();
-			if (s.t_menu_off && !(s.t_start.y < TOP_H + 16 && !horiz && dy > 0) && !(in_mini && dy < 0 && !horiz) &&
+			/* шторка — от верхней панели; быстрый жест — и чуть ниже: тач опрашивается 33 раза в секунду, первая
+			 * точка резкого свайпа от края приходит уже ниже панели */
+			int pull = !horiz && dy > 0 &&
+				   (s.t_start.y < TOP_H + 24 || (s.t_start.y < TOP_H + 60 && dy * 1000 > 800 * (int)(now - s.t_ms + 1)));
+			if (s.t_menu_off && !pull && !(in_mini && dy < 0 && !horiz) &&
 			    !(in_mini && horiz))
 				s.t_mode = T_NONE;
-			else if (s.t_start.y < TOP_H + 16 && !horiz && dy > 0 && !s.eq_edit)
+			else if (pull && !s.eq_edit)
 				s.t_mode = T_PULL;   /* шторка — свайпом от верхней панели отовсюду, и из плеера */
 			else if (s.opt_open && !horiz) {
 				s.t_mode = T_VLIST;
@@ -5714,7 +5713,7 @@ static void touch_cb(lv_event_t *e)
 				xmb_input(right ? XMB_SELECT : XMB_BACK);
 			}
 		} else if (mode == T_PULL) {
-			shade_set(dy > 60);
+			shade_set(dy > 60 || (dy > 24 && t_flick()));
 		} else if (mode == T_VLIST) {
 			/* скорость пальца за последние ~100 мс, пикселей в секунду (вниз — плюс) */
 			int last = (s.t_nhist - 1) % 8, k = last;
@@ -5825,19 +5824,17 @@ static void apply_edges(void)
 static void slider_draw(lv_event_t *e)
 {
 	lv_obj_t *o = lv_event_get_target(e);
-	int idx = (int)(intptr_t)lv_event_get_user_data(e);
 	lv_layer_t *l = lv_event_get_layer(e);
 	lv_area_t a;
 	lv_obj_get_coords(o, &a);
-	int lit = idx == 0 ? (s.bright + 1) * SEG / 10 : (s.volume * SEG + 50) / 100;
-	int adj = s.sh_drag == 1 + idx;
+	int lit = s.bright + 1;   /* 10 уровней — 10 делений */
 	lv_draw_rect_dsc_t d;
 	lv_draw_rect_dsc_init(&d);
-	d.radius = 1;
-	int w = lv_area_get_width(&a), sw = w / SEG;
-	for (int i = 0; i < SEG; i++) {
-		lv_area_t sa = { a.x1 + i * sw, a.y1, a.x1 + i * sw + sw - 3, a.y2 };
-		d.bg_color = i < lit && adj ? lv_color_hex(ACCENT) : lv_color_white();
+	d.radius = 2;
+	int w = lv_area_get_width(&a), sw = w / 10;
+	for (int i = 0; i < 10; i++) {
+		lv_area_t sa = { a.x1 + i * sw, a.y1, a.x1 + i * sw + sw - 4, a.y2 };
+		d.bg_color = i < lit && s.sh_drag ? lv_color_hex(ACCENT) : lv_color_white();
 		d.bg_opa = i < lit ? 255 : 45;
 		lv_draw_rect(l, &d, &sa);
 	}
@@ -5865,23 +5862,20 @@ static void shade_create(lv_obj_t *parent)
 				     s.f_tile ? tiles[i].fa : tiles[i].sym);
 		lv_obj_center(s.sh_icon[i]);
 		s.sh_label[i] = label(s.sh_panel, s.f_sub, tx(tiles[i].name));
-		lv_obj_set_size(s.sh_label[i], 80, lv_font_get_line_height(s.f_sub));
+		lv_obj_set_size(s.sh_label[i], 100, lv_font_get_line_height(s.f_sub));
 		lv_obj_set_style_text_align(s.sh_label[i], LV_TEXT_ALIGN_CENTER, 0);
 		lv_label_set_long_mode(s.sh_label[i], LV_LABEL_LONG_MODE_DOTS);
-		lv_obj_set_pos(s.sh_label[i], TILE_X(i) - 40, TILE_Y(i) + TILE_R + 5);
+		lv_obj_set_pos(s.sh_label[i], TILE_X(i) - 50, TILE_Y(i) + TILE_R + 5);
 	}
 
-	const char *icons[2] = { LV_SYMBOL_EYE_OPEN, LV_SYMBOL_VOLUME_MAX };
-	for (int i = 0; i < 2; i++) {
-		lv_obj_t *ic = label(s.sh_panel, &lv_font_montserrat_20, icons[i]);
-		lv_obj_set_size(ic, 32, 24);
-		lv_obj_set_style_text_align(ic, LV_TEXT_ALIGN_CENTER, 0);
-		lv_obj_set_pos(ic, 12, SLIDER_Y(i) - 12);
-		s.sh_slider[i] = plain(s.sh_panel);
-		lv_obj_set_size(s.sh_slider[i], SLIDER_W, 14);
-		lv_obj_set_pos(s.sh_slider[i], SLIDER_X, SLIDER_Y(i) - 7);
-		lv_obj_add_event_cb(s.sh_slider[i], slider_draw, LV_EVENT_DRAW_MAIN, (void *)(intptr_t)i);
-	}
+	lv_obj_t *ic = label(s.sh_panel, &lv_font_montserrat_20, LV_SYMBOL_EYE_OPEN);
+	lv_obj_set_size(ic, 32, 24);
+	lv_obj_set_style_text_align(ic, LV_TEXT_ALIGN_CENTER, 0);
+	lv_obj_set_pos(ic, 12, SLIDER_Y - 12);
+	s.sh_slider = plain(s.sh_panel);
+	lv_obj_set_size(s.sh_slider, SLIDER_W, 14);
+	lv_obj_set_pos(s.sh_slider, SLIDER_X, SLIDER_Y - 7);
+	lv_obj_add_event_cb(s.sh_slider, slider_draw, LV_EVENT_DRAW_MAIN, NULL);
 	lv_obj_t *grip = plain(s.sh_panel);   /* язычок: шторку тянут вверх */
 	lv_obj_set_size(grip, 36, 4);
 	lv_obj_set_pos(grip, (SCR_W - 36) / 2, SHADE_H - 12);
