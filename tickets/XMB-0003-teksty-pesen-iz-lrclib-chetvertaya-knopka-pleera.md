@@ -2,7 +2,7 @@
 id: XMB-0003
 title: Тексты песен из LRCLIB (четвёртая кнопка плеера)
 type: feature
-status: fixed
+status: verified
 priority: P2
 area: player
 source: user
@@ -25,3 +25,4 @@ commits: 47df57e, e638c6d
 
 - 2026-10-17 (agent): создан (feature, fixed).
 - 2026-10-17 (agent): commits 47df57e, e638c6d
+- 2026-10-18 (agent): ревью 2026-10-18: фикс работает

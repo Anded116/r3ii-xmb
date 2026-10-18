@@ -2,7 +2,7 @@
 id: XMB-0004
 title: Рамка экрана: чёрная верхняя панель и скругления углов
 type: feature
-status: fixed
+status: verified
 priority: P2
 area: display
 source: user
@@ -25,3 +25,4 @@ commits: 06abee1
 
 - 2026-10-17 (agent): создан (feature, fixed).
 - 2026-10-17 (agent): commits 06abee1
+- 2026-10-18 (agent): ревью 2026-10-18: фикс работает

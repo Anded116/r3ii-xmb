@@ -9,21 +9,21 @@
 | Статус | Тикетов |
 |---|---|
 | `open` | 5 |
-| `fixed` | 40 |
-| `verified` | 3 |
+| `fixed` | 12 |
+| `verified` | 31 |
 | `accepted` | 7 |
 | **всего** | **55** |
 
 | Область | open | in-progress | fixed |
 |---|---|---|---|
-| ui | 0 | 0 | 13 |
-| player | 0 | 0 | 6 |
-| audio | 1 | 0 | 5 |
-| library | 0 | 0 | 2 |
-| net | 1 | 0 | 4 |
-| power | 0 | 0 | 4 |
-| display | 0 | 0 | 4 |
-| input | 1 | 0 | 1 |
+| ui | 0 | 0 | 1 |
+| player | 0 | 0 | 1 |
+| audio | 1 | 0 | 1 |
+| library | 0 | 0 | 1 |
+| net | 1 | 0 | 3 |
+| power | 0 | 0 | 3 |
+| display | 0 | 0 | 1 |
+| input | 1 | 0 | 0 |
 | firmware | 2 | 0 | 0 |
 | tools | 0 | 0 | 1 |
 
@@ -47,48 +47,20 @@
 - [ ] [XMB-0053](XMB-0053-proizvoditelnost-prosela-nuzhno-stabilno-45-k.md) `[P1/display]` Производительность просела: нужно стабильно 45 к/с с самой тяжёлой анимацией и музыкой
 - [ ] [XMB-0001](XMB-0001-sbros-bufera-pcm-pri-pauze-peremotke-i-smene.md) `[P2/audio]` Сброс буфера PCM при паузе, перемотке и смене трека — проверить на щелчки
 - [ ] [XMB-0002](XMB-0002-wi-fi-podklyuchenie-k-novoy-seti-s-parolem.md) `[P2/net]` Wi-Fi: подключение к новой сети с паролем
-- [ ] [XMB-0003](XMB-0003-teksty-pesen-iz-lrclib-chetvertaya-knopka-pleera.md) `[P2/player]` Тексты песен из LRCLIB (четвёртая кнопка плеера)
-- [ ] [XMB-0004](XMB-0004-ramka-ekrana-chernaya-verhnyaya-panel-i.md) `[P2/display]` Рамка экрана: чёрная верхняя панель и скругления углов
 - [ ] [XMB-0005](XMB-0005-podkasty-podpiski-vybirayutsya-na-pk-vypuski.md) `[P2/net]` Подкасты: подписки выбираются на ПК, выпуски плеер качает сам по Wi-Fi
-- [ ] [XMB-0007](XMB-0007-niz-spiskov-gasnet-nad-mini-pleerom.md) `[P2/ui]` Низ списков гаснет над мини-плеером
 - [ ] [XMB-0013](XMB-0013-son-na-kabele-kompyutera-ekran-srazu.md) `[P2/power]` Сон на кабеле компьютера: экран сразу загорался с диалогом накопителя
-- [ ] [XMB-0018](XMB-0018-podsvetka-alboma-po-obschemu-standartu-ui-bez.md) `[P2/ui]` Подсветка альбома по общему стандарту UI, без сильного приглушения соседей
-- [ ] [XMB-0019](XMB-0019-skrugleniya-uglov-ekrana-ne-sovsem-kruglye.md) `[P2/display]` Скругления углов экрана не совсем круглые
-- [ ] [XMB-0020](XMB-0020-nastroyki-klaviatury-angliyskaya-raskladka-po.md) `[P2/ui]` Настройки клавиатуры; английская раскладка по умолчанию
-- [ ] [XMB-0021](XMB-0021-svayp-vlevo-vo-vlozhennyh-menyu-na-uroven-vyshe.md) `[P2/input]` Свайп влево во вложенных меню — на уровень выше
-- [ ] [XMB-0022](XMB-0022-fonovye-protsessy-skan-zagruzka-podkastov-v.md) `[P2/ui]` Фоновые процессы (скан, загрузка подкастов) — в центре статус-бара с прогрессом
-- [ ] [XMB-0025](XMB-0025-status-bar-pri-fonovoy-rabote-sverhu-tekst.md) `[P2/ui]` Статус-бар при фоновой работе: сверху текст, что идёт, снизу полоса; остальные значки скрыть
-- [ ] [XMB-0026](XMB-0026-podkasty-proveryayutsya-slishkom-chasto-pri.md) `[P2/net]` Подкасты проверяются слишком часто — при каждом запуске XMB
-- [ ] [XMB-0027](XMB-0027-crystal-castles-ii-i-iii-slity-v-odin-albom.md) `[P2/library]` Crystal Castles: (II) и (III) слиты в один альбом, (III) играет одним 40-минутным треком
-- [ ] [XMB-0029](XMB-0029-varianty-oformleniya-mini-pleera-stroki-spiska.md) `[P2/ui]` Варианты оформления мини-плеера: строки списка не должны просвечивать сквозь него
 - [ ] [XMB-0031](XMB-0031-teksty-pesen-dlya-vsey-biblioteki-pleer-sam.md) `[P2/net]` Тексты песен для всей библиотеки — плеер сам скачивает в фоне и держит на карте
-- [ ] [XMB-0033](XMB-0033-kursor-v-polyah-vvoda-temnyy-hotya-zadan-belym.md) `[P2/ui]` Курсор в полях ввода тёмный, хотя задан белым
-- [ ] [XMB-0035](XMB-0035-okno-tsapa-vizualizirovat-gromkost.md) `[P2/audio]` Окно ЦАПа: визуализировать громкость
-- [ ] [XMB-0036](XMB-0036-okno-tsapa-vyhod-kak-v-ostalnoy-sisteme.md) `[P2/audio]` Окно ЦАПа: выход как в остальной системе
-- [ ] [XMB-0038](XMB-0038-status-bar-znachok-rezhima-usb-podklyucheniya.md) `[P2/ui]` Статус-бар: значок режима USB-подключения
-- [ ] [XMB-0040](XMB-0040-usb-tsap-v-fone-menyu-dostupno-okno-ne.md) `[P2/audio]` USB-ЦАП в фоне: меню доступно, окно не обязательно
 - [ ] [XMB-0046](XMB-0046-shtorka-bystrym-svaypom-inogda-ne-otkryvaetsya.md) `[P2/ui]` Шторка: быстрым свайпом иногда не открывается
-- [ ] [XMB-0047](XMB-0047-shtorka-bez-polzunka-gromkosti-koleso-yarkost.md) `[P2/ui]` Шторка: без ползунка громкости, колесо — яркость
-- [ ] [XMB-0048](XMB-0048-shtorka-ubrat-knopki-kotorye-est-v-pleere.md) `[P2/ui]` Шторка: убрать кнопки, которые есть в плеере
-- [ ] [XMB-0049](XMB-0049-pleer-rezkaya-smena-tsveta-fona-pri-raskrytii.md) `[P2/player]` Плеер: резкая смена цвета фона при раскрытии мини-плеера
-- [ ] [XMB-0050](XMB-0050-mini-pleer-kartochka-redizayn.md) `[P2/player]` Мини-плеер «Карточка»: редизайн
-- [ ] [XMB-0051](XMB-0051-raskrytie-pleera-iz-kartochki-ne-podhodit-k-ee.md) `[P2/player]` Раскрытие плеера из «Карточки» не подходит к её виду
-- [ ] [XMB-0052](XMB-0052-podkasty-otdelnyy-razdel-vmesto-punkta-v-muzyke.md) `[P2/ui]` Подкасты — отдельный раздел вместо пункта в «Музыке»
-- [ ] [XMB-0055](XMB-0055-shtorka-dolgoe-nazhatie-na-plitku-otkryvaet-ee.md) `[P2/ui]` Шторка: долгое нажатие на плитку открывает её страницу
-- [ ] [XMB-0011](XMB-0011-rezhim-usb-tsap.md) `[P3/audio]` Режим USB-ЦАП
-- [ ] [XMB-0023](XMB-0023-fon-pleera-tsvetom-oblozhki-plavnaya-smena.md) `[P3/player]` Фон плеера цветом обложки: плавная смена оттенка
 - [ ] [XMB-0028](XMB-0028-pleer-na-pauze-posle-zapuska-xmb-stroka.md) `[P3/player]` Плеер на паузе после запуска XMB: строка формата — только «FLAC», без разрядности и частоты
 
 **Проверить ТЕСТОМ**
 
 - [ ] [XMB-0009](XMB-0009-biblioteka-podpis-papki-chtoby-pereskanirovat.md) `[P3/library]` Библиотека: подпись папки, чтобы пересканировать только изменившиеся
-- [ ] [XMB-0015](XMB-0015-ekran-zagoraetsya-cherez-1-4-1-75-s-posle.md) `[P3/power]` Экран загорается через 1,4–1,75 с после пробуждения
 
 **Без проверки (можно закрывать)**
 
 - [ ] [XMB-0054](XMB-0054-stress-test-samye-tyazhelye-usloviya-192-kgts.md) `[P2/tools]` Стресс-тест: самые тяжёлые условия (192 кГц, эквалайзер, тяжёлые фоны, фоновая работа)
 - [ ] [XMB-0008](XMB-0008-geydzh-cw2015-proverit-zavisshiy-0.md) `[P3/power]` Гейдж CW2015: проверить зависший 0 %
-- [ ] [XMB-0034](XMB-0034-ekran-60-gts-naskolko-riskovanno-i-stoit-li.md) `[P3/display]` Экран 60 Гц: насколько рискованно и стоит ли
 
 ## 📐 Решения (decision)
 
@@ -106,6 +78,34 @@
 
 | ID | Обновлён | Статус | Заголовок |
 |---|---|---|---|
-| [XMB-0044](XMB-0044-ikonki-xmb-svoi-vmesto-dubliruyuschihsya.md) | 2026-10-18 | verified | Иконки XMB: свои вместо дублирующихся символов LVGL |
+| [XMB-0035](XMB-0035-okno-tsapa-vizualizirovat-gromkost.md) | 2026-10-18 | verified | Окно ЦАПа: визуализировать громкость |
+| [XMB-0036](XMB-0036-okno-tsapa-vyhod-kak-v-ostalnoy-sisteme.md) | 2026-10-18 | verified | Окно ЦАПа: выход как в остальной системе |
+| [XMB-0038](XMB-0038-status-bar-znachok-rezhima-usb-podklyucheniya.md) | 2026-10-18 | verified | Статус-бар: значок режима USB-подключения |
+| [XMB-0034](XMB-0034-ekran-60-gts-naskolko-riskovanno-i-stoit-li.md) | 2026-10-18 | verified | Экран 60 Гц: насколько рискованно и стоит ли |
+| [XMB-0055](XMB-0055-shtorka-dolgoe-nazhatie-na-plitku-otkryvaet-ee.md) | 2026-10-18 | verified | Шторка: долгое нажатие на плитку открывает её страницу |
 | [XMB-0032](XMB-0032-punkt-bez-vtoroy-stroki-smeschen-vverh.md) | 2026-10-18 | verified | Пункт без второй строки смещён вверх — центрировать |
+| [XMB-0033](XMB-0033-kursor-v-polyah-vvoda-temnyy-hotya-zadan-belym.md) | 2026-10-18 | verified | Курсор в полях ввода тёмный, хотя задан белым |
+| [XMB-0040](XMB-0040-usb-tsap-v-fone-menyu-dostupno-okno-ne.md) | 2026-10-18 | verified | USB-ЦАП в фоне: меню доступно, окно не обязательно |
+| [XMB-0050](XMB-0050-mini-pleer-kartochka-redizayn.md) | 2026-10-18 | verified | Мини-плеер «Карточка»: редизайн |
+| [XMB-0051](XMB-0051-raskrytie-pleera-iz-kartochki-ne-podhodit-k-ee.md) | 2026-10-18 | verified | Раскрытие плеера из «Карточки» не подходит к её виду |
+| [XMB-0052](XMB-0052-podkasty-otdelnyy-razdel-vmesto-punkta-v-muzyke.md) | 2026-10-18 | verified | Подкасты — отдельный раздел вместо пункта в «Музыке» |
+| [XMB-0049](XMB-0049-pleer-rezkaya-smena-tsveta-fona-pri-raskrytii.md) | 2026-10-18 | verified | Плеер: резкая смена цвета фона при раскрытии мини-плеера |
+| [XMB-0044](XMB-0044-ikonki-xmb-svoi-vmesto-dubliruyuschihsya.md) | 2026-10-18 | verified | Иконки XMB: свои вместо дублирующихся символов LVGL |
+| [XMB-0047](XMB-0047-shtorka-bez-polzunka-gromkosti-koleso-yarkost.md) | 2026-10-18 | verified | Шторка: без ползунка громкости, колесо — яркость |
+| [XMB-0048](XMB-0048-shtorka-ubrat-knopki-kotorye-est-v-pleere.md) | 2026-10-18 | verified | Шторка: убрать кнопки, которые есть в плеере |
+| [XMB-0015](XMB-0015-ekran-zagoraetsya-cherez-1-4-1-75-s-posle.md) | 2026-10-18 | verified | Экран загорается через 1,4–1,75 с после пробуждения |
+| [XMB-0021](XMB-0021-svayp-vlevo-vo-vlozhennyh-menyu-na-uroven-vyshe.md) | 2026-10-18 | verified | Свайп влево во вложенных меню — на уровень выше |
+| [XMB-0011](XMB-0011-rezhim-usb-tsap.md) | 2026-10-18 | verified | Режим USB-ЦАП |
+| [XMB-0019](XMB-0019-skrugleniya-uglov-ekrana-ne-sovsem-kruglye.md) | 2026-10-18 | verified | Скругления углов экрана не совсем круглые |
+| [XMB-0029](XMB-0029-varianty-oformleniya-mini-pleera-stroki-spiska.md) | 2026-10-18 | verified | Варианты оформления мини-плеера: строки списка не должны просвечивать сквозь него |
+| [XMB-0007](XMB-0007-niz-spiskov-gasnet-nad-mini-pleerom.md) | 2026-10-17 | verified | Низ списков гаснет над мини-плеером |
 | [XMB-0014](XMB-0014-otpuskanie-kolesa-budilo-pleer-srazu-posle.md) | 2026-10-17 | verified | Отпускание колеса будило плеер сразу после засыпания |
+| [XMB-0004](XMB-0004-ramka-ekrana-chernaya-verhnyaya-panel-i.md) | 2026-10-17 | verified | Рамка экрана: чёрная верхняя панель и скругления углов |
+| [XMB-0003](XMB-0003-teksty-pesen-iz-lrclib-chetvertaya-knopka-pleera.md) | 2026-10-17 | verified | Тексты песен из LRCLIB (четвёртая кнопка плеера) |
+| [XMB-0023](XMB-0023-fon-pleera-tsvetom-oblozhki-plavnaya-smena.md) | 2026-10-17 | verified | Фон плеера цветом обложки: плавная смена оттенка |
+| [XMB-0025](XMB-0025-status-bar-pri-fonovoy-rabote-sverhu-tekst.md) | 2026-10-17 | verified | Статус-бар при фоновой работе: сверху текст, что идёт, снизу полоса; остальные значки скрыть |
+| [XMB-0026](XMB-0026-podkasty-proveryayutsya-slishkom-chasto-pri.md) | 2026-10-17 | verified | Подкасты проверяются слишком часто — при каждом запуске XMB |
+| [XMB-0022](XMB-0022-fonovye-protsessy-skan-zagruzka-podkastov-v.md) | 2026-10-17 | verified | Фоновые процессы (скан, загрузка подкастов) — в центре статус-бара с прогрессом |
+| [XMB-0018](XMB-0018-podsvetka-alboma-po-obschemu-standartu-ui-bez.md) | 2026-10-17 | verified | Подсветка альбома по общему стандарту UI, без сильного приглушения соседей |
+| [XMB-0027](XMB-0027-crystal-castles-ii-i-iii-slity-v-odin-albom.md) | 2026-10-17 | verified | Crystal Castles: (II) и (III) слиты в один альбом, (III) играет одним 40-минутным треком |
+| [XMB-0020](XMB-0020-nastroyki-klaviatury-angliyskaya-raskladka-po.md) | 2026-10-17 | verified | Настройки клавиатуры; английская раскладка по умолчанию |
