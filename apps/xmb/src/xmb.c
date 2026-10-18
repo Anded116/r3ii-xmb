@@ -5469,6 +5469,16 @@ int xmb_input_name(const char *name)
 		xmb_set_usb_link(atoi(name + 8));
 		return 1;
 	}
+	if (!strncmp(name, "sleep:", 6)) {   /* подготовка ко сну без отсчёта: sleep:1 — как перед mem, sleep:0 — экран */
+		xmb_sleep_prepare(name[6] == '1');
+		audio_power_down();
+		return 1;
+	}
+	if (!strcmp(name, "wake")) {
+		xmb_sleep_end();
+		xmb_wake();
+		return 1;
+	}
 	if (!strncmp(name, "btn:", 4) && name[4] && name[5]) {   /* кнопка на корпусе: btn:<кнопка><жест>, как в настройках */
 		xmb_button(name[4] - '0', name[5] - '0');
 		return 1;
@@ -5772,11 +5782,20 @@ void xmb_sleep_countdown(int left, const char *hint)
 	set_hidden(sleep_ov, false);
 }
 
-void xmb_sleep_prepare(int radio_off)
+void xmb_sleep_prepare(int mem)
 {
 	if (s.playing)
 		toggle_play();
-	if (radio_off)
+	/* карта во сне теряет питание: открытый на ней трек после пробуждения роняет ядро на первом «играть» —
+	 * закрыть, «играть» откроет его заново с того же места */
+	if (mem && s.track >= 0 && !s.resume) {
+		audio_release();
+		s.resume_pos = s.pos;
+		s.resume = 1;
+		plan_next();
+		printf("сон: трек закрыт на %.1f с\n", s.pos);
+	}
+	if (mem)
 		wifi_park(1);
 	save_flush();
 	xmb_sleep_countdown(-1, NULL);
