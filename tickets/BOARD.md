@@ -9,10 +9,10 @@
 | Статус | Тикетов |
 |---|---|
 | `open` | 5 |
-| `fixed` | 38 |
+| `fixed` | 39 |
 | `verified` | 3 |
 | `accepted` | 7 |
-| **всего** | **53** |
+| **всего** | **54** |
 
 | Область | open | in-progress | fixed |
 |---|---|---|---|
@@ -25,6 +25,7 @@
 | display | 0 | 0 | 4 |
 | input | 1 | 0 | 1 |
 | firmware | 2 | 0 | 0 |
+| tools | 0 | 0 | 1 |
 
 ## 🔥 Открытые (open / in-progress)
 
@@ -84,6 +85,7 @@
 
 **Без проверки (можно закрывать)**
 
+- [ ] [XMB-0054](XMB-0054-stress-test-samye-tyazhelye-usloviya-192-kgts.md) `[P2/tools]` Стресс-тест: самые тяжёлые условия (192 кГц, эквалайзер, тяжёлые фоны, фоновая работа)
 - [ ] [XMB-0008](XMB-0008-geydzh-cw2015-proverit-zavisshiy-0.md) `[P3/power]` Гейдж CW2015: проверить зависший 0 %
 - [ ] [XMB-0034](XMB-0034-ekran-60-gts-naskolko-riskovanno-i-stoit-li.md) `[P3/display]` Экран 60 Гц: насколько рискованно и стоит ли
 
