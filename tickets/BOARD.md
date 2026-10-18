@@ -9,14 +9,15 @@
 | Статус | Тикетов |
 |---|---|
 | `open` | 5 |
+| `in-progress` | 1 |
 | `fixed` | 30 |
 | `verified` | 2 |
-| `accepted` | 6 |
-| **всего** | **43** |
+| `accepted` | 7 |
+| **всего** | **45** |
 
 | Область | open | in-progress | fixed |
 |---|---|---|---|
-| ui | 0 | 0 | 8 |
+| ui | 0 | 1 | 8 |
 | player | 0 | 0 | 3 |
 | audio | 1 | 0 | 5 |
 | library | 0 | 0 | 2 |
@@ -35,6 +36,7 @@
 | [XMB-0010](XMB-0010-bluetooth-proverit-naushniki-zvuk-i-smenu-kodeka.md) | P2 | open | net | Bluetooth: проверить наушники, звук и смену кодека |
 | [XMB-0037](XMB-0037-usb-tsap-mozhno-li-menshe-50-ms-zaderzhki.md) | P3 | open | audio | USB-ЦАП: можно ли меньше 50 мс задержки |
 | [XMB-0041](XMB-0041-mtp-peredacha-faylov-bez-otdachi-karty.md) | P3 | open | firmware | MTP: передача файлов без отдачи карты |
+| [XMB-0044](XMB-0044-ikonki-xmb-svoi-vmesto-dubliruyuschihsya.md) | P3 | in-progress | ui | Иконки XMB: свои вместо дублирующихся символов LVGL |
 
 ## 🧪 Ждут проверки (fixed)
 
@@ -83,12 +85,13 @@
 
 | ID | Принято | Статус | Область | Решение |
 |---|---|---|---|---|
+| [XMB-0045](XMB-0045-ikonki-xmb-stil-sploshnoy-fa-pervye-tri.md) | 2026-10-18 | accepted | ui | Иконки XMB: стиль сплошной FA, первые три — Исполнители v3, Язык v1, Стоковый плеер v4 |
 | [XMB-0042](XMB-0042-znachki-usb-nabor-a-shteker-znachok-rezhima.md) | 2026-10-18 | accepted | ui | Значки USB: набор A (штекер + значок режима) |
-| [XMB-0039](XMB-0039-usb-znachki-dlya-vseh-rezhimov-bez.md) | 2026-10-18 | accepted | ui | USB: значки для всех режимов без обязательного полноэкранного окна; ЦАП — в фон |
 | [XMB-0043](XMB-0043-tsap-v-fone-pleer-istochnik-kompyuter-svoya.md) | 2026-10-18 | accepted | audio | ЦАП в фоне: плеер-источник «Компьютер», своя музыка на паузе, буфер 50 мс |
+| [XMB-0039](XMB-0039-usb-znachki-dlya-vseh-rezhimov-bez.md) | 2026-10-18 | accepted | ui | USB: значки для всех режимов без обязательного полноэкранного окна; ЦАП — в фон |
 | [XMB-0016](XMB-0016-fon-volnu-v-pokoe-ne-trogaem-chastota-kadrov.md) | 2026-10-17 | accepted | display | Фон-волну в покое не трогаем: частота кадров фона не снижается |
-| [XMB-0017](XMB-0017-podkasty-vybirayutsya-na-pk-pleer-tolko.md) | 2026-10-17 | accepted | net | Подкасты выбираются на ПК, плеер только подгружает новые выпуски |
 | [XMB-0030](XMB-0030-stroki-spiska-u-mini-pleera-ne-uvodit-v.md) | 2026-10-17 | accepted | ui | Строки списка у мини-плеера не уводить в прозрачность — решать оформлением самого мини-плеера |
+| [XMB-0017](XMB-0017-podkasty-vybirayutsya-na-pk-pleer-tolko.md) | 2026-10-17 | accepted | net | Подкасты выбираются на ПК, плеер только подгружает новые выпуски |
 
 ## ✅ Недавно закрытые (14 дней)
 

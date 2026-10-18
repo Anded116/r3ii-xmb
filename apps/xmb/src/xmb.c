@@ -141,6 +141,11 @@ typedef struct {
 #define OPT(ic, t, o, v, ap) { ic, t, NULL, NULL, 0, o, v, ap, NULL, A_NONE, 0 }
 #define ACT(ic, t, sub, a)   { ic, t, sub, NULL, 0, NULL, NULL, NULL, NULL, a, 0 }
 
+/* свои значки — XmbIcons.ttf (res/icons, tools/icons_ttf.py), коды U+E000… в порядке ICONS сборщика */
+#define ICON_ARTISTS  "\xEE\x80\x80"
+#define ICON_LANGUAGE "\xEE\x80\x81"
+#define ICON_STOCK    "\xEE\x80\x82"
+
 static const char *const theme_names[] = {
 	"Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
 	"Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь", NULL,
@@ -203,6 +208,7 @@ static struct {
 	lv_font_t *f_title, *f_item, *f_sub, *f_clock;
 	lv_font_t *m_title, *m_item, *m_sub, *f_letter;   /* шрифты меню — по размеру интерфейса */
 	lv_font_t *f_icons, *f_tile;                      /* Font Awesome 4.7: сердечко, плитки шторки */
+	lv_font_t *f_own[14];                             /* свои значки 14–40 px, остальное — montserrat того же размера */
 	int dy_title, dy_title_sel, dy_sub, h_title, h_sub;
 	lv_obj_t *idx_strip, *bubble, *bubble_lbl;
 	double bubble_t;
@@ -424,7 +430,7 @@ static const node_t power_items[] = {
 	OPT(LV_SYMBOL_POWER, "Сон устройства", dev_sleep_names, &s.dev_sleep, NULL),
 };
 static const node_t system_items[] = {
-	ACT(LV_SYMBOL_REFRESH, "Стоковый плеер", "обновление прошивки", A_STOCK),
+	ACT(ICON_STOCK, "Стоковый плеер", "обновление прошивки", A_STOCK),
 	{ LV_SYMBOL_SETTINGS, "О системе", "HiBy R3II 2025 · XMB", about_items, N(about_items) },
 };
 
@@ -436,7 +442,7 @@ static const node_t set_items[] = {
 	DIR(LV_SYMBOL_KEYBOARD, "Управление", "кнопки, клавиатура, сенсор", control_items),
 	DIR(LV_SYMBOL_POWER, "Питание", "таймер сна, сон устройства", power_items),
 	ACT(LV_SYMBOL_USB, "USB", "карта или ЦАП — компьютеру по кабелю", A_USB),
-	OPT(LV_SYMBOL_KEYBOARD, "Язык · Language", lang_names, &s.lang, apply_lang),
+	OPT(ICON_LANGUAGE, "Язык · Language", lang_names, &s.lang, apply_lang),
 	DIR(LV_SYMBOL_SETTINGS, "Система", "стоковый плеер, о системе", system_items),
 };
 /* «Музыка» и «Папки» строятся из библиотеки после сканирования */
@@ -582,19 +588,26 @@ static void set_scale(lv_obj_t *o, int scale)
 		lv_obj_set_style_transform_scale(o, scale, 0);
 }
 
+static const lv_font_t *const icon_fonts[] = {
+	&lv_font_montserrat_14, &lv_font_montserrat_16, &lv_font_montserrat_18, &lv_font_montserrat_20,
+	&lv_font_montserrat_22, &lv_font_montserrat_24, &lv_font_montserrat_26, &lv_font_montserrat_28,
+	&lv_font_montserrat_30, &lv_font_montserrat_32, &lv_font_montserrat_34, &lv_font_montserrat_36,
+	&lv_font_montserrat_38, &lv_font_montserrat_40,
+};
+
+/* шрифт значка ic размера icon_fonts[i]: свой (U+E000…) — из XmbIcons.ttf */
+static const lv_font_t *icon_font(const char *ic, int i)
+{
+	return !strncmp(ic, "\xEE\x80", 2) && s.f_own[i] ? s.f_own[i] : icon_fonts[i];
+}
+
 /* иконка размера px — ближайшим готовым шрифтом (шаг 2 px), без трансформации: она рендерит объект через
  * отдельный слой при каждой перерисовке, а во время прокрутки размер меняется каждый кадр */
 static void set_icon_px(lv_obj_t *o, double px)
 {
-	static const lv_font_t *const fonts[] = {
-		&lv_font_montserrat_14, &lv_font_montserrat_16, &lv_font_montserrat_18, &lv_font_montserrat_20,
-		&lv_font_montserrat_22, &lv_font_montserrat_24, &lv_font_montserrat_26, &lv_font_montserrat_28,
-		&lv_font_montserrat_30, &lv_font_montserrat_32, &lv_font_montserrat_34, &lv_font_montserrat_36,
-		&lv_font_montserrat_38, &lv_font_montserrat_40,
-	};
 	int i = (int)lround((px - 14) / 2);
 	i = i < 0 ? 0 : i > 13 ? 13 : i;
-	const lv_font_t *f = fonts[i];
+	const lv_font_t *f = icon_font(lv_label_get_text(o), i);
 	int scale = 256;
 	/* текст метки прижат к верху рамки: глиф центрируется отступом под каждый размер шрифта */
 	int pad = (lv_obj_get_style_height(o, 0) - f->line_height) / 2;
@@ -1690,7 +1703,7 @@ static void library_build(void)
 	if (L->ntracks) {
 		music[MUSIC_QUEUE] = (node_t){ .icon = LV_SYMBOL_NEXT, .title = "Очередь", .sub = "пусто" };   /* q_changed */
 		music[MUSIC_ALBUMS] = (node_t){ .icon = LV_SYMBOL_IMAGE, .title = "Альбомы", .kids = albums, .nkids = nmusic, .grid = 1 };
-		music[MUSIC_ARTISTS] = (node_t){ .icon = LV_SYMBOL_AUDIO, .title = "Исполнители", .kids = artists, .nkids = L->nartists };
+		music[MUSIC_ARTISTS] = (node_t){ .icon = ICON_ARTISTS, .title = "Исполнители", .kids = artists, .nkids = L->nartists };
 		music[MUSIC_ALL] = (node_t){ .icon = LV_SYMBOL_LIST, .title = "Все треки", .kids = all,
 					     .nkids = L->nby_title };
 		music[MUSIC_PODCASTS] = (node_t){ .icon = LV_SYMBOL_DOWNLOAD, .title = "Подкасты", .sub = pod_sub, .kids = pod_nodes,
@@ -4457,7 +4470,7 @@ static void slide_open(const char *icon, const char *title, const char *sub, con
 	lv_obj_set_style_bg_opa(sl.panel, LV_OPA_COVER, 0);
 	lv_obj_set_clickable(sl.panel, true);   /* касания не проходят в меню под панелью */
 
-	lv_obj_t *ic = label(sl.panel, &lv_font_montserrat_40, icon);
+	lv_obj_t *ic = label(sl.panel, icon_font(icon, 13), icon);
 	lv_obj_align(ic, LV_ALIGN_TOP_MID, 0, 26);
 	lv_obj_t *t1 = label(sl.panel, s.f_title, tx(title));
 	lv_obj_set_width(t1, SCR_W - 24);
@@ -4844,7 +4857,7 @@ static void select_current(void)
 	if (n->action == A_USB) {
 		usb_menu();
 	} else if (n->action == A_STOCK) {
-		slide_open(LV_SYMBOL_REFRESH, "Перезагрузить в сток?",
+		slide_open(ICON_STOCK, "Перезагрузить в сток?",
 			   tx("Один раз загрузится стоковый плеер HiBy, следующая загрузка — снова XMB"), "перезагрузить", 1,
 			   "Отмена", stock_do, NULL);
 	} else if (n->action == A_BTN_RESET) {
@@ -5995,6 +6008,9 @@ void xmb_init(const char *font_dir)
 	s.f_letter = load_font(font_dir, "NotoSans-SemiBold.ttf", 40);
 	s.f_icons = load_font(font_dir, "FontAwesome4.ttf", 20);
 	s.f_tile = load_font(font_dir, "FontAwesome4.ttf", 22);
+	for (int i = 0; i < N(s.f_own); i++)
+		if ((s.f_own[i] = load_font(font_dir, "XmbIcons.ttf", 14 + 2 * i)))
+			s.f_own[i]->fallback = icon_fonts[i];
 	if (!s.f_title || !s.f_item || !s.f_sub || !s.f_clock || !s.f_bat || !s.m_title || !s.m_item || !s.m_sub || !s.f_letter)
 		s.f_title = s.f_item = s.f_sub = s.f_clock = s.f_bat = s.m_title = s.m_item = s.m_sub = s.f_letter =
 			(lv_font_t *)&lv_font_montserrat_14;
