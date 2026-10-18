@@ -5,8 +5,9 @@ python tools/icons_ttf.py          (нужны fonttools и shapely)
 SVG — viewBox 0 0 24 24, только <path> (заливка; fill-rule evenodd или nonzero
 из одного контура), без масок, обводок и трансформаций. Порядок ICONS задаёт коды:
 U+E000, U+E001, … — те же, что ICON_* в src/xmb.c; новые значки дописывать в конец.
-Высота шрифта (ascent − descent) — 24 единицы SVG: значок кегля px занимает px×px,
-как глифы montserrat того же размера.
+Кегль — поле 2..22 сетки (ascent − descent = 20 единиц SVG): у символов montserrat
+(Font Awesome 5) значок тоже занимает весь кегль. Вес подгоняется в самом SVG —
+масштабом формы вокруг центра (круглые чуть крупнее, квадратные чуть мельче), а не здесь.
 """
 import os
 import re
@@ -23,7 +24,7 @@ from shapely.ops import unary_union
 ICONS = ['artists', 'language', 'stock']
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 U = 50   # единиц шрифта на единицу SVG
-EM = 24 * U
+EM = 20 * U
 
 
 class Flatten(BasePen):
@@ -81,8 +82,8 @@ def glyph(shape):
     pen = TTGlyphPen(None)
     polys = shape.geoms if hasattr(shape, 'geoms') else [shape]
     for p in polys:
-        p = Polygon([(x * U, (24 - y) * U) for x, y in p.exterior.coords],
-                    [[(x * U, (24 - y) * U) for x, y in h.coords] for h in p.interiors])
+        p = Polygon([((x - 2) * U, (22 - y) * U) for x, y in p.exterior.coords],
+                    [[((x - 2) * U, (22 - y) * U) for x, y in h.coords] for h in p.interiors])
         p = orient(p.simplify(U * 0.02), sign=-1.0)   # TrueType: внешний контур по часовой
         for ring in [p.exterior] + list(p.interiors):
             pts = [(round(x), round(y)) for x, y in ring.coords[:-1]]
