@@ -302,7 +302,8 @@ static struct {
 	uint32_t seek_ms;
 	track_t np;
 	char np_format[48];
-	lv_obj_t *mini_img, *mini_note, *tb_usb;
+	lv_obj_t *mini_img, *mini_note, *mini_ring, *tb_usb;
+	int mini_ty;   /* верх названия в мини-плеере (у «Карточки» — свой) */
 	library_t *lib;
 	/* плейлисты: [0] — «Избранное» */
 	playlist_t *pls;
@@ -1919,7 +1920,7 @@ static void mini_cover(void)
 	if (dac_shown())
 		return;
 	const char *cv = s.track >= 0 ? s.lib->albums[s.lib->tracks[s.track].aidx].cover : NULL;
-	const lv_image_dsc_t *d = cover_get(cv, 36);
+	const lv_image_dsc_t *d = cover_get(cv, s.mini_style == MINI_CARD ? 34 : 36);
 	if (lv_image_get_src(s.mini_img) != d)
 		lv_image_set_src(s.mini_img, d);
 	set_hidden(s.mini_img, !d);
@@ -1932,11 +1933,12 @@ static void update_np_labels(void)
 		return;
 	}
 	lv_label_set_text(s.mini_icon, s.playing ? LV_SYMBOL_PLAY : LV_SYMBOL_PAUSE);
+	lv_obj_invalidate(s.mini_ring);
 	if (s.track < 0) {
 		lv_label_set_text(s.mini_text, tx("Нет трека"));
 		lv_label_set_text(s.mini_artist, "");
 		int at, xh;   /* без второй строки — середина строчных на середине мини-плеера */
-		font_xheight(s.f_item, &at, &xh);
+		font_xheight(lv_obj_get_style_text_font(s.mini_text, 0), &at, &xh);
 		lv_obj_set_y(s.mini_text, lv_obj_get_height(s.mini) / 2 - (at - xh / 2));
 		refresh_subs();
 		return;
@@ -1945,7 +1947,7 @@ static void update_np_labels(void)
 	const lib_album_t *al = &s.lib->albums[tr->aidx];
 	lv_label_set_text(s.mini_text, tr->title);
 	lv_label_set_text(s.mini_artist, tx(tr->artist));
-	lv_obj_set_y(s.mini_text, 8);
+	lv_obj_set_y(s.mini_text, s.mini_ty);
 	mini_cover();
 	/* соседние альбомы для карусели плеера */
 	int a = s.album_pos[tr->aidx], lo = al->podcast ? nmusic : 0, hi = al->podcast ? s.lib->nalbums : nmusic;
@@ -4070,6 +4072,7 @@ static void frame_cb(lv_timer_t *t)
 		if ((int)s.pos != last_sec) {
 			last_sec = (int)s.pos;
 			lv_label_set_text_fmt(s.mini_time, "%d:%02d", last_sec / 60, last_sec % 60);
+			lv_obj_invalidate(s.mini_ring);
 		}
 		player_set_state(s.playing, s.seek_preview >= 0 ? s.seek_preview : s.pos, s.volume);
 	}
@@ -4155,6 +4158,72 @@ static void apply_theme(void)
 }
 
 /* вид мини-плеера: насколько он закрывает строки списка, которые уходят под него */
+/* что у мини-плеера справа и сверху: у «Карточки» — кнопка в кольце прогресса, у остальных — значок, время и
+ * полоса; у источника «Компьютер» — без времени и полосы */
+static void mini_chrome(void)
+{
+	int card = s.mini_style == MINI_CARD, dac = dac_shown();
+	set_hidden(s.mini_ring, !card);
+	set_hidden(s.mini_icon, card);
+	set_hidden(s.mini_time, card || dac);
+	set_hidden(s.mini_track, card);
+	set_hidden(s.mini_bar, card || dac);
+}
+
+/* «Карточка»: «играть/пауза» в кольце прогресса — значок показывает действие */
+static void mini_ring_draw(lv_event_t *e)
+{
+	lv_layer_t *l = lv_event_get_layer(e);
+	lv_area_t a;
+	lv_obj_get_coords(lv_event_get_target(e), &a);
+	int dac = dac_shown(), on = dac ? pc_playing() : s.playing, off = !dac && s.track < 0;
+	lv_draw_rect_dsc_t r;
+	lv_draw_rect_dsc_init(&r);
+	r.radius = LV_RADIUS_CIRCLE;
+	r.bg_color = lv_color_white();
+	r.bg_opa = off ? 10 : 26;
+	lv_draw_rect(l, &r, &a);
+	lv_draw_arc_dsc_t d;
+	lv_draw_arc_dsc_init(&d);
+	d.center.x = (a.x1 + a.x2 + 1) / 2;
+	d.center.y = (a.y1 + a.y2 + 1) / 2;
+	d.radius = (lv_area_get_width(&a)) / 2;
+	d.width = 2;
+	d.rounded = 1;
+	d.color = lv_color_white();
+	d.opa = off ? 20 : 56;
+	d.start_angle = 0;
+	d.end_angle = 360;
+	lv_draw_arc(l, &d);
+	int deg = !dac && s.dur > 0 ? (int)(359 * fmin(1.0, s.pos / s.dur)) : 0;
+	if (deg > 1) {
+		d.color = on ? lv_color_hex(ACCENT) : lv_color_white();   /* оранжевый — только «играет» */
+		d.opa = on ? LV_OPA_COVER : 153;
+		d.start_angle = 270;
+		d.end_angle = (270 + deg) % 360;
+		lv_draw_arc(l, &d);
+	}
+	lv_draw_label_dsc_t g;
+	lv_draw_label_dsc_init(&g);
+	g.font = &lv_font_montserrat_12;
+	g.color = lv_color_white();
+	g.opa = off ? 77 : LV_OPA_COVER;
+	g.align = LV_TEXT_ALIGN_CENTER;
+	g.text = on ? LV_SYMBOL_PAUSE : LV_SYMBOL_PLAY;
+	int dx = on ? 0 : 1;   /* треугольник центрируется по массе — она левее */
+	lv_area_t ga = { a.x1 + dx, d.center.y - 7, a.x2 + dx, d.center.y + 7 };
+	lv_draw_label(l, &g, &ga);
+}
+
+/* тап по мини-плееру: у «Карточки» по кнопке справа — пауза и продолжение, иначе — раскрыть плеер */
+static void mini_tap(lv_point_t p)
+{
+	if (s.mini_style == MINI_CARD && p.x >= lv_obj_get_x(s.mini) + 260)
+		toggle_play();
+	else
+		player_show(1);
+}
+
 static void apply_mini(void)
 {
 	if (!s.mini)
@@ -4162,16 +4231,49 @@ static void apply_mini(void)
 	uint32_t c = theme_colors[s.theme][1];   /* низ фона темы, притемнённый: мини-плеер как часть фона */
 	uint32_t dark = ((c >> 16 & 255) * 2 / 5) << 16 | ((c >> 8 & 255) * 2 / 5) << 8 | (c & 255) * 2 / 5;
 	int card = s.mini_style == MINI_CARD;
-	uint32_t color = s.mini_style == MINI_THEME || card ? dark : 0;
+	uint32_t color = s.mini_style == MINI_THEME ? dark : 0;
 	int opa = s.mini_style == MINI_CLEAR ? 77 : s.mini_style == MINI_DARK ? 217 : 255;
-	int x = card ? 6 : 0, w = SCR_W - 2 * x, h = card ? MINI_H - 4 : MINI_H, inset = card ? 12 : 0;
+	int x = card ? 6 : 0, w = SCR_W - 2 * x, h = card ? MINI_H - 6 : MINI_H, inset = 0;
 	lv_obj_set_pos(s.mini, x, SCR_H - MINI_H);
 	lv_obj_set_size(s.mini, w, h);
-	lv_obj_set_style_radius(s.mini, card ? 12 : 0, 0);
-	lv_obj_set_style_bg_color(s.mini, lv_color_hex(color), 0);
+	lv_obj_set_style_radius(s.mini, card ? 14 : 0, 0);
 	lv_obj_set_style_bg_opa(s.mini, (lv_opa_t)opa, 0);
-	/* у карточки полоса прогресса — не до краёв: углы скруглены; у «Чёрного со скруглением» — внизу, под текстом:
-	 * сверху она разделяла бы мини-плеер и скругления над ним */
+	/* «Карточка»: цвет темы, подмешанный к графиту (не притемнённый — тот грязнит), сверху светлее; светлый кант */
+	lv_obj_set_style_bg_grad_dir(s.mini, card ? LV_GRAD_DIR_VER : LV_GRAD_DIR_NONE, 0);
+	lv_obj_set_style_border_width(s.mini, card ? 1 : 0, 0);
+	if (card) {
+		lv_color_t th = lv_color_hex(c), gr = lv_color_hex(0x141418);
+		lv_color_t top = lv_color_mix(th, gr, 97), bot = lv_color_mix(th, gr, 61);
+		color = lv_color_to_u32(top) & 0xffffff;
+		lv_obj_set_style_bg_grad_color(s.mini, bot, 0);
+		lv_obj_set_style_border_color(s.mini, lv_color_white(), 0);
+		lv_obj_set_style_border_opa(s.mini, 36, 0);
+		lv_obj_set_style_border_side(s.mini, LV_BORDER_SIDE_TOP, 0);   /* блик по верхней кромке */
+	}
+	lv_obj_set_style_bg_color(s.mini, lv_color_hex(color), 0);
+	/* обложка: у «Карточки» — скруглённая, отступы ровные, заглушка — светлая */
+	int ts = card ? 34 : 36;
+	lv_obj_set_pos(s.mini_thumb, card ? 6 : 10, card ? 6 : 9);
+	lv_obj_set_size(s.mini_thumb, ts, ts);
+	lv_obj_set_size(s.mini_img, ts, ts);
+	lv_obj_set_style_radius(s.mini_thumb, card ? 8 : 0, 0);
+	lv_obj_set_style_clip_corner(s.mini_thumb, card, 0);
+	lv_obj_set_style_bg_color(s.mini_thumb, card ? lv_color_white() : lv_color_hex(EMPTY_BG), 0);
+	lv_obj_set_style_bg_opa(s.mini_thumb, card ? 31 : LV_OPA_COVER, 0);
+	lv_obj_set_style_text_color(s.mini_note, card ? lv_color_white() : lv_color_hex(EMPTY_FG), 0);
+	lv_obj_set_style_text_opa(s.mini_note, card ? 179 : LV_OPA_COVER, 0);
+	/* подписи: у «Карточки» название полужирное, мельче, исполнитель — ниже */
+	int tx0 = card ? 50 : 56, tw = card ? 172 : SCR_W - 56 - 58;
+	s.mini_ty = card ? 5 : 8;
+	lv_obj_set_style_text_font(s.mini_text, card ? s.f_clock : s.f_item, 0);
+	lv_obj_set_pos(s.mini_text, tx0, s.mini_ty);
+	lv_obj_set_width(s.mini_text, tw);
+	lv_obj_set_pos(s.mini_artist, tx0, card ? 25 : 28);
+	lv_obj_set_width(s.mini_artist, tw);
+	lv_obj_set_style_text_opa(s.mini_artist, card ? 153 : 160, 0);
+	lv_obj_set_pos(s.mini_ring, 268, 6);
+	/* у «Чёрного со скруглением» полоса прогресса — внизу, под текстом: сверху она разделяла бы мини-плеер и
+	 * скругления над ним */
 	int frame = s.mini_style == MINI_FRAME, bar_y = frame ? h - 5 : 0;
 	if (frame)
 		inset = 10;
@@ -4181,6 +4283,8 @@ static void apply_mini(void)
 	lv_obj_set_pos(s.mini_bar, inset, bar_y);
 	lv_obj_set_x(s.mini_time, w - 54);
 	lv_obj_set_x(s.mini_icon, w - 54);
+	mini_chrome();
+	lv_obj_invalidate(s.mini_ring);
 	player_set_mini_bg(color, opa);
 	corners_place();
 }
@@ -4699,19 +4803,18 @@ static void dac_mini(void)
 	lv_label_set_text(s.mini_icon, pc_playing() ? LV_SYMBOL_PLAY : LV_SYMBOL_PAUSE);
 	lv_label_set_text(s.mini_text, tx("Компьютер"));
 	lv_label_set_text(s.mini_artist, usb.st);
-	lv_obj_set_y(s.mini_text, 8);
+	lv_obj_set_y(s.mini_text, s.mini_ty);
 	set_hidden(s.mini_img, true);
 	lv_label_set_text(s.mini_note, LV_SYMBOL_USB);
-	set_hidden(s.mini_bar, true);
-	set_hidden(s.mini_time, true);
+	mini_chrome();
+	lv_obj_invalidate(s.mini_ring);
 }
 
 /* снова свой трек: мини-плеер — как был */
 static void dac_mini_off(void)
 {
 	lv_label_set_text(s.mini_note, LV_SYMBOL_AUDIO);
-	set_hidden(s.mini_bar, false);
-	set_hidden(s.mini_time, false);
+	mini_chrome();
 	update_np_labels();
 	if (s.track < 0)
 		player_show(0);
@@ -5679,7 +5782,7 @@ static void touch_cb(lv_event_t *e)
 			return;
 		if (mode == T_TAP && s.t_menu_off) {
 			if (p.y > SCR_H - MINI_H)
-				player_show(1);
+				mini_tap(p);
 		} else if (mode == T_TAP && now - s.t_ms < 500) {
 			int right = p.x >= SCR_W / 2;
 			int m = player_mode_at(p.x, p.y), act = player_action_at(p.x, p.y);
@@ -5700,7 +5803,7 @@ static void touch_cb(lv_event_t *e)
 			} else if (player_shown()) {
 				/* в плеере только его кнопки; закрыть — свайп вниз */
 			} else if (p.y > SCR_H - MINI_H) {
-				player_show(1);
+				mini_tap(p);
 			} else if (!s.at_cats && cur_col()->grid && grid_hit(cur_col(), p) >= 0) {
 				/* сетка: тап выбирает обложку, тап по выбранной — открывает */
 				column_t *c = cur_col();
@@ -6160,6 +6263,10 @@ void xmb_init(const char *font_dir)
 	lv_obj_set_width(s.mini_icon, 44);
 	lv_obj_set_style_text_align(s.mini_icon, LV_TEXT_ALIGN_RIGHT, 0);
 	lv_obj_set_pos(s.mini_icon, SCR_W - 54, 28);
+	s.mini_ring = plain(np);
+	lv_obj_set_size(s.mini_ring, 34, 34);
+	lv_obj_add_event_cb(s.mini_ring, mini_ring_draw, LV_EVENT_DRAW_MAIN, NULL);
+	s.mini_ty = 8;
 
 	player_create(scr, s.f_title, s.f_item, s.f_sub);
 	if (s.f_icons)
