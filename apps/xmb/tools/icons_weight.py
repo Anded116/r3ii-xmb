@@ -18,9 +18,7 @@ from icons_ttf import ICONS  # noqa: E402
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 
-PX = int(sys.argv[1]) if len(sys.argv) > 1 else 20
 TTF = os.path.join(ROOT, 'res', 'fonts', 'XmbIcons.ttf')
-SHEET = sys.argv[2] if len(sys.argv) > 2 else None
 SYMS = {0xF013: 'settings', 0xF001: 'audio', 0xF00B: 'list', 0xF07B: 'folder', 0xF03E: 'image',
         0xF028: 'volume', 0xF1EB: 'wifi', 0xF293: 'bt', 0xF11C: 'keyboard', 0xF011: 'power',
         0xF021: 'refresh', 0xF287: 'usb', 0xF015: 'home', 0xF019: 'download', 0xF06E: 'eye',
@@ -75,25 +73,32 @@ def stats(img):
     return a, w, h
 
 
-rows = list(montserrat(PX).items()) + list(own(PX).items())
-print(f'{PX}px  {"glyph":10s} {"area":>6s} {"sqrtA":>6s} {"w":>3s} {"h":>3s} {"dens":>5s} {"top":>4s}/line')
-ref = []
-for name, (img, top, lh) in rows:
-    a, w, h = stats(img)
-    if name.islower():
-        ref.append(a)
-    print(f'     {name:10s} {a:6.1f} {math.sqrt(a):6.2f} {w:3d} {h:3d} {a / (w * h):5.2f} {top:4d}/{lh}')
-ref.sort()
-print(f'median area: {ref[len(ref) // 2]:.1f}')
-
-if SHEET:
-    Z = 6
-    W = sum(img.size[0] for _, (img, _, _) in rows) * Z + len(rows) * 12 + 20
-    sh = Image.new('RGB', (W, (PX + 8) * Z), (0x3a, 0x42, 0x50))
-    x = 10
+def main():
+    px = int(sys.argv[1]) if len(sys.argv) > 1 else 20
+    sheet = sys.argv[2] if len(sys.argv) > 2 else None
+    rows = list(montserrat(px).items()) + list(own(px).items())
+    print(f'{px}px  {"glyph":10s} {"area":>6s} {"sqrtA":>6s} {"w":>3s} {"h":>3s} {"dens":>5s} {"top":>4s}/line')
+    ref = []
     for name, (img, top, lh) in rows:
-        y = (top + (PX + 8 - lh) // 2) * Z
-        big = img.resize((img.size[0] * Z, img.size[1] * Z), Image.NEAREST)
-        sh.paste(Image.new('RGB', big.size, (255, 255, 255)), (x, max(y, 0)), big)
-        x += big.size[0] + 12
-    sh.save(SHEET)
+        a, w, h = stats(img)
+        if name.islower():
+            ref.append(a)
+        print(f'     {name:10s} {a:6.1f} {math.sqrt(a):6.2f} {w:3d} {h:3d} {a / (w * h):5.2f} {top:4d}/{lh}')
+    ref.sort()
+    print(f'median area: {ref[len(ref) // 2]:.1f}')
+
+    if sheet:
+        Z = 6
+        W = sum(img.size[0] for _, (img, _, _) in rows) * Z + len(rows) * 12 + 20
+        sh = Image.new('RGB', (W, (px + 8) * Z), (0x3a, 0x42, 0x50))
+        x = 10
+        for name, (img, top, lh) in rows:
+            y = (top + (px + 8 - lh) // 2) * Z
+            big = img.resize((img.size[0] * Z, img.size[1] * Z), Image.NEAREST)
+            sh.paste(Image.new('RGB', big.size, (255, 255, 255)), (x, max(y, 0)), big)
+            x += big.size[0] + 12
+        sh.save(sheet)
+
+
+if __name__ == '__main__':
+    main()

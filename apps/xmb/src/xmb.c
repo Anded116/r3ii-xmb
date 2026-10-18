@@ -142,9 +142,46 @@ typedef struct {
 #define ACT(ic, t, sub, a)   { ic, t, sub, NULL, 0, NULL, NULL, NULL, NULL, a, 0 }
 
 /* свои значки — XmbIcons.ttf (res/icons, tools/icons_ttf.py), коды U+E000… в порядке ICONS сборщика */
-#define ICON_ARTISTS  "\xEE\x80\x80"
-#define ICON_LANGUAGE "\xEE\x80\x81"
-#define ICON_STOCK    "\xEE\x80\x82"
+#define ICON_ARTISTS       "\xEE\x80\x80"
+#define ICON_LANGUAGE      "\xEE\x80\x81"
+#define ICON_STOCK         "\xEE\x80\x82"
+#define ICON_QUEUE         "\xEE\x80\x83"
+#define ICON_ALBUMS        "\xEE\x80\x84"
+#define ICON_PODCASTS      "\xEE\x80\x85"
+#define ICON_SEARCH        "\xEE\x80\x86"
+#define ICON_LIBRARY       "\xEE\x80\x87"
+#define ICON_PLAYLIST      "\xEE\x80\x88"
+#define ICON_TRACKS        "\xEE\x80\x89"
+#define ICON_FAVORITES     "\xEE\x80\x8A"
+#define ICON_XMB           "\xEE\x80\x8B"
+#define ICON_INFO          "\xEE\x80\x8C"
+#define ICON_SOUND         "\xEE\x80\x8D"
+#define ICON_SCREEN        "\xEE\x80\x8E"
+#define ICON_CONTROLS      "\xEE\x80\x8F"
+#define ICON_SYSTEM        "\xEE\x80\x90"
+#define ICON_DEVICE        "\xEE\x80\x91"
+#define ICON_EQUALIZER     "\xEE\x80\x92"
+#define ICON_EQ_TOGGLE     "\xEE\x80\x93"
+#define ICON_PRESET        "\xEE\x80\x94"
+#define ICON_REPLAYGAIN    "\xEE\x80\x95"
+#define ICON_CROSSFADE     "\xEE\x80\x96"
+#define ICON_THEME         "\xEE\x80\x97"
+#define ICON_WAVE          "\xEE\x80\x98"
+#define ICON_BRIGHTNESS    "\xEE\x80\x99"
+#define ICON_UI_SIZE       "\xEE\x80\x9A"
+#define ICON_ALBUM_VIEW    "\xEE\x80\x9B"
+#define ICON_PLAYER_BG     "\xEE\x80\x9C"
+#define ICON_MINI_PLAYER   "\xEE\x80\x9D"
+#define ICON_BUTTONS       "\xEE\x80\x9E"
+#define ICON_TOUCH         "\xEE\x80\x9F"
+#define ICON_RESET         "\xEE\x80\xA0"
+#define ICON_SLEEP_TIMER   "\xEE\x80\xA1"
+#define ICON_DEV_SLEEP     "\xEE\x80\xA2"
+#define ICON_KB_LAYOUTS    "\xEE\x80\xA3"
+#define ICON_KB_START      "\xEE\x80\xA4"
+#define ICON_BT_DEVICES    "\xEE\x80\xA5"
+#define ICON_WIFI_NETWORKS "\xEE\x80\xA6"
+#define ICON_CODEC         "\xEE\x80\xA7"
 
 static const char *const theme_names[] = {
 	"Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
@@ -360,8 +397,8 @@ static char wifi_sub[WIFI_MAX][72], wifi_items_sub[48], wifi_kb_ssid[33];
 static void wifi_apply(void);
 
 static const node_t eq_items[] = {
-	OPT(LV_SYMBOL_POWER, "Эквалайзер", eq_onoff, &s.eq_on, eq_apply),
-	OPT(LV_SYMBOL_LIST, "Пресет", eq_presets, &s.eq_preset, eq_apply),
+	OPT(ICON_EQ_TOGGLE, "Эквалайзер", eq_onoff, &s.eq_on, eq_apply),
+	OPT(ICON_PRESET, "Пресет", eq_presets, &s.eq_preset, eq_apply),
 	ACT(LV_SYMBOL_EDIT, "Настроить полосы", "свой пресет: колесо — полоса, клик — изменить", A_EQ),
 };
 static const node_t btn_items[] = {
@@ -373,77 +410,77 @@ static const node_t btn_items[] = {
 	OPT(LV_SYMBOL_PLAY, "«Пауза»: два нажатия", btn_act_names, &s.btn[XMB_BTN_PLAY][XMB_G_DOUBLE], NULL),
 	OPT(LV_SYMBOL_PREV, "«Пред. трек»: нажатие", btn_act_names, &s.btn[XMB_BTN_SCREEN][XMB_G_SHORT], NULL),
 	OPT(LV_SYMBOL_PREV, "«Пред. трек»: два нажатия", btn_act_names, &s.btn[XMB_BTN_SCREEN][XMB_G_DOUBLE], NULL),
-	ACT(LV_SYMBOL_REFRESH, "Как было", "вернуть назначения по умолчанию", A_BTN_RESET),
+	ACT(ICON_RESET, "Как было", "вернуть назначения по умолчанию", A_BTN_RESET),
 };
 static const char *const wifi_onoff[] = { "Включён", "Выключен", NULL };
 static node_t wifi_items[] = {
 	OPT(LV_SYMBOL_WIFI, "Wi-Fi", wifi_onoff, &s.wifi_off, wifi_apply),
-	{ LV_SYMBOL_LIST, "Сети", wifi_items_sub, wifi_nodes, 1 },
+	{ ICON_WIFI_NETWORKS, "Сети", wifi_items_sub, wifi_nodes, 1 },
 };
 static node_t bt_items[] = {
 	OPT(LV_SYMBOL_BLUETOOTH, "Bluetooth", bt_onoff, &s.bt_off, bt_apply),
-	{ LV_SYMBOL_LIST, "Устройства", bt_dev_sub, bt_nodes, 1 },
-	OPT(LV_SYMBOL_AUDIO, "Кодек", codecs, &s.codec, bt_codec_apply),
+	{ ICON_BT_DEVICES, "Устройства", bt_dev_sub, bt_nodes, 1 },
+	OPT(ICON_CODEC, "Кодек", codecs, &s.codec, bt_codec_apply),
 };
 /* «О системе»: подписи заполняет about_fill при входе */
 static char about_sub[5][64];
 static node_t about_items[] = {
-	{ .icon = LV_SYMBOL_SETTINGS, .title = "XMB", .sub = about_sub[0] },
-	{ .icon = LV_SYMBOL_AUDIO, .title = "Библиотека", .sub = about_sub[1] },
+	{ .icon = ICON_XMB, .title = "XMB", .sub = about_sub[0] },
+	{ .icon = ICON_LIBRARY, .title = "Библиотека", .sub = about_sub[1] },
 	{ .icon = LV_SYMBOL_SD_CARD, .title = "Карта памяти", .sub = about_sub[2] },
 	{ .icon = LV_SYMBOL_BATTERY_FULL, .title = "Батарея", .sub = about_sub[3] },
-	{ .icon = LV_SYMBOL_HOME, .title = "Устройство", .sub = "HiBy R3II 2025 · Ingenic X1600E" },
+	{ .icon = ICON_DEVICE, .title = "Устройство", .sub = "HiBy R3II 2025 · Ingenic X1600E" },
 	{ .icon = LV_SYMBOL_FILE, .title = "Лицензия", .sub = "GPL-3.0 · github.com/Anded116/r3ii-xmb" },
 };
 
 static const node_t sound_items[] = {
-	DIR(LV_SYMBOL_BARS, "Эквалайзер", NULL, eq_items),
+	DIR(ICON_EQUALIZER, "Эквалайзер", NULL, eq_items),
 	OPT(LV_SYMBOL_VOLUME_MAX, "Усиление", gain_names, &s.gain, apply_gain),
-	OPT(LV_SYMBOL_SHUFFLE, "ReplayGain", rg_names, &s.rg_mode, apply_rg),
-	OPT(LV_SYMBOL_LOOP, "Кроссфейд", xfade_names, &s.xfade, apply_xfade),
+	OPT(ICON_REPLAYGAIN, "ReplayGain", rg_names, &s.rg_mode, apply_rg),
+	OPT(ICON_CROSSFADE, "Кроссфейд", xfade_names, &s.xfade, apply_xfade),
 };
 static const node_t screen_items[] = {
-	{ LV_SYMBOL_IMAGE, "Тема оформления", NULL, NULL, 0, theme_names, &s.theme, apply_theme, theme_colors, A_NONE, 0 },
-	OPT(LV_SYMBOL_REFRESH, "Фон", wave_names, &s.wave, apply_wave),
-	OPT(LV_SYMBOL_EYE_OPEN, "Яркость", bright_names, &s.bright, apply_bright),
-	OPT(LV_SYMBOL_EDIT, "Размер интерфейса", size_names, &s.ui_size, apply_size),
-	OPT(LV_SYMBOL_IMAGE, "Вид альбомов", album_views, &s.album_view, NULL),
+	{ ICON_THEME, "Тема оформления", NULL, NULL, 0, theme_names, &s.theme, apply_theme, theme_colors, A_NONE, 0 },
+	OPT(ICON_WAVE, "Фон", wave_names, &s.wave, apply_wave),
+	OPT(ICON_BRIGHTNESS, "Яркость", bright_names, &s.bright, apply_bright),
+	OPT(ICON_UI_SIZE, "Размер интерфейса", size_names, &s.ui_size, apply_size),
+	OPT(ICON_ALBUM_VIEW, "Вид альбомов", album_views, &s.album_view, NULL),
 	OPT(LV_SYMBOL_EYE_CLOSE, "Гашение экрана", screen_names, &s.screen_off, NULL),
-	OPT(LV_SYMBOL_AUDIO, "Фон плеера", player_bg_names, &s.player_bg, NULL),
-	OPT(LV_SYMBOL_AUDIO, "Мини-плеер", mini_names, &s.mini_style, apply_mini),
+	OPT(ICON_PLAYER_BG, "Фон плеера", player_bg_names, &s.player_bg, NULL),
+	OPT(ICON_MINI_PLAYER, "Мини-плеер", mini_names, &s.mini_style, apply_mini),
 	OPT(LV_SYMBOL_LEFT, "Рамка: левый край", edge_names, &s.edge_l, apply_edges),
 	OPT(LV_SYMBOL_RIGHT, "Рамка: правый край", edge_names, &s.edge_r, apply_edges),
 };
 static const char *const kb_start_names[] = { "Английская", "Русская", "Последняя", NULL };
 static const char *const kb_langs_names[] = { "Английская и русская", "Только английская", NULL };
 static const node_t kb_items[] = {
-	OPT(LV_SYMBOL_KEYBOARD, "Раскладка при открытии", kb_start_names, &s.kb_start, NULL),
-	OPT(LV_SYMBOL_KEYBOARD, "Раскладки", kb_langs_names, &s.kb_langs, NULL),
+	OPT(ICON_KB_START, "Раскладка при открытии", kb_start_names, &s.kb_start, NULL),
+	OPT(ICON_KB_LAYOUTS, "Раскладки", kb_langs_names, &s.kb_langs, NULL),
 };
 static const node_t control_items[] = {
-	DIR(LV_SYMBOL_KEYBOARD, "Кнопки", "что делают кнопки на корпусе", btn_items),
+	DIR(ICON_BUTTONS, "Кнопки", "что делают кнопки на корпусе", btn_items),
 	DIR(LV_SYMBOL_KEYBOARD, "Клавиатура", "раскладка при открытии", kb_items),
-	OPT(LV_SYMBOL_GPS, "Сенсорное управление", onoff, &s.touch_off, NULL),
+	OPT(ICON_TOUCH, "Сенсорное управление", onoff, &s.touch_off, NULL),
 };
 static const node_t power_items[] = {
-	OPT(LV_SYMBOL_POWER, "Таймер сна", sleep_names, &s.sleep, sleep_start),
-	OPT(LV_SYMBOL_POWER, "Сон устройства", dev_sleep_names, &s.dev_sleep, NULL),
+	OPT(ICON_SLEEP_TIMER, "Таймер сна", sleep_names, &s.sleep, sleep_start),
+	OPT(ICON_DEV_SLEEP, "Сон устройства", dev_sleep_names, &s.dev_sleep, NULL),
 };
 static const node_t system_items[] = {
 	ACT(ICON_STOCK, "Стоковый плеер", "обновление прошивки", A_STOCK),
-	{ LV_SYMBOL_SETTINGS, "О системе", "HiBy R3II 2025 · XMB", about_items, N(about_items) },
+	{ ICON_INFO, "О системе", "HiBy R3II 2025 · XMB", about_items, N(about_items) },
 };
 
 static const node_t set_items[] = {
-	DIR(LV_SYMBOL_AUDIO, "Звук", "эквалайзер, усиление, ReplayGain", sound_items),
-	DIR(LV_SYMBOL_IMAGE, "Экран", "тема, фон, яркость, размер", screen_items),
+	DIR(ICON_SOUND, "Звук", "эквалайзер, усиление, ReplayGain", sound_items),
+	DIR(ICON_SCREEN, "Экран", "тема, фон, яркость, размер", screen_items),
 	DIR(LV_SYMBOL_BLUETOOTH, "Bluetooth", NULL, bt_items),
 	DIR(LV_SYMBOL_WIFI, "Wi-Fi", wifi_items_sub, wifi_items),
-	DIR(LV_SYMBOL_KEYBOARD, "Управление", "кнопки, клавиатура, сенсор", control_items),
+	DIR(ICON_CONTROLS, "Управление", "кнопки, клавиатура, сенсор", control_items),
 	DIR(LV_SYMBOL_POWER, "Питание", "таймер сна, сон устройства", power_items),
 	ACT(LV_SYMBOL_USB, "USB", "карта или ЦАП — компьютеру по кабелю", A_USB),
 	OPT(ICON_LANGUAGE, "Язык · Language", lang_names, &s.lang, apply_lang),
-	DIR(LV_SYMBOL_SETTINGS, "Система", "стоковый плеер, о системе", system_items),
+	DIR(ICON_SYSTEM, "Система", "стоковый плеер, о системе", system_items),
 };
 /* «Музыка» и «Папки» строятся из библиотеки после сканирования */
 static char scan_sub[48];
@@ -455,7 +492,7 @@ enum { CAT_SETTINGS, CAT_MUSIC, CAT_PLAYLISTS, CAT_FOLDERS };
 static cat_t cats[] = {
 	{ LV_SYMBOL_SETTINGS, "Настройки", set_items, N(set_items) },
 	{ LV_SYMBOL_AUDIO, "Музыка", scanning, 1 },
-	{ LV_SYMBOL_LIST, "Плейлисты", scanning, 1 },
+	{ ICON_PLAYLIST, "Плейлисты", scanning, 1 },
 	{ LV_SYMBOL_DIRECTORY, "Папки", scanning, 1 },
 };
 enum { MUSIC_QUEUE, MUSIC_ALBUMS, MUSIC_ARTISTS, MUSIC_ALL, MUSIC_PODCASTS, MUSIC_SEARCH, MUSIC_COUNT };
@@ -1701,15 +1738,15 @@ static void library_build(void)
 		all[i].cover = L->albums[L->tracks[L->by_title[i]].aidx].cover;
 	}
 	if (L->ntracks) {
-		music[MUSIC_QUEUE] = (node_t){ .icon = LV_SYMBOL_NEXT, .title = "Очередь", .sub = "пусто" };   /* q_changed */
-		music[MUSIC_ALBUMS] = (node_t){ .icon = LV_SYMBOL_IMAGE, .title = "Альбомы", .kids = albums, .nkids = nmusic, .grid = 1 };
+		music[MUSIC_QUEUE] = (node_t){ .icon = ICON_QUEUE, .title = "Очередь", .sub = "пусто" };   /* q_changed */
+		music[MUSIC_ALBUMS] = (node_t){ .icon = ICON_ALBUMS, .title = "Альбомы", .kids = albums, .nkids = nmusic, .grid = 1 };
 		music[MUSIC_ARTISTS] = (node_t){ .icon = ICON_ARTISTS, .title = "Исполнители", .kids = artists, .nkids = L->nartists };
-		music[MUSIC_ALL] = (node_t){ .icon = LV_SYMBOL_LIST, .title = "Все треки", .kids = all,
+		music[MUSIC_ALL] = (node_t){ .icon = ICON_TRACKS, .title = "Все треки", .kids = all,
 					     .nkids = L->nby_title };
-		music[MUSIC_PODCASTS] = (node_t){ .icon = LV_SYMBOL_DOWNLOAD, .title = "Подкасты", .sub = pod_sub, .kids = pod_nodes,
+		music[MUSIC_PODCASTS] = (node_t){ .icon = ICON_PODCASTS, .title = "Подкасты", .sub = pod_sub, .kids = pod_nodes,
 						  .nkids = npod + 1 };
 		pod_labels();
-		music[MUSIC_SEARCH] = (node_t){ .icon = LV_SYMBOL_EYE_OPEN, .title = "Поиск", .sub = "исполнители, альбомы, треки",
+		music[MUSIC_SEARCH] = (node_t){ .icon = ICON_SEARCH, .title = "Поиск", .sub = "исполнители, альбомы, треки",
 						.action = A_SEARCH };
 		lib_artists = artists;
 		lib_albums = albums;
@@ -2188,7 +2225,7 @@ static void playlists_build(void)
 	node_t *v = calloc(s.npl + 1, sizeof(node_t));
 	for (int i = 0; i < s.npl; i++) {
 		const playlist_t *p = &s.pls[i];
-		v[i].icon = i == PL_FAVORITES ? LV_SYMBOL_OK : LV_SYMBOL_LIST;
+		v[i].icon = i == PL_FAVORITES ? ICON_FAVORITES : ICON_PLAYLIST;
 		v[i].title = p->name;
 		if (p->n) {
 			node_t *k = track_nodes(p->tracks, p->n);
@@ -3006,10 +3043,10 @@ static void reveal_dir(void)
 
 enum { PX_QUEUE, PX_ALBUM, PX_DIR, PX_EQ, PX_PRESET, PX_SLEEP, PX_AB, PX_GAIN, PX_RG };
 
-static const node_t px_preset = OPT(LV_SYMBOL_LIST, "Пресет эквалайзера", eq_presets, &s.eq_preset, eq_apply);
-static const node_t px_sleep = OPT(LV_SYMBOL_POWER, "Таймер сна", sleep_names, &s.sleep, sleep_start);
+static const node_t px_preset = OPT(ICON_PRESET, "Пресет эквалайзера", eq_presets, &s.eq_preset, eq_apply);
+static const node_t px_sleep = OPT(ICON_SLEEP_TIMER, "Таймер сна", sleep_names, &s.sleep, sleep_start);
 static const node_t px_gain = OPT(LV_SYMBOL_VOLUME_MAX, "Усиление", gain_names, &s.gain, apply_gain);
-static const node_t px_rg = OPT(LV_SYMBOL_SHUFFLE, "ReplayGain", rg_names, &s.rg_mode, apply_rg);
+static const node_t px_rg = OPT(ICON_REPLAYGAIN, "ReplayGain", rg_names, &s.rg_mode, apply_rg);
 
 static struct {
 	int choice, n, act[10];

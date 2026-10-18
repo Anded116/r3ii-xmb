@@ -21,7 +21,12 @@ from shapely.geometry import Polygon
 from shapely.geometry.polygon import orient
 from shapely.ops import unary_union
 
-ICONS = ['artists', 'language', 'stock']
+ICONS = ['artists', 'language', 'stock', 'queue', 'albums', 'podcasts', 'search', 'library',
+        'playlist', 'tracks', 'favorites', 'xmb', 'info', 'sound', 'screen', 'controls', 'system',
+        'device', 'equalizer', 'eq_toggle', 'preset', 'replaygain', 'crossfade', 'theme', 'wave',
+        'brightness', 'ui_size', 'album_view', 'player_bg', 'mini_player', 'buttons', 'touch',
+        'reset', 'sleep_timer', 'dev_sleep', 'kb_layouts', 'kb_start', 'bt_devices',
+        'wifi_networks', 'codec']
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 U = 50   # единиц шрифта на единицу SVG
 EM = 20 * U
