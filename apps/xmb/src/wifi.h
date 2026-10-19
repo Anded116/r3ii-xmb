@@ -16,7 +16,9 @@ void wifi_init(int on);
 void wifi_power(int on);
 /* перед глубоким сном: остановить радио (драйвер Broadcom держит блокировку сна, и ядро отвечает EBUSY),
  * park = 0 — после сна поднять снова, если было включено */
-void wifi_park(int park);
+/* выключить радио перед сном (1) и вернуть после (0). 1: −1 — драйвер не ответил (Wi-Fi завис после сна): так до
+ * перезагрузки, в mem с ним нельзя — плеер виснет насовсем */
+int wifi_park(int park);
 void wifi_scan(void);
 void wifi_connect(const char *ssid, const char *psk);   /* psk = NULL — сохранённая или открытая сеть */
 void wifi_forget(const char *ssid);

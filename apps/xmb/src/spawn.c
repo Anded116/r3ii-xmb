@@ -125,3 +125,19 @@ int sp_system(const char *cmd)
 	}
 	return st;
 }
+
+int sp_system_timeout(const char *cmd, int ms)
+{
+	pid_t pid = spawn(cmd, -1, 0);
+	if (pid < 0)
+		return -1;
+	int st = -1;
+	for (int t = 0; t <= ms; t += 20) {
+		pid_t r = waitpid(pid, &st, WNOHANG);
+		if (r == pid || (r < 0 && errno != EINTR))
+			return st;
+		usleep(20000);
+	}
+	bb("команда не завершилась за %d мс: %.60s", ms, cmd);
+	return -2;
+}

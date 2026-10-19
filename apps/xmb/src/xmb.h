@@ -40,7 +40,7 @@ void xmb_restart_prepare(void);
  * перед сном — пауза, позиция сохранена, экран погашен (mem — настоящий сон: ещё трек закрыт и радио выключено);
  * время последнего ввода — отмена отсчёта касанием */
 void xmb_sleep_countdown(int left, const char *hint);
-void xmb_sleep_prepare(int mem);
+int xmb_sleep_prepare(int mem);   /* −1 — Wi-Fi не выключился: в mem нельзя, только экран */
 void xmb_sleep_end(void);   /* после сна (или неудачной попытки): радио — как было */
 uint32_t xmb_last_input(void);
 /* USB: подключён компьютер (предложить накопитель); запрос «накопитель» из меню; перед отдачей карты — всё

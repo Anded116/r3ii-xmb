@@ -289,6 +289,7 @@ static struct {
 	lv_obj_t *opt_panel, *opt_rows[MAX_OPTS], *opt_checks[MAX_OPTS], *opt_sw[MAX_OPTS];
 	column_t cat_col[8], stack[MAX_DEPTH];   /* stack[d] — вложенный уровень d (с 1) */
 	int cat, at_cats, depth, screen_on, glow_x, glow_y, glow_sz;
+	int wifi_hung;   /* Wi-Fi не выключился перед сном: 1 — сказать при включении экрана, 2 — сказано */
 	int act_kind;             /* фоновая работа в статус-баре: 0 — нет, 1 — скан библиотеки, 2 — подкасты */
 	double act_frac, act_phase;   /* доля (−1 — неизвестна: бежит отрезок) и фаза бегущего отрезка */
 	char act_text[64];
@@ -5436,6 +5437,10 @@ static void spectrum_update(void)
 static void screen(int on)
 {
 	s.screen_on = on;
+	if (on && s.wifi_hung == 1) {
+		s.wifi_hung = 2;
+		toast("%s", "Wi-Fi завис — без глубокого сна до перезагрузки");
+	}
 	spectrum_update();
 	set_hidden(s.off, on);
 	s.input_ms = lv_tick_get();
@@ -5783,8 +5788,9 @@ void xmb_sleep_countdown(int left, const char *hint)
 	set_hidden(sleep_ov, false);
 }
 
-void xmb_sleep_prepare(int mem)
+int xmb_sleep_prepare(int mem)
 {
+	int ok = 0;
 	if (s.playing)
 		toggle_play();
 	/* карта во сне теряет питание: открытый на ней трек после пробуждения роняет ядро на первом «играть» —
@@ -5796,11 +5802,14 @@ void xmb_sleep_prepare(int mem)
 		plan_next();
 		printf("сон: трек закрыт на %.1f с\n", s.pos);
 	}
-	if (mem)
-		wifi_park(1);
+	if (mem && wifi_park(1) < 0) {
+		ok = -1;
+		s.wifi_hung = 1;
+	}
 	save_flush();
 	xmb_sleep_countdown(-1, NULL);
 	screen(0);
+	return ok;
 }
 
 uint32_t xmb_last_input(void)

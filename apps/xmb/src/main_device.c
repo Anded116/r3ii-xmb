@@ -140,11 +140,15 @@ static int deep_sleep(void)
 {
 	/* XMB_FORCE_MEM — проверка сна на кабеле (сценарий mem): иначе компьютер разбудил бы сразу */
 	int slept = 0, host = usb_host() && !getenv("XMB_FORCE_MEM");
-	xmb_sleep_prepare(!host);
+	int radio = xmb_sleep_prepare(!host);
 	screen_set(0);
 	/* компьютер на кабеле будит сразу же, а переподключение USB после пробуждения рвёт adb — только гасим экран */
 	if (host) {
 		printf("на кабеле компьютера — без сна, экран погашен\n");
+		return 1;
+	}
+	if (radio < 0) {   /* сон с невыключенным Wi-Fi вешает плеер насовсем */
+		bb("сон: без mem — Wi-Fi не выключился");
 		return 1;
 	}
 	audio_power_down();

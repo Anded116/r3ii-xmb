@@ -383,24 +383,33 @@ void wifi_init(int on)
 }
 #endif
 
-void wifi_park(int park)
+int wifi_park(int park)
 {
 #if XMB_DEVICE
+	static int hung;
+	if (park && hung)
+		return -1;
 	if (park && w.power) {
 		w.parked = 1;
 		w.power = 0;
-		sp_system("killall udhcpc wpa_supplicant > /dev/null 2>&1; ifconfig wlan0 down");
+		/* драйвер, вставший на шине SDIO, держит ifconfig в ядре навсегда — не ждать дольше 5 с */
+		if (sp_system_timeout("killall udhcpc wpa_supplicant > /dev/null 2>&1; ifconfig wlan0 down", 5000) == -2) {
+			fprintf(stderr, "wifi: драйвер не отвечает — без глубокого сна до перезагрузки\n");
+			hung = 1;
+		}
 		pthread_mutex_lock(&w.mu);
 		w.online = 0;
 		w.gen++;
 		pthread_mutex_unlock(&w.mu);
-	} else if (!park && w.parked) {
+		return hung ? -1 : 0;
+	} else if (!park && w.parked && !hung) {
 		w.parked = 0;
 		post(OP_POWER, 1, NULL, NULL);
 	}
 #else
 	(void)park;
 #endif
+	return 0;
 }
 
 void wifi_power(int on)
