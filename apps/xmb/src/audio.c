@@ -139,6 +139,7 @@ static struct {
 	int16_t rs_last[2];
 	int out_bits, s24_bad;   /* формат открытого PCM; s24_bad — драйвер 24 бита не принял, дальше только 16 */
 	int out_period;          /* кадров в периоде открытого PCM */
+	unsigned out_fill;       /* записано в PCM с открытия или сброса (до полного буфера) */
 	/* USB-ЦАП: /dev/uac_sa (−1 — нет), заявка интерфейса, частота потока с компьютера (0 — не идёт) */
 	int usb_fd, usb_rq_fd, usb_rq, usb_rate;
 	uint32_t usb_last_ms;   /* когда пришёл последний пакет */
@@ -730,6 +731,7 @@ static int out_open(int rate)
 	}
 	a.out_rate = rate;
 	a.out_period = period;
+	a.out_fill = 0;
 	return 0;
 }
 
@@ -738,6 +740,7 @@ static void out_drop(void)
 {
 	if (a.pcm)
 		pcm_stop(a.pcm);
+	a.out_fill = 0;
 }
 
 static void out_write(const int32_t *buf, unsigned frames)
@@ -747,7 +750,10 @@ static void out_write(const int32_t *buf, unsigned frames)
 		to_s16(buf, s16, frames);
 	if (a.bt_pipe)
 		bt_write(s16, frames);
-	else if (a.pcm && pcm_writei(a.pcm, a.out_bits == 16 ? (const void *)s16 : (const void *)buf, frames) < 0) {
+	else if (a.pcm && pcm_writei(a.pcm, a.out_bits == 16 ? (const void *)s16 : (const void *)buf, frames) >= 0) {
+		if (a.out_fill < 1u << 30)   /* нужно лишь «больше буфера» — без переполнения за часы игры */
+			a.out_fill += frames;
+	} else if (a.pcm) {
 		/* недогрузка (поток не успел) — слышна щелчком: считать и раз в 10 с писать в журнал */
 		static unsigned xruns;
 		static time_t said;
@@ -758,6 +764,7 @@ static void out_write(const int32_t *buf, unsigned frames)
 				pcm_get_error(a.pcm));
 		}
 		pcm_prepare(a.pcm);
+		a.out_fill = 0;
 	}
 }
 
@@ -1017,6 +1024,7 @@ static void apply_rg(int32_t *buf, unsigned n, float k)
 static volatile int spec_on = 1;   /* считать спектр: только пока экран включён */
 static void open_request(void);
 static void out_drop(void);
+static void vz_clear(void);
 
 /* заявки интерфейса — в том порядке, в каком их отменяют друг друга (под a.mu) */
 static void take_cmds(void)
@@ -1055,16 +1063,92 @@ static void take_cmds(void)
 		a.nx_xfade = c.next_xfade;
 		a.nx_rg = c.next_rg;
 	}
-	if (c.pause && c.pause_v && !a.paused)
+	if (c.pause && c.pause_v && !a.paused) {
 		out_drop();   /* пауза — сразу: накопленное в буфере PCM не доигрывать */
+		vz_clear();
+	}
 	if (c.pause)
 		a.paused = c.pause_v;
 	if (c.seek) {
 		a.seek_to = c.seek_v;
 		a.ended = 0;
 	}
-	if (c.seek || c.play)
+	if (c.seek || c.play) {
 		out_drop();   /* новое место или трек — без хвоста старого */
+		vz_clear();
+	}
+}
+
+/* визуализатор: уровень и спектр куска — вместе со временем, когда он зазвучит (кусок ложится в конец буфера
+ * вывода, до динамика ему ещё 50–190 мс). Интерфейс берёт последний зазвучавший — картинка не опережает звук */
+#define VZ_N 32
+static struct {
+	pthread_mutex_t mu;
+	unsigned w;
+	struct vz_e { uint32_t due; float level, spec[AUDIO_BANDS]; } e[VZ_N];
+} vz = { .mu = PTHREAD_MUTEX_INITIALIZER };
+
+static uint32_t vz_ms(void)
+{
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (uint32_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
+}
+
+/* кадров в буфере вывода перед куском из got кадров. Без запроса к драйверу (у HBC3000 любой лишний ioctl —
+ * риск): запись блокирующая, поэтому буфер полон, и кусок ложится за bufsize − got кадрами; сразу после открытия
+ * или сброса вывод ещё не начат (старт — по полному буферу) — за всем, что записано до него */
+static unsigned out_delay(unsigned got)
+{
+#if XMB_DEVICE
+	if (!a.pcm)
+		return 0;
+	unsigned buf = (unsigned)a.out_period * 4, d = buf > got ? buf - got : 0;
+	return a.out_fill < d ? a.out_fill : d;
+#else
+	(void)got;
+	return a.dev ? SDL_GetQueuedAudioSize(a.dev) / 4 + CHUNK : 0;
+#endif
+}
+
+static void vz_push(int rate, unsigned got)
+{
+	pthread_mutex_lock(&vz.mu);
+	struct vz_e *e = &vz.e[vz.w++ % VZ_N];
+	e->due = vz_ms() + (uint32_t)((uint64_t)out_delay(got) * 1000 / (unsigned)rate);
+	e->level = a.level;
+	memcpy(e->spec, a.spec, sizeof(e->spec));
+	pthread_mutex_unlock(&vz.mu);
+}
+
+static void vz_clear(void)
+{
+	pthread_mutex_lock(&vz.mu);
+	vz.w = 0;
+	pthread_mutex_unlock(&vz.mu);
+}
+
+/* последний зазвучавший кусок; давно ничего не звучало (пауза, конец) — тишина */
+static void vz_take(float *level, float *spec)
+{
+	uint32_t now = vz_ms();
+	int best = -1;
+	pthread_mutex_lock(&vz.mu);
+	unsigned n = vz.w < VZ_N ? vz.w : VZ_N;
+	for (unsigned i = 0; i < n; i++) {
+		int k = (int)((vz.w - 1 - i) % VZ_N);
+		if ((int32_t)(now - vz.e[k].due) >= 0) {
+			if ((int32_t)(now - vz.e[k].due) < 150)
+				best = k;
+			break;
+		}
+	}
+	*level = best >= 0 ? vz.e[best].level : 0;
+	if (best >= 0)
+		memcpy(spec, vz.e[best].spec, sizeof(vz.e[best].spec));
+	else
+		memset(spec, 0, sizeof(float) * AUDIO_BANDS);
+	pthread_mutex_unlock(&vz.mu);
 }
 
 /* готовый кусок (24 бита в int32) — уровень, эквалайзер, спектр и в вывод; общее для файла и USB-ЦАПа */
@@ -1078,20 +1162,22 @@ static void play_buf(int32_t *buf, unsigned got, int rate)
 	if (eq.on)
 		eq_process(buf, got);
 	/* экран погашен или фону спектр не нужен — не считать; фон обновляется 45 раз в секунду, а куски
-	 * на 96 кГц идут под сотню в секунду — БПФ не чаще 25 раз */
+	 * на 96 кГц идут под сотню в секунду — БПФ не чаще 50 раз */
 	static unsigned spec_frames;
 	spec_frames += got;
-	if (spec_on && spec_frames >= (unsigned)rate / 25) {
+	if (spec_on && spec_frames >= (unsigned)rate / 50) {
 		spec_frames = 0;
 		spectrum(buf, got, rate);
 	}
 #if XMB_DEVICE
 	a.idle = 0;
 #endif
-	if (out_open(rate) == 0)
+	if (out_open(rate) == 0) {
+		vz_push(rate, got);
 		out_write(buf, got);
-	else
+	} else {
 		usleep(20000);
+	}
 }
 
 #if XMB_DEVICE
@@ -1490,8 +1576,7 @@ void audio_get_status(audio_status_t *st)
 	else
 		st->dur = c->total && c->rate ? (double)(c->total - c->start_f) / c->rate : c->dur_hint;
 	snprintf(st->codec, sizeof(st->codec), "%s", c->codec == C_FLAC ? "FLAC" : c->codec == C_MP3 ? "MP3" : c->codec == C_WAV ? "WAV" : c->codec == C_ALAC ? "ALAC" : c->codec == C_AAC ? "AAC" : "");
-	st->level = a.level;
-	memcpy(st->spec, a.spec, sizeof(st->spec));
+	vz_take(&st->level, st->spec);
 	pthread_mutex_lock(&cmd.mu);
 	int pend = cmd.play;   /* заявка ещё не забрана потоком */
 	double pend_dur = cmd.play_dur;

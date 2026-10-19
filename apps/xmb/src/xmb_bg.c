@@ -37,7 +37,8 @@ static uint16_t band[W * BAND_H];
 static lv_image_dsc_t img, dim_img, band_img;
 static lv_obj_t *image, *wave;
 static bg_wave_t style = BG_WAVE_COUNT;
-static float spec[NSPEC], level;
+static float spec[NSPEC], raw[NSPEC], level;
+static wave_music_t music;
 static int band_y = BAND_Y;
 static int full = 1;        /* модулю — перерисовать всё (новый фон, стиль, место полосы) */
 static int dim, dim_done;   /* затемнение и для какого оно посчитано (0 — не посчитано) */
@@ -215,10 +216,12 @@ void bg_set_level(double l)
 	level = (float)(l < 0 ? 0 : l > 1 ? 1 : l);
 }
 
-void bg_set_spectrum(const float *v, int n)
+void bg_set_spectrum(const float *v, const float *r, int n)
 {
-	for (int i = 0; i < NSPEC; i++)
+	for (int i = 0; i < NSPEC; i++) {
 		spec[i] = i < n ? v[i] : 0;
+		raw[i] = i < n ? r[i] : 0;
+	}
 }
 
 /* мягкое белое пятно свечения size×size (ARGB8888), строится один раз на размер */
@@ -301,7 +304,8 @@ void bg_tick(double dt)
 	if (!module())
 		return;
 	t_sec += dt;
-	wave_frame_t f = { t_sec, dt, spec, level, full };
+	wave_music_update(&music, raw, (float)dt);
+	wave_frame_t f = { t_sec, dt, spec, level, full, &music };
 	wave_dirty_t d = { 0 };
 	module()->render(band, pixels + band_y * W, &f, &d);
 	merge_dirty(&d, 2);

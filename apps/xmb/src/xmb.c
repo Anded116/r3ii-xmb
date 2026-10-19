@@ -4280,12 +4280,13 @@ static void frame_cb(lv_timer_t *t)
 	bg_set_level(s.level);
 	bg_set_band(player_progress() > 0.5);
 	/* спектр: быстрая атака, медленный спад — полосы не дёргаются, но успевают за ударными */
-	static float sp[AUDIO_BANDS];
+	static float sp[AUDIO_BANDS], raw[AUDIO_BANDS];
 	for (int i = 0; i < AUDIO_BANDS; i++) {
-		float v = s.playing ? st.spec[i] : 0;
+		float v = s.playing || pc_playing() ? st.spec[i] : 0;
+		raw[i] = v;
 		sp[i] = v > sp[i] ? sp[i] + (v - sp[i]) * (float)fmin(1.0, dt * 28) : sp[i] + (v - sp[i]) * (float)fmin(1.0, dt * 5);
 	}
-	bg_set_spectrum(sp, AUDIO_BANDS);
+	bg_set_spectrum(sp, raw, AUDIO_BANDS);
 
 	if (s.screen_on) {
 		static int prof = -1;   /* замеры (XMB_SCRIPT): долгие раскладка и волна — в журнал */

@@ -1,7 +1,8 @@
 /* Звёздная пыль: светящиеся частицы текут слева направо вдоль невидимой плавной волны (лента), мерцают,
- * у части — гаснущие хвостики вдоль траектории. Басы (spec[0..4]) дают всплеск: частицы ярче, шире
- * разлетаются от линии, хвосты длиннее, ленту качает; спектр по ширине (басы слева) — местная яркость;
- * верха (spec[20..]) — искры: мелкие частицы вспыхивают.
+ * у части — гаснущие хвостики вдоль траектории. Музыка (wave_music.c): бочка — общий вздох (частицы ярче, шире
+ * разлетаются от линии, хвосты длиннее) и импульс, бегущий по ленте: где он проходит, пыль разбрасывает и
+ * зажигает; хэт — вспыхивают случайные частицы; малый барабан дёргает ленту, середина — её размах; поток быстрее,
+ * когда играет плотно; спектр по ширине (басы слева) — местная яркость.
  *
  * Перерисовка: у каждой частицы своё нарисованное состояние (целый x, y, уровень яркости, хвост).
  * Пересчитывается треть частиц за кадр; если состояние поменялось — старый и новый габарит попадают в
@@ -59,7 +60,11 @@ static par_t par[NP];
 static st_t st[NP];
 static int16_t bx1[NP], by1[NP], bx2[NP], by2[NP];
 static uint32_t flow16, flow_s, rng;
-static int lvs, ebase, burst, hi, started, frame_n;
+static int burst, started, frame_n;
+static wave_pulses_t pl;        /* импульсы бочки по ленте */
+static int pls[WAVE_W];         /* их сумма по столбцам, 0..256 */
+static uint8_t spk[NP];         /* вспышка частицы от хэта, спадает */
+static unsigned last_hat;
 static int spec8[WAVE_BANDS];
 static int amp1, amp2, p1, p2, p3;
 static uint32_t tq;
@@ -103,7 +108,9 @@ static void init(void)
 		p->x0 = rnd() % XR;
 	}
 	flow16 = flow_s = 0;
-	lvs = ebase = burst = frame_n = 0;
+	burst = frame_n = 0;
+	memset(&pl, 0, sizeof(pl));
+	memset(spk, 0, sizeof(spk));
 	started = 0;
 }
 
@@ -124,14 +131,13 @@ static void calc(int i, st_t *s)
 	int c = cy_of(x);
 	int wd = 9 + (((sintab[((x * 640 >> 8) + p3) & (SIN_N - 1)] + 1024) * 11) >> 11);
 	int wob = sintab[((tq * p->wsp >> 5) + p->wph * 4) & (SIN_N - 1)] >> 10;
-	int y = c + ((p->lane * wd) >> 7) + ((p->lane * burst) >> 10) + wob;
+	int y = c + ((p->lane * wd) >> 7) + ((p->lane * (burst + pls[xc] * 3 / 2)) >> 10) + wob;
 	y = y < 3 ? 3 : y > WAVE_H - 4 ? WAVE_H - 4 : y;
 	int tw = sintab[((tq * p->tsp >> 4) + p->tph * 4) & (SIN_N - 1)];
 	int a = p->b0 * (176 + (tw >> 4)) >> 8;
 	a = (a * (190 + (spec8[xc * 204 >> 11] * 120 >> 8))) >> 8;
-	a += burst * 140 >> 8;
-	if (p->sz == 0 && tw > 0)   /* верха — искры: мелкие частицы вспыхивают на пике мерцания */
-		a += (hi * tw) >> 11;
+	a += (burst * 60 + pls[xc] * 150) >> 8;
+	a += spk[i];
 	a = a > 255 ? 255 : a;
 	s->ix = (int16_t)x;
 	s->iy = (int16_t)y;
@@ -139,7 +145,7 @@ static void calc(int i, st_t *s)
 	s->tl = 0;
 	s->ts = 0;
 	if (p->tail) {
-		int l = p->tail + (burst >> 5);
+		int l = p->tail + ((burst + pls[xc]) >> 5);
 		s->tl = (uint8_t)(l > 6 ? 6 : l);
 		int ts = c - cy_of(x - 4);
 		s->ts = (int8_t)(ts < -8 ? -8 : ts > 8 ? 8 : ts);
@@ -268,32 +274,30 @@ static void render(uint16_t *dst, const uint16_t *bg, const wave_frame_t *f, wav
 	tq = (uint32_t)(f->t * 256.0);
 	int dtq = (int)(f->dt * 1024.0);
 	dtq = dtq < 0 ? 0 : dtq > 60 ? 60 : dtq;
-	int lv = (int)(f->level * 256.0f);
-	lvs += (lv - lvs) >> 3;
-	int e = 0;
+	static const wave_music_t calm;
+	const wave_music_t *m = f->m ? f->m : &calm;
+	float dts = f->dt > 0.1 ? 0.1f : (float)f->dt;
 	for (int b = 0; b < WAVE_BANDS; b++) {
 		int v = (int)(f->spec[b] * 256.0f);
 		spec8[b] = v < 0 ? 0 : v > 256 ? 256 : v;
-		if (b < 5)
-			e += spec8[b];
 	}
-	e /= 5;
-	hi = 0;
-	for (int b = 20; b < WAVE_BANDS; b++)
-		hi += spec8[b];
-	hi /= WAVE_BANDS - 20;
-	int k = e - ebase - 12;
-	ebase += (e - ebase) >> 4;
-	if (k * 5 / 2 > burst)
-		burst = k * 5 / 2 > 256 ? 256 : k * 5 / 2;
-	else
-		burst = burst * 228 >> 8;
-	amp1 = 26 + (lvs * 24 >> 8);
-	amp2 = 6 + (lvs * 10 >> 8) + (burst >> 4);
+	burst = (int)(m->kick * 160);
+	wave_pulses_update(&pl, m, dts, pls);
+	int dec = (int)(256 * expf(-dts / 0.12f));
+	for (int i = 0; i < NP; i++)
+		spk[i] = (uint8_t)(spk[i] * dec >> 8);
+	if (m->hats != last_hat) {
+		last_hat = m->hats;
+		int a = 120 + (int)(m->hat * 135);
+		for (int n = 6 + (int)(m->hat * 14); n > 0; n--)
+			spk[rnd() % NP] = (uint8_t)a;
+	}
+	amp1 = 22 + (int)(m->mid_att * 30);
+	amp2 = 6 + (int)(m->bass_att * 8 + m->snare * 18);
 	p1 = (int)(tq * 4 / 9);
 	p2 = (int)(tq * 4 / 5);
 	p3 = (int)(tq * 4 / 13);
-	flow_s += (uint32_t)dtq * (480 * (256 + (lvs >> 2) + (burst >> 1)) >> 8);
+	flow_s += (uint32_t)dtq * (480 * (256 + (int)(m->energy * 200) + (int)(m->kick * 300)) >> 8);
 	flow16 = (flow16 + (flow_s >> 10)) % (256 * XR);
 	flow_s &= 1023;
 

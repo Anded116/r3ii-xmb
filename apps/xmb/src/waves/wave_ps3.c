@@ -1,7 +1,9 @@
 /* Волна PS3: «пучок» тонких светлых линий в двух слоях. Слой A (4 линии) течёт вправо, слой B (3 линии) —
  * влево и чаще вьётся. Форма — две синусоиды по таблице (целые 8.8), фазы слегка плывут, линии пересекаются.
- * Спектр столбца растягивает пучок от центральной линии (с запасом: край пучка не выходит из полосы) и
- * делает ярче; в тишине — ровное течение. Сглаживание — ядро по дробной части y и наклону линии
+ * Музыка (wave_music.c): пучок дышит на сглаженном басу, каждая бочка пускает по ленте импульс — пучок вспухает
+ * и светлеет, и это место бежит слева направо; течение быстрее, когда играет плотно, и с рывком на бочке; малый
+ * барабан на миг разводит линии веером; спектр столбца — лёгкая неровность (растяжение — с запасом: край пучка
+ * не выходит из полосы). В тишине — ровное течение. Сглаживание — ядро по дробной части y и наклону линии
  * (без ступенек на крутых местах, яркость вдоль линии ровная). Слои обновляются через кадр: у слоя
  * линии близки друг к другу, поэтому один набор прямоугольников dirty накрывает слой целиком;
  * сумма вкладов линий по пикселям лежит в acc, пересечения не портятся. */
@@ -61,6 +63,10 @@ static uint8_t nta[WAVE_W][6];
 static int uu[WAVE_W + 2];
 static int blo[NBLK], bhi[NBLK];
 static int ready, fc;
+static double ft;                       /* время течения: идёт быстрее, когда играет плотно */
+static int spread;                      /* разведение линий от центра, 8.8 */
+static wave_pulses_t pl;                /* импульсы бочки по ленте */
+static int pls[WAVE_W];                 /* их сумма по столбцам, 0..256 */
 
 static void init(void)
 {
@@ -112,6 +118,9 @@ static void init(void)
 		gmax = 256 * 2;
 	ready = 0;
 	fc = 0;
+	ft = 0;
+	spread = 256;
+	memset(&pl, 0, sizeof(pl));
 }
 
 static inline uint32_t turns32(double x)
@@ -127,7 +136,7 @@ static void thr_calc(int t, double tt, int16_t *orb, uint8_t *orn, uint8_t (*ota
 	double sh = -h->v * tt / WAVE_W, pd = h->ph / (2 * M_PI) + 0.04 * sin(2 * M_PI * h->wd * tt);
 	uint32_t ph1 = turns32(h->cyc * sh + pd), ph2 = turns32((2 * h->cyc + 1) * sh - 1.7 * pd + 0.04 * t);
 	uint32_t dk1 = (uint32_t)(h->cyc * 4294967296.0 / WAVE_W), dk2 = (uint32_t)((2 * h->cyc + 1) * 4294967296.0 / WAVE_W);
-	int off = (int)(h->off * 256), A1 = (int)(h->amp * 256 * (1 + 0.08 * sin(0.45 * tt + t * 1.7)));
+	int off = (int)(h->off * spread), A1 = (int)(h->amp * 256 * (1 + 0.08 * sin(0.45 * tt + t * 1.7)));
 	int A2 = (A1 * 77) >> 8;
 	for (int x = 0; x < WAVE_W; x++) {
 		int d = off + ((A1 * sn[ph1 >> 21]) >> 14) + ((A2 * sn[ph2 >> 21]) >> 14);
@@ -214,6 +223,12 @@ static void emit(wave_dirty_t *d, int m)
 
 static void render(uint16_t *dst, const uint16_t *bg, const wave_frame_t *f, wave_dirty_t *dirty)
 {
+	static const wave_music_t calm;
+	const wave_music_t *m = f->m ? f->m : &calm;
+	float dt = f->dt > 0.1 ? 0.1f : (float)f->dt;
+	ft += dt * (1 + 0.9f * m->energy + 1.6f * m->kick);
+	spread = 256 + (int)(m->snare * 320);
+	wave_pulses_update(&pl, m, dt, pls);
 	/* спектр -> столбцы (сглаженный между полосами) */
 	int s[WAVE_BANDS + 2], sm[WAVE_BANDS + 2];
 	for (int b = 0; b < WAVE_BANDS; b++) {
@@ -224,24 +239,23 @@ static void render(uint16_t *dst, const uint16_t *bg, const wave_frame_t *f, wav
 	s[WAVE_BANDS + 1] = s[WAVE_BANDS];
 	for (int b = 0; b < WAVE_BANDS + 2; b++)
 		sm[b] = b == 0 || b == WAVE_BANDS + 1 ? s[b] : (s[b - 1] + 2 * s[b] + s[b + 1]) >> 2;
-	int lvl = (int)(f->level * 256);
-	lvl = lvl < 0 ? 0 : lvl > 256 ? 256 : lvl;
+	int bass = (int)(m->bass_att * 256), sn = (int)(m->snare * 256);
 	for (int x = 0; x < WAVE_W; x++) {      /* cb может быть -1: это s[0] */
 		int b = cb[x] + 1;
 		int v = sm[b] + (((sm[b + 1] - sm[b]) * cf[x]) >> 8);
-		int e = (v * (102400 - 144 * v)) >> 16;
-		e += (lvl * 40) >> 8;
-		e = e > 256 ? 256 : e;
-		gx[x] = 256 + (((gmax - 256) * e * 160) >> 16);   /* пучок раскрывается умеренно: поверх — текст меню */
-		int m = 135 + ((v * 70) >> 8) + ((lvl * 20) >> 8);
-		mx[x] = (m * fade[x]) >> 8;
+		/* пучок раскрывается умеренно (поверх — текст меню), импульс бочки — сильнее */
+		int e = ((bass * 120) >> 8) + ((v * 40) >> 8) + ((pls[x] * 170) >> 8);
+		e = e > 230 ? 230 : e;
+		gx[x] = 256 + (((gmax - 256) * e) >> 8);
+		int br = 130 + ((bass * 40) >> 8) + ((v * 30) >> 8) + ((pls[x] * 140) >> 8) + ((sn * 50) >> 8);
+		mx[x] = (br * fade[x]) >> 8;
 	}
 
 	if (f->full || !ready) {
 		memcpy(dst, bg, sizeof(uint16_t) * WAVE_W * WAVE_H);
 		memset(acc, 0, sizeof(acc));
 		for (int t = 0; t < NT; t++) {
-			thr_calc(t, f->t, rb[t], rn[t], ta[t]);
+			thr_calc(t, ft, rb[t], rn[t], ta[t]);
 			for (int x = 0; x < WAVE_W; x++)
 				for (int k = 0; k < rn[t][x]; k++)
 					acc[(rb[t][x] + k) * WAVE_W + x] += ta[t][x][k];
@@ -265,7 +279,7 @@ static void render(uint16_t *dst, const uint16_t *bg, const wave_frame_t *f, wav
 		bhi[b] = -1;
 	}
 	for (int t = t0; t < t1; t++) {
-		thr_calc(t, f->t, nrb, nrn, nta);
+		thr_calc(t, ft, nrb, nrn, nta);
 		for (int x = 0; x < WAVE_W; x++) {
 			int ro = rb[t][x], no = rn[t][x], rnw = nrb[x], nn = nrn[x];
 			if (ro == rnw && no == nn && !memcmp(ta[t][x], nta[x], 6))

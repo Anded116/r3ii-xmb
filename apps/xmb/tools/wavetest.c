@@ -2,12 +2,16 @@
  * wavetest — стенд модуля волны (src/waves/wave.h) без интерфейса: время кадра, площадь перерисовки,
  * проверка «вне dirty ничего не менялось», кадры в PPM.
  *
- *   gcc -O2 -Isrc/waves -DWAVE_SYM=wave_aurora tools/wavetest.c src/waves/wave_aurora.c -o /tmp/wt_aurora -lm
+ *   gcc -O2 -Isrc/waves -DWAVE_SYM=wave_aurora tools/wavetest.c src/waves/wave_aurora.c src/waves/wave_music.c -o /tmp/wt_aurora -lm
  *   /tmp/wt_aurora <папка для кадров>
  *
  * 900 кадров по 1/45 с: первые 450 — синтетическая музыка (бочка 2 раза в секунду, хэты, «вокал» в середине
  * спектра), дальше — тишина (пауза). На кадре 300 — смена фона (full = 1). Кадры 30, 120, 240, 420, 600 —
  * в <папка>/frame_NNN.ppm (полоса, вставленная в фон 320×480 на своё место) и все пять — в sheet.ppm.
+ *
+ * Настоящая музыка: WT_WAV=файл.wav (16 бит, стерео) — спектр и уровень считаются как в плеере (audio.c, xmb.c),
+ * разбор — wave_music.c (собирать с src/waves/wave_music.c). WT_CSV=файл — признаки по кадрам, WT_ALL=1 — каждый
+ * кадр в <папка>/f_NNNNN.ppm (полоса ±40 px) — видео: ffmpeg -i f_%05d.ppm -i файл.wav.
  */
 #include <math.h>
 #include <stdio.h>
@@ -73,15 +77,151 @@ static double now_us(void)
 	return ts.tv_sec * 1e6 + ts.tv_nsec / 1e3;
 }
 
+/* спектр — как spectrum() в audio.c */
+#define FFT_N 1024
+static void spectrum(const int16_t *pcm, int rate, float *out)
+{
+	static float win[FFT_N], cs[FFT_N / 2], sn[FFT_N / 2], re[FFT_N], im[FFT_N];
+	static int ready, lo[WAVE_BANDS], hi[WAVE_BANDS];
+	if (!ready) {
+		for (int i = 0; i < FFT_N; i++)
+			win[i] = 0.5f - 0.5f * cosf(2 * (float)M_PI * i / (FFT_N - 1));
+		for (int i = 0; i < FFT_N / 2; i++) {
+			cs[i] = cosf(2 * (float)M_PI * i / FFT_N);
+			sn[i] = -sinf(2 * (float)M_PI * i / FFT_N);
+		}
+		double fmax = rate / 2.0 < 16000 ? rate / 2.0 : 16000;
+		for (int b = 0; b < WAVE_BANDS; b++) {
+			double f0 = 40 * pow(fmax / 40, (double)b / WAVE_BANDS), f1 = 40 * pow(fmax / 40, (double)(b + 1) / WAVE_BANDS);
+			lo[b] = (int)(f0 * FFT_N / rate);
+			hi[b] = (int)(f1 * FFT_N / rate);
+			lo[b] = lo[b] < 1 ? 1 : lo[b];
+			hi[b] = hi[b] <= lo[b] ? lo[b] + 1 : hi[b] > FFT_N / 2 ? FFT_N / 2 : hi[b];
+		}
+		ready = 1;
+	}
+	for (unsigned i = 0; i < FFT_N; i++) {
+		re[i] = (pcm[i * 2] + pcm[i * 2 + 1]) * 0.5f * 256 * win[i];
+		im[i] = 0;
+	}
+	for (unsigned i = 1, j = 0; i < FFT_N; i++) {
+		unsigned bit = FFT_N >> 1;
+		for (; j & bit; bit >>= 1)
+			j ^= bit;
+		j ^= bit;
+		if (i < j) {
+			float x = re[i]; re[i] = re[j]; re[j] = x;
+			x = im[i]; im[i] = im[j]; im[j] = x;
+		}
+	}
+	for (unsigned len = 2; len <= FFT_N; len <<= 1) {
+		unsigned step = FFT_N / len;
+		for (unsigned i = 0; i < FFT_N; i += len)
+			for (unsigned k = 0; k < len / 2; k++) {
+				float wr = cs[k * step], wi = sn[k * step];
+				unsigned p = i + k, q = p + len / 2;
+				float xr = re[q] * wr - im[q] * wi, xi = re[q] * wi + im[q] * wr;
+				re[q] = re[p] - xr;
+				im[q] = im[p] - xi;
+				re[p] += xr;
+				im[p] += xi;
+			}
+	}
+	const float ref = (FFT_N / 4.0f) * 8388608.0f;
+	for (int b = 0; b < WAVE_BANDS; b++) {
+		float pw = 0;
+		for (int k = lo[b]; k < hi[b]; k++)
+			pw += re[k] * re[k] + im[k] * im[k];
+		float v = (10 * log10f(pw / (ref * ref) + 1e-12f) + 60) / 60;
+		out[b] = v < 0 ? 0 : v > 1 ? 1 : v;
+	}
+}
+
+static double approach(double v, double to, double dt, double rate)
+{
+	return v + (to - v) * fmin(1.0, dt * rate);
+}
+
+/* WAV: кадры по 1/45 с; кусок звука — 1024 кадра, как запись в плеере */
+static int run_wav(const char *path, const char *out)
+{
+	FILE *f = fopen(path, "rb");
+	if (!f)
+		return perror(path), 1;
+	fseek(f, 0, SEEK_END);
+	long sz = ftell(f) - 44;
+	fseek(f, 44, SEEK_SET);
+	int16_t *pcm = malloc(sz);
+	if (fread(pcm, 1, sz, f) != (size_t)sz)
+		return fprintf(stderr, "%s: короткий\n", path), 1;
+	fclose(f);
+	long nfr = sz / 4;
+	const int rate = 44100;
+	const wave_t *w = &WAVE_SYM;
+	make_bg(0x5a3a08, 0xc98f2a);
+	w->init();
+	FILE *csv = getenv("WT_CSV") ? fopen(getenv("WT_CSV"), "w") : NULL;
+	if (csv)
+		fprintf(csv, "t,level,bass,mid,treb,bass_att,mid_att,treb_att,energy,kick,snare,hat,kicks,snares,hats\n");
+	int all = getenv("WT_ALL") != NULL;
+	float raw[WAVE_BANDS] = { 0 }, sp[WAVE_BANDS] = { 0 };
+	double level = 0, sum_us = 0, max_us = 0;
+	long chunk = -1;
+	wave_music_t m = { 0 };
+	int n = (int)(nfr * 45 / rate);
+	for (int i = 0; i < n; i++) {
+		double t = i / 45.0, dt = 1 / 45.0;
+		long c = (long)(t * rate) / 1024 - 1;   /* последний доигравший кусок */
+		if (c >= 0 && c != chunk) {
+			chunk = c;
+			spectrum(pcm + c * 1024 * 2, rate, raw);
+		}
+		double sum = 0;
+		for (long k = c * 1024; k >= 0 && k < (c + 1) * 1024; k++)
+			sum += (double)pcm[k * 2] * pcm[k * 2];
+		double lv = c >= 0 ? fmin(1.0, sqrt(sum / 1024) / 32768 * 3.5) : 0;
+		level = lv > level ? approach(level, lv, dt, 30) : approach(level, lv, dt, 5);
+		for (int b = 0; b < WAVE_BANDS; b++)
+			sp[b] = raw[b] > sp[b] ? sp[b] + (raw[b] - sp[b]) * (float)fmin(1.0, dt * 28) : sp[b] + (raw[b] - sp[b]) * (float)fmin(1.0, dt * 5);
+		wave_music_update(&m, raw, (float)dt);
+		wave_frame_t fr = { t, dt, sp, (float)level, i == 0, &m };
+		wave_dirty_t d = { 0 };
+		double t0 = now_us();
+		w->render(dst, bg, &fr, &d);
+		double us = now_us() - t0;
+		sum_us += us;
+		max_us = us > max_us ? us : max_us;
+		if (csv)
+			fprintf(csv, "%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%u,%u,%u\n", t, level, m.bass, m.mid,
+				m.treb, m.bass_att, m.mid_att, m.treb_att, m.energy, m.kick, m.snare, m.hat, m.kicks, m.snares, m.hats);
+		if (all) {
+			static uint16_t crop[WAVE_W * (WAVE_H + 80)];
+			memcpy(crop, screen_bg + (WAVE_Y - 40) * WAVE_W, sizeof(crop));
+			memcpy(crop + 40 * WAVE_W, dst, sizeof(dst));
+			char p[512];
+			snprintf(p, sizeof(p), "%s/f_%05d.ppm", out, i);
+			save_ppm(p, crop, WAVE_W, WAVE_H + 80);
+		}
+	}
+	if (csv)
+		fclose(csv);
+	printf("%s: %d кадров, кадр в среднем %.1f мкс, макс %.1f мкс; ударов: бочка %u, малый %u, хэт %u\n", w->name, n,
+	       sum_us / n, max_us, m.kicks, m.snares, m.hats);
+	return 0;
+}
+
 int main(int argc, char **argv)
 {
 	const char *out = argc > 1 ? argv[1] : ".";
+	if (getenv("WT_WAV"))
+		return run_wav(getenv("WT_WAV"), out);
 	const wave_t *w = &WAVE_SYM;
 	srand(1);
 	make_bg(0x5a3a08, 0xc98f2a);
 	memcpy(dst, bg, sizeof(dst));
 	w->init();
 	float spec[WAVE_BANDS] = { 0 }, target[WAVE_BANDS];
+	wave_music_t mm = { 0 };
 	double sum_us = 0, max_us = 0, sum_area = 0, music_area = 0, idle_area = 0;
 	long bad = 0;
 	int ns = 0;
@@ -103,7 +243,8 @@ int main(int argc, char **argv)
 		if (i == 300) {   /* смена темы */
 			make_bg(0x0d2a5e, 0x4f86d8);
 		}
-		wave_frame_t fr = { t, 1 / 45.0, spec, level, i == 0 || i == 300 };
+		wave_music_update(&mm, target, 1 / 45.0f);
+		wave_frame_t fr = { t, 1 / 45.0, spec, level, i == 0 || i == 300, &mm };
 		wave_dirty_t d = { 0 };
 		memcpy(prev, dst, sizeof(dst));
 		double t0 = now_us();

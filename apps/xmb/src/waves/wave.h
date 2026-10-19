@@ -31,12 +31,36 @@ typedef struct {
 	wave_rect_t r[WAVE_MAX_DIRTY];
 } wave_dirty_t;
 
+/* музыка глазами фона (wave_music.c): всё — относительно недавнего прошлого этого же трека, поэтому тихая запись и
+ * громкий мастеринг двигают картинку одинаково; 0 в тишине и на паузе */
+typedef struct {
+	float band[WAVE_BANDS];         /* 0..1: полоса относительно своего размаха за последние секунды */
+	float bass, mid, treb;          /* 0..1: группы полос (40–150 Гц, 150 Гц – 2 кГц, 2–16 кГц), быстрые */
+	float bass_att, mid_att, treb_att;   /* они же, сглаженные (~0,5 с) — для размаха и скорости */
+	float energy;                   /* 0..1: среднее сглаженных — «насколько плотно играет» */
+	float kick, snare, hat;         /* удары: в момент удара — его сила 0,4..1, потом спадает (бочка ~0,2 с) */
+	unsigned kicks, snares, hats;   /* счётчики ударов: новый удар — счётчик сменился */
+} wave_music_t;
+
+/* обновить по кадру: raw — спектр как есть (без сглаживания, 0..1 = −60…0 дБ), dt — с прошлого кадра */
+void wave_music_update(wave_music_t *m, const float *raw, float dt);
+
+/* импульсы бочки, бегущие по полосе слева направо: новый — на каждый удар, сила — сила удара, гаснут за ~1 с;
+ * профиль — крутой фронт и длинный хвост. col — сумма по столбцам, 0..256 */
+#define WAVE_NPULSE 4
+typedef struct {
+	float x[WAVE_NPULSE], a[WAVE_NPULSE];
+	unsigned last;
+} wave_pulses_t;
+void wave_pulses_update(wave_pulses_t *p, const wave_music_t *m, float dt, int *col);
+
 typedef struct {
 	double t;                       /* секунды с запуска, монотонно */
 	double dt;                      /* с прошлого кадра */
 	const float *spec;              /* WAVE_BANDS значений 0..1, уже сглажены (атака быстрая, спад медленный) */
 	float level;                    /* общий уровень 0..1; 0 и нулевой спектр — музыка на паузе */
 	int full;                       /* 1 — перерисовать всё (первый кадр, сменился фон) */
+	const wave_music_t *m;          /* разбор музыки; NULL — нет (стенд без него) */
 } wave_frame_t;
 
 typedef struct {

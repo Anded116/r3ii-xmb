@@ -30,7 +30,8 @@ void bg_set_level(double level);            /* 0..1 — уровень звук�
 void bg_set_band(int player);               /* 1 — полоса волны под обложкой плеера */
 /* фон под раскрытым плеером: смешать с цветом (0 — чёрный, затемнение) на opa 0..255; 0 — без смешивания */
 void bg_set_dim(int opa, uint32_t color);
-void bg_set_spectrum(const float *v, int n); /* полосы спектра 0..1, от низких частот к высоким */
+/* полосы спектра 0..1, от низких частот к высоким: v — сглаженные (для волн), r — как есть (для разбора ударов) */
+void bg_set_spectrum(const float *v, const float *r, int n);
 const lv_image_dsc_t *bg_glow(int size);    /* пятно свечения под выбранным элементом */
 
 #endif
