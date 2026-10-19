@@ -234,12 +234,17 @@ const lv_image_dsc_t *bg_glow(int size)
 			return &dsc[i];
 	if (n == 4)
 		return &dsc[0];
+	/* пятно ложится на RGB565 с прозрачностью 35–60%: от центра к краю красному и синему достаётся по 8–12 ступеней —
+	 * кольца. Альфа с порогом Байера на шаг в одну ступень выхода — ступени рассыпаются в мелкую сетку */
 	uint32_t *b = lv_malloc(size * size * 4);
 	for (int y = 0; y < size; y++)
 		for (int x = 0; x < size; x++) {
 			double dx = (x + 0.5) / size * 2 - 1, dy = (y + 0.5) / size * 2 - 1;
 			double a = exp(-(dx * dx + dy * dy) * 3.2) - exp(-3.2);
-			int ai = (int)(255 * fmax(0.0, a / (1 - exp(-3.2))));
+			a = 255 * fmax(0.0, a / (1 - exp(-3.2)));
+			if (a > 0)
+				a += (bayer[y & 7][x & 7] - 31.5) / 64 * 24;
+			int ai = (int)lround(a < 0 ? 0 : a > 255 ? 255 : a);
 			b[y * size + x] = ((uint32_t)ai << 24) | 0xffffff;
 		}
 	lv_image_dsc_t *d = &dsc[n];
