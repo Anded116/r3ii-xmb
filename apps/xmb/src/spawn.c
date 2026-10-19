@@ -6,6 +6,7 @@
 #include <pthread.h>
 #include <signal.h>
 #include <spawn.h>
+#include <string.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -42,8 +43,16 @@ static pid_t spawn(const char *cmd, int io, int io_to)
 	posix_spawnattr_setflags(&at, POSIX_SPAWN_SETSIGDEF);
 	bb("команда: %.80s", cmd);
 	char *argv[] = { "sh", "-c", (char *)cmd, NULL };
+	/* без служебных XMB_*: иначе их унаследует, например, перезапущенный adbd — и сценарий проверки (XMB_SCRIPT,
+	 * XMB_FORCE_MEM) достанется каждому следующему запуску XMB из adb */
+	char *env[256];
+	int n = 0;
+	for (char **e = environ; *e && n < 255; e++)
+		if (strncmp(*e, "XMB_", 4))
+			env[n++] = *e;
+	env[n] = NULL;
 	pid_t pid;
-	if (posix_spawn(&pid, "/bin/sh", &fa, &at, argv, environ))
+	if (posix_spawn(&pid, "/bin/sh", &fa, &at, argv, env))
 		pid = -1;
 	posix_spawn_file_actions_destroy(&fa);
 	posix_spawnattr_destroy(&at);
