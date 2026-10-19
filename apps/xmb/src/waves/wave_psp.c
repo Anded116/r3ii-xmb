@@ -3,9 +3,14 @@
  * тонкая светлая линия с бликом там, где лист «смотрит» на свет, под кромкой — короткий отсвет и заливка.
  * Заливка зависит только от строки (затухает книзу до нуля у нижнего края полосы), поэтому при сдвиге кромки
  * меняется лишь узкая зона вокруг неё: профиль листа от расстояния до кромки ненулевой в пределах -UP..+DN px,
- * глубже — постоянная заливка строки. Музыка медленно (сглаженный уровень) добавляет листам размах и яркость.
+ * глубже — постоянная заливка строки. Музыка (wave_music.c): листы дышат на сглаженном басу — размах больше,
+ * сами чуть поднимаются; каждая бочка пускает по ленте импульс — листы в этом месте вспухают вверх (передний
+ * сильнее), кромки светлеют, и этот вал бежит слева направо; течение быстрее, когда играет плотно, и с рывком
+ * на бочке; малый барабан на миг подсвечивает кромки, на хэтах по кромкам вспыхивают и гаснут блики.
+ * В тишине — исходное спокойное течение.
  *
- * Кадр: у каждого листа и столбца — строки вокруг старой и новой кромки, если она сдвинулась хотя бы на HYS/16 px;
+ * Кадр: у каждого листа и столбца — строки вокруг старой и новой кромки, если она сдвинулась хотя бы на HYS/16 px
+ * или заметно сменилась яркость кромки или отсвета;
  * пиксель пересчитывается по всем листам, пишется, только если изменился. dirty — по блокам столбцов от первой
  * до последней изменившейся строки; соседние блоки жадно склеиваются по наименьшему приросту площади, пока
  * прямоугольников больше WAVE_MAX_DIRTY. Всё целочисленное:
@@ -25,6 +30,9 @@
 #define NBLK (WAVE_W / BLK)
 #define HYS 4                   /* столбец не трогаем, пока кромка сдвинулась меньше, 1/16 px */
 #define SNB 12                  /* таблица синуса: 4096 значений */
+#define NGL 6                   /* бликов на хэт */
+#define GLR 12                  /* полуширина блика, столбцов */
+#define SWR 12                  /* полуширина сглаживания вала, столбцов */
 
 typedef struct {
 	double ct;                  /* средняя высота кромки, px от верха полосы */
@@ -32,13 +40,14 @@ typedef struct {
 	double a2, k2, v2;          /* вторая, мельче */
 	double ph, wob;             /* начальная фаза (обороты) и частота её покачивания (Гц) */
 	int fill, rim, sheen;       /* заливка, кромка, отсвет под кромкой (0..256) */
+	int swell;                  /* вал от бочки: подъём кромки при полном импульсе, 1/16 px */
 } sheet_t;
 
 /* сзади вперёд: дальний лист бледнее и шире, передний — ярче кромкой */
 static const sheet_t S[NL] = {
-	{ 78, 14, 0.55, -0.030, 4.0, 1.30,  0.045, 0.10, 0.031, 30,  90, 20 },
-	{ 90, 16, 0.75,  0.042, 4.5, 1.70, -0.050, 0.45, 0.023, 34, 130, 26 },
-	{ 102, 12, 0.95, -0.055, 3.5, 2.20,  0.065, 0.80, 0.037, 40, 170, 32 },
+	{ 78, 14, 0.55, -0.030, 4.0, 1.30,  0.045, 0.10, 0.031, 30,  90, 20, 8 * SUB },
+	{ 90, 16, 0.75,  0.042, 4.5, 1.70, -0.050, 0.45, 0.023, 34, 130, 26, 12 * SUB },
+	{ 102, 12, 0.95, -0.055, 3.5, 2.20,  0.065, 0.80, 0.037, 40, 170, 32, 16 * SUB },
 };
 
 static int16_t sn[1 << SNB];            /* sin, ±16384 */
@@ -49,10 +58,17 @@ static uint8_t g[WAVE_H];               /* затухание заливки к�
 static int fl[NL][WAVE_H];              /* заливка листа по строке */
 static int ed[NL][WAVE_W];              /* нарисованная кромка, 1/16 px */
 static int rs[NL][WAVE_W];              /* нарисованная яркость кромки (с бликом), 0..256 */
-static int ne[WAVE_W + 2], nr[WAVE_W];
+static int ss[NL][WAVE_W];              /* нарисованный отсвет под кромкой, 0..256 */
+static int ne[WAVE_W + 2], nr[WAVE_W], ns[WAVE_W];
 static int blo[NBLK], bhi[NBLK];
-static int lvs;                         /* уровень, сглаженный медленно, 0..256 */
 static int ready;
+static double ft;                       /* время течения: идёт быстрее, когда играет плотно */
+static wave_pulses_t pl;                /* импульсы бочки по ленте */
+static int pls[WAVE_W];                 /* их сумма по столбцам, 0..256 */
+static uint8_t gl[NL][WAVE_W];          /* блики хэтов на кромках, 0..255 */
+static uint8_t glp[2 * GLR + 1];         /* профиль блика */
+static int mb, me, ms;                  /* бас (сглаженный), плотность, малый барабан — 0..256 */
+static unsigned last_hat, rnd;
 
 static const uint8_t bay[4][4] = {
 	{ 8, 136, 40, 168 }, { 200, 72, 232, 104 }, { 56, 184, 24, 152 }, { 248, 120, 216, 88 },
@@ -88,8 +104,13 @@ static void init(void)
 	for (int k = 0; k < NL; k++)
 		for (int y = 0; y < WAVE_H; y++)
 			fl[k][y] = (S[k].fill * g[y] + 127) / 255;
-	lvs = 0;
+	for (int i = 0; i <= 2 * GLR; i++)
+		glp[i] = (uint8_t)lround(255 * exp(-(i - GLR) * (i - GLR) / (2 * 4.0 * 4.0)));
 	ready = 0;
+	ft = 0;
+	memset(&pl, 0, sizeof(pl));
+	memset(gl, 0, sizeof(gl));
+	rnd = 4242;
 }
 
 static inline uint32_t turns32(double x)
@@ -98,27 +119,28 @@ static inline uint32_t turns32(double x)
 	return (uint32_t)(uint64_t)(x * 4294967296.0);
 }
 
-/* новая кромка листа k (ne, 1/16 px) и яркость кромки по столбцам (nr) */
+/* новая кромка листа k (ne, 1/16 px), яркость кромки (nr) и отсвет под ней (ns) по столбцам */
 static void sheet_calc(int k, double t)
 {
 	const sheet_t *h = &S[k];
 	double pw = 0.06 * sin(2 * M_PI * h->wob * t);
-	uint32_t p1 = turns32(h->ph + h->v1 * t + pw), p2 = turns32(-1.3 * h->ph + h->v2 * t - 1.6 * pw);
+	uint32_t p1 = turns32(h->ph + h->v1 * ft + pw), p2 = turns32(-1.3 * h->ph + h->v2 * ft - 1.6 * pw);
 	uint32_t d1 = (uint32_t)(h->k1 * 4294967296.0 / WAVE_W), d2 = (uint32_t)(h->k2 * 4294967296.0 / WAVE_W);
 	double br = 1 + 0.10 * sin(2 * M_PI * (0.017 * t + 0.3 * k));    /* медленное «дыхание» размаха */
-	int am = 256 + ((lvs * 90) >> 8);                                   /* музыка: до +35% размаха */
+	int am = 256 + ((mb * 150 + me * 40) >> 8);                        /* дыхание: до +75% размаха */
 	int A1 = (int)(h->a1 * SUB * br), A2 = (int)(h->a2 * SUB * br);
 	A1 = (A1 * am) >> 8;
 	A2 = (A2 * am) >> 8;
-	int c = (int)(h->ct * SUB);
+	int c = (int)(h->ct * SUB) - ((mb * 6 * SUB) >> 8);
 	for (int x = 0; x < WAVE_W; x++) {
-		ne[x + 1] = c + ((A1 * sn[p1 >> (32 - SNB)]) >> 14) + ((A2 * sn[p2 >> (32 - SNB)]) >> 14);
+		ne[x + 1] = c + ((A1 * sn[p1 >> (32 - SNB)]) >> 14) + ((A2 * sn[p2 >> (32 - SNB)]) >> 14)
+			- ((pls[x] * h->swell) >> 8);
 		p1 += d1;
 		p2 += d2;
 	}
 	ne[0] = 2 * ne[1] - ne[2];
 	ne[WAVE_W + 1] = 2 * ne[WAVE_W] - ne[WAVE_W - 1];
-	int rim = h->rim + ((lvs * 40) >> 8);
+	int rim = h->rim + ((me * 30 + ms * 80) >> 8);
 	for (int x = 0; x < WAVE_W; x++) {
 		/* наклон в 1/16 px на 2 столбца; блик — где кромка слегка поднимается вправо (свет сверху-слева) */
 		int s = ne[x + 2] - ne[x] + 4;
@@ -126,7 +148,9 @@ static void sheet_calc(int k, double t)
 		int sp = 256 - s * 26;
 		sp = sp < 0 ? 0 : sp;
 		sp = (sp * sp) >> 8;
-		nr[x] = (rim * (150 + ((sp * 106) >> 8))) >> 8;
+		int v = ((rim * (150 + ((sp * 106) >> 8))) >> 8) + ((pls[x] * 110) >> 8) + gl[k][x];
+		nr[x] = v > 256 ? 256 : v;
+		ns[x] = h->sheen + ((pls[x] * 130 + ms * 30) >> 8);
 	}
 }
 
@@ -154,7 +178,7 @@ static inline uint16_t pix(const uint16_t *bg, int x, int y)
 		if (i >= PN)
 			a += fl[k][y];
 		else
-			a += ((cov[i] * fl[k][y]) >> 8) + ((rimt[i] * rs[k][x]) >> 8) + ((sht[i] * S[k].sheen) >> 8);
+			a += ((cov[i] * fl[k][y]) >> 8) + ((rimt[i] * rs[k][x]) >> 8) + ((sht[i] * ss[k][x]) >> 8);
 	}
 	return lit(bg[y * WAVE_W + x], a, bay[y & 3][x & 3]);
 }
@@ -202,15 +226,49 @@ static void emit(wave_dirty_t *d)
 
 static void render(uint16_t *dst, const uint16_t *bg, const wave_frame_t *f, wave_dirty_t *dirty)
 {
-	int lv = (int)(f->level * 256);
-	lv = lv < 0 ? 0 : lv > 256 ? 256 : lv;
-	lvs += (lv - lvs) / 40 + (lv > lvs) - (lv < lvs);   /* ~1 с до установки, без рывков */
+	static const wave_music_t calm;
+	const wave_music_t *m = f->m ? f->m : &calm;
+	float dt = f->dt > 0.1 ? 0.1f : (float)f->dt;
+	ft += dt * (1 + 1.5f * m->energy + 3.0f * m->kick);
+	mb = (int)(m->bass_att * 256);
+	me = (int)(m->energy * 256);
+	ms = (int)(m->snare * 256);
+	wave_pulses_update(&pl, m, dt, pls);
+	for (int x = 0; x < WAVE_W; x++)        /* импульс поднимает сразу и заметно, хвост — мягко */
+		pls[x] = (pls[x] * (512 - pls[x])) >> 8;
+	for (int pass = 0; pass < 2; pass++) {  /* вал — пологий холм, а не складка: дважды скользящее среднее */
+		int ps[WAVE_W + 1];
+		ps[0] = 0;
+		for (int x = 0; x < WAVE_W; x++)
+			ps[x + 1] = ps[x] + pls[x];
+		for (int x = 0; x < WAVE_W; x++) {
+			int a = x - SWR < 0 ? 0 : x - SWR, b = x + SWR + 1 > WAVE_W ? WAVE_W : x + SWR + 1;
+			pls[x] = (ps[b] - ps[a]) / (2 * SWR + 1);
+		}
+	}
+	for (int k = 0; k < NL; k++)
+		for (int x = 0; x < WAVE_W; x++)
+			gl[k][x] -= (gl[k][x] >> 3) + (gl[k][x] > 0);
+	if (m->hats != last_hat) {
+		last_hat = m->hats;
+		int a = 110 + (int)(m->hat * 145);
+		for (int n = 0; n < NGL; n++) {
+			rnd = rnd * 1103515245u + 12345u;
+			int k = (int)((rnd >> 8) % NL), x0 = (int)((rnd >> 16) % WAVE_W) - GLR;
+			for (int i = 0; i <= 2 * GLR; i++) {
+				int x = x0 + i, v = (a * glp[i]) >> 8;
+				if (x >= 0 && x < WAVE_W && v > gl[k][x])
+					gl[k][x] = (uint8_t)v;
+			}
+		}
+	}
 
 	if (f->full || !ready) {
 		for (int k = 0; k < NL; k++) {
 			sheet_calc(k, f->t);
 			memcpy(ed[k], ne + 1, sizeof(ed[k]));
 			memcpy(rs[k], nr, sizeof(rs[k]));
+			memcpy(ss[k], ns, sizeof(ss[k]));
 		}
 		for (int x = 0; x < WAVE_W; x++) {
 			int top = ed[0][x];             /* выше всех листов — чистый фон */
@@ -236,11 +294,12 @@ static void render(uint16_t *dst, const uint16_t *bg, const wave_frame_t *f, wav
 		sheet_calc(k, f->t);
 		for (int x = 0; x < WAVE_W; x++) {
 			int eo = ed[k][x], en = ne[x + 1];
-			int de = en - eo, dr = nr[x] - rs[k][x];
-			if (de < HYS && de > -HYS && dr < HYS * 2 && dr > -HYS * 2)
+			int de = en - eo, dr = nr[x] - rs[k][x], ds = ns[x] - ss[k][x];
+			if (de < HYS && de > -HYS && dr < HYS * 2 && dr > -HYS * 2 && ds < HYS && ds > -HYS)
 				continue;
 			ed[k][x] = en;
 			rs[k][x] = nr[x];
+			ss[k][x] = ns[x];
 			int a = (eo < en ? eo : en) - UP * SUB, z = (eo > en ? eo : en) + DN * SUB;
 			int y0 = a >> 4, y1 = (z >> 4) + 1;
 			y0 = y0 < 0 ? 0 : y0;

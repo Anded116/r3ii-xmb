@@ -1,10 +1,15 @@
 /* Лента: две полупрозрачные ленты (заливка между верхней и нижней кромкой) с яркой сглаженной верхней
  * кромкой; вторая бледнее и плывёт в другую сторону. Кромки — суммы синусоид по таблице (целые 8.8 px),
- * спектр локально поднимает верх, утолщает ленту и подсвечивает кромку; амплитуды ограничены, лента всегда
- * целиком в полосе. Заливка плоская, поэтому при сдвиге формы меняются только края: у каждого столбца храним
- * положение кромок и перерисовываем зону вокруг них, лишь когда сдвиг больше порога. Ленты обновляются по
- * очереди (раз в 2 кадра). al — яркость каждой ленты в пикселе, пиксель = фон, осветлённый на сумму.
- * dirty — прямоугольники по блокам столбцов отдельно для верхней и нижней кромки (по 12 штук). */
+ * амплитуды ограничены, лента всегда целиком в полосе. Музыка (wave_music.c): ленты дышат на сглаженном
+ * басу — волна глубже, лента толще; каждая бочка пускает по лентам вспухание (волна в этом месте глубже,
+ * верх поднимается, низ опускается, кромка светлеет), которое бежит по первой ленте слева направо, по
+ * второй — навстречу; течение быстрее, когда играет плотно, и с рывком на бочке (время течения копится —
+ * без рывков назад); малый барабан на миг разводит ленты и вспыхивает кромками; хэт пускает вдоль кромки
+ * скользящий блик; спектр столбца — лёгкая неровность. В тишине — ровное течение. Заливка плоская, поэтому
+ * при сдвиге формы меняются только края: у каждого столбца храним положение кромок и перерисовываем зону
+ * вокруг них, лишь когда сдвиг больше порога. Ленты обновляются по очереди (раз в 2 кадра). al — яркость
+ * каждой ленты в пикселе, пиксель = фон, осветлённый на сумму. dirty — прямоугольники по блокам столбцов
+ * отдельно для верхней и нижней кромки (по 12 штук). */
 #include <math.h>
 #include <string.h>
 
@@ -21,21 +26,25 @@
 #define MINTH (16 * 256)        /* минимальная толщина ленты */
 #define YMIN (14 * 256)         /* границы, внутри которых кромки лежат всегда */
 #define YMAX ((WAVE_H - 14) * 256)
+#define NG 4                    /* бликов хэта */
+#define GR 28                   /* полуширина блика, столбцов */
+#define PR 14                   /* радиус сглаживания импульса бочки, столбцов */
 
 typedef struct {
 	double ct, a1, k1, w1, p1, a2, k2, w2, p2;      /* верх: центр, две синусоиды (px, циклов на ширину, об/с, фаза) */
 	double th, ta, k3, w3, p3;                      /* толщина: средняя, размах и её синусоида */
 	double lt, lb;                                  /* подъём верха и опускание низа от спектра, px */
-	int fill, e0, ek, el, sheen;                    /* заливка, кромка: база, от спектра, от уровня, блик (0..255) */
+	double kt, kb, bt;                              /* от бочки: подъём верха, опускание низа; утолщение от баса, px */
+	int fill, e0, ek, el, sheen, ke;                /* заливка, кромка: база, от спектра, от уровня, блик, от бочки */
 } rib_t;
 
 static const rib_t P[NR] = {
-	{ 52, 9, 0.9, 0.050, 0.10, 4.5, 2.1, -0.070, 0.40,   32, 7, 1.4,  0.040, 0.30,  15, 10,  38, 95, 95, 30, 26 },
-	{ 80, 8, 1.2, -0.035, 0.65, 4.0, 2.6,  0.060, 0.15,   30, 6, 1.7, -0.045, 0.70,  12,  9,  24, 52, 62, 18, 18 },
+	{ 52, 9, 0.9, 0.050, 0.10, 4.5, 2.1, -0.070, 0.40,   32, 7, 1.4,  0.040, 0.30,   8, 5,  18, 10, 7,   38, 95, 70, 30, 26, 150 },
+	{ 80, 8, 1.2, -0.035, 0.65, 4.0, 2.6,  0.060, 0.15,   30, 6, 1.7, -0.045, 0.70,   6, 4,  14, 3, 4,   24, 52, 45, 18, 18, 110 },
 };
 
 typedef struct {
-	int ct, a1, a2, th, ta, lt, lb;
+	int ct, a1, a2, th, ta, lt, lb, kt, kb, bt;
 	uint32_t dk1, dk2, dk3;
 	double p1, w1, p2, w2, p3, w3;
 } rt_t;
@@ -52,6 +61,15 @@ static int tt[NR][WAVE_W], bb[NR][WAVE_W], ee[NR][WAVE_W];     /* нарисов
 static uint8_t al[NR][WAVE_W * WAVE_H];
 static int lo[2][NBLK], hi[2][NBLK];
 static int ready, fc;
+static double ft;                       /* время течения: идёт быстрее, когда играет плотно */
+static wave_pulses_t pl;                /* импульсы бочки по лентам */
+static int pls[WAVE_W];                 /* их сумма по столбцам, сглаженная, 0..256 */
+static int amul, bas, sns, part;        /* размах волны (8.8), бас и малый (0..256), разведение лент (8.8 px) */
+static float snf;                       /* малый с мягким фронтом */
+static struct { float x, v, a; int r; } gs[NG];         /* блики хэта: столбец, скорость, сила, лента */
+static uint8_t gp[2 * GR + 1];          /* профиль блика */
+static int gl[NR][WAVE_W];              /* блики по столбцам, 0..256 */
+static unsigned ghats, rnd;
 
 static inline double sstep(double x)
 {
@@ -75,6 +93,10 @@ static void init(void)
 	}
 	for (int i = 0; i < BOTN; i++)
 		bl[i] = (uint8_t)lround(255 * sstep(((i + 0.5 - 40) / 16 + 2) / 4));
+	for (int i = 0; i <= 2 * GR; i++) {
+		double u = (i - GR) / 11.0;
+		gp[i] = (uint8_t)lround(255 * exp(-u * u));
+	}
 	for (int x = 0; x < WAVE_W; x++) {
 		double p = (x - 4.5) / 10;      /* центры полос — в серединах десяток столбцов */
 		int b = (int)floor(p);
@@ -85,13 +107,20 @@ static void init(void)
 		const rib_t *p = &P[r];
 		rt[r] = (rt_t){ (int)(p->ct * 256), (int)(p->a1 * 256), (int)(p->a2 * 256), (int)(p->th * 256),
 				(int)(p->ta * 256), (int)(p->lt * 256), (int)(p->lb * 256),
+				(int)(p->kt * 256), (int)(p->kb * 256), (int)(p->bt * 256),
 				(uint32_t)(p->k1 * 4294967296.0 / WAVE_W), (uint32_t)(p->k2 * 4294967296.0 / WAVE_W),
 				(uint32_t)(p->k3 * 4294967296.0 / WAVE_W), p->p1, p->w1, p->p2, p->w2, p->p3, p->w3 };
 	}
 	memset(sb, 0, sizeof(sb));
+	memset(&pl, 0, sizeof(pl));
+	memset(gs, 0, sizeof(gs));
 	lvs = 0;
 	ready = 0;
 	fc = 0;
+	ft = 0;
+	snf = 0;
+	amul = 256;
+	bas = sns = part = 0;
 }
 
 static inline uint32_t turns32(double x)
@@ -113,21 +142,24 @@ static void calc(int r, double t, int *T, int *B, int *E)
 	const rt_t *h = &rt[r];
 	const rib_t *p = &P[r];
 	uint32_t p1 = turns32(h->p1 + h->w1 * t), p2 = turns32(h->p2 + h->w2 * t), p3 = turns32(h->p3 + h->w3 * t);
+	int A1 = (h->a1 * amul) >> 8, th = h->th + ((bas * h->bt) >> 8), sh = r ? part : -part;
+	int eb = p->e0 + ((lvs * p->el) >> 8) + ((sns * 60) >> 8);
+	const int *g = gl[r];
 	for (int x = 0; x < WAVE_W; x++) {
-		int s1 = ssin(p1), s2 = ssin(p2), s3 = ssin(p3), c = cs[x];
+		int s1 = ssin(p1), s2 = ssin(p2), s3 = ssin(p3), c = cs[x], k = r ? pls[WAVE_W - 1 - x] : pls[x];
 		p1 += h->dk1;
 		p2 += h->dk2;
 		p3 += h->dk3;
-		int w = h->ct + ((h->a1 * s1) >> 14) + ((h->a2 * s2) >> 14);
-		int top = w - ((c * h->lt) >> 8);
-		int bot = w + h->th + ((h->ta * s3) >> 14) + ((c * h->lb) >> 8);
+		int w = h->ct + (((A1 + ((A1 * k) >> 9)) * s1) >> 14) + ((h->a2 * s2) >> 14) + sh;
+		int top = w - ((c * h->lt) >> 8) - ((k * h->kt) >> 8);
+		int bot = w + th + ((h->ta * s3) >> 14) + ((c * h->lb) >> 8) + ((k * h->kb) >> 8);
 		top = top < YMIN ? YMIN : top;
 		bot = bot < top + MINTH ? top + MINTH : bot;
 		if (bot > YMAX) {
 			bot = YMAX;
 			top = top > bot - MINTH ? bot - MINTH : top;
 		}
-		int e = p->e0 + ((c * p->ek) >> 8) + ((lvs * p->el) >> 8) + ((s2 * p->sheen) >> 14);
+		int e = eb + ((c * p->ek) >> 8) + ((s2 * p->sheen) >> 14) + ((k * p->ke) >> 8) + ((g[x] * 120) >> 8);
 		T[x] = top;
 		B[x] = bot;
 		E[x] = e < 0 ? 0 : e > 255 ? 255 : e;
@@ -248,8 +280,62 @@ static void full(uint16_t *dst, const uint16_t *bg, double t)
 	}
 }
 
+/* скользящее среднее по 2·PR+1 столбцам (края — повтором крайнего) */
+static void smooth(int *v)
+{
+	int o[WAVE_W], s = 0;
+	for (int i = -PR - 1; i < PR; i++)
+		s += v[i < 0 ? 0 : i];
+	for (int x = 0; x < WAVE_W; x++) {
+		int a = x + PR, b = x - PR - 1;
+		s += v[a > WAVE_W - 1 ? WAVE_W - 1 : a] - v[b < 0 ? 0 : b];
+		o[x] = s * (65536 / (2 * PR + 1)) >> 16;
+	}
+	memcpy(v, o, sizeof(o));
+}
+
+/* музыка -> течение, дыхание, импульсы бочки, разведение на малом, блики хэта */
+static void music(const wave_music_t *m, float dt)
+{
+	float sp = 1 + 1.6f * m->energy + 3.0f * m->kick;
+	ft += dt * sp;
+	wave_pulses_update(&pl, m, dt, pls);
+	smooth(pls);
+	smooth(pls);
+	bas = (int)(m->bass_att * 256);
+	amul = 256 + ((bas * 150) >> 8);
+	snf += (m->snare - snf) * (m->snare > snf ? (dt >= 0.04f ? 1 : dt / 0.04f) : 1);
+	sns = (int)(snf * 256);
+	part = (sns * 6 * 256) >> 8;
+	if (m->hats != ghats) {
+		ghats = m->hats;
+		int k = 0;
+		for (int i = 1; i < NG; i++)
+			if (gs[i].a < gs[k].a)
+				k = i;
+		rnd = rnd * 1103515245u + 12345u;
+		gs[k].r = (ghats % 3) == 2;
+		gs[k].x = (float)(40 + (rnd >> 16) % 240);
+		gs[k].v = P[gs[k].r].w1 > 0 ? -140 : 140;
+		gs[k].a = m->hat;
+	}
+	memset(gl, 0, sizeof(gl));
+	for (int i = 0; i < NG; i++) {
+		if (gs[i].a < 0.03f)
+			continue;
+		gs[i].x += gs[i].v * sp * dt;
+		gs[i].a *= expf(-dt / 0.3f);
+		int a = (int)(gs[i].a * 256), cx = (int)gs[i].x, *g = gl[gs[i].r];
+		for (int x = cx - GR < 0 ? 0 : cx - GR; x < WAVE_W && x <= cx + GR; x++) {
+			int v = g[x] + ((a * gp[x - cx + GR]) >> 8);
+			g[x] = v > 256 ? 256 : v;
+		}
+	}
+}
+
 static void render(uint16_t *dst, const uint16_t *bg, const wave_frame_t *f, wave_dirty_t *dirty)
 {
+	static const wave_music_t calm;
 	/* спектр: по времени, по полосам и плавно между полосами -> столбцы */
 	int s[WAVE_BANDS + 2], sm[WAVE_BANDS + 2], s2[WAVE_BANDS + 2];
 	for (int b = 0; b < WAVE_BANDS; b++) {
@@ -271,9 +357,10 @@ static void render(uint16_t *dst, const uint16_t *bg, const wave_frame_t *f, wav
 	int lv = (int)(f->level * 256);
 	lv = lv < 0 ? 0 : lv > 256 ? 256 : lv;
 	lvs += ((lv - lvs) * (lv > lvs ? 100 : 40)) >> 8;
+	music(f->m ? f->m : &calm, f->dt > 0.1 ? 0.1f : (float)f->dt);
 
 	if (f->full || !ready) {
-		full(dst, bg, f->t);
+		full(dst, bg, ft);
 		wave_dirty_add(dirty, 0, 0, WAVE_W - 1, WAVE_H - 1);
 		ready = 1;
 		fc = 0;
@@ -282,7 +369,7 @@ static void render(uint16_t *dst, const uint16_t *bg, const wave_frame_t *f, wav
 
 	int r = ++fc & 1;
 	int T[WAVE_W], B[WAVE_W], E[WAVE_W];
-	calc(r, f->t, T, B, E);
+	calc(r, ft, T, B, E);
 	for (int z = 0; z < 2; z++)
 		for (int b = 0; b < NBLK; b++) {
 			lo[z][b] = WAVE_H;

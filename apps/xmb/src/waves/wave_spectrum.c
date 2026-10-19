@@ -2,8 +2,12 @@
  * отражение. Высота в 1/16 пикселя: верх столбика сглажен по покрытию строки и скруглён по углам, поэтому
  * движется без «ступенек». Яркость растёт вверх и привязана к строке (не к столбцу), так что при смене
  * высоты перекрашиваются только строки между старым и новым верхом. Пик — тонкая светлая черта над
- * столбиком: держится ~0.3 с, дальше опускается с ускорением. В тишине столбики садятся в короткую
+ * столбиком: держится ~0.25 с, дальше опускается с ускорением. В тишине столбики садятся в короткую
  * едва заметную линию, пики гаснут по пути вниз.
+ * Музыка (wave_music.c): высота — полоса в своём недавнем размахе (полный ход на тихой записи и на громком
+ * мастеринге) с долей сглаженного спектра для формы; вверх — сразу, вниз — плавно. Каждая бочка пускает по
+ * столбикам импульс слева направо: где он проходит, столбики подпрыгивают и пики вспыхивают; хэт зажигает пики
+ * верхов.
  *
  * Каждый кадр: новая высота и пик по столбцам; столбик, где они не изменились, не трогаем. У изменившегося
  * перерисовываем только затронутые строки (верх/пик и отражение), прямоугольники склеиваем по наименьшему
@@ -29,15 +33,18 @@
 #define PK_GAP 32                 /* пик над столбиком, 1/16 px */
 #define PK_T 24
 #define PK_A 95
-#define HOLD_US 300000
-#define VEL0 40960                /* пиксели в Q12: 10 px/с, ускорение 100 px/с² */
-#define ACC 409600
+#define HOLD_US 250000
+#define VEL0 40960                /* пиксели в Q12: 10 px/с, ускорение 200 px/с² */
+#define ACC 819200
+#define FALL 0.12f                /* спад высоты, с */
 #define DEAD 3                    /* мёртвая зона высоты, 1/16 px */
 #define IT_MAX (WAVE_BANDS * 4)
 
 typedef struct {
 	int h, pk;                /* показанные высота и пик, 1/16 px */
 	int ppos, vel, hold;      /* физика пика: положение Q12 px, скорость, остаток удержания, мкс */
+	int lv;                   /* сглаженная цель высоты, 1/256 от 1/16 px */
+	int fl;                   /* вспышка пика, 0..256 */
 } bar_t;
 
 static bar_t bars[WAVE_BANDS];
@@ -46,6 +53,8 @@ static uint16_t gain[WAVE_BANDS];
 static uint8_t ga[KROWS], gr[MROWS];
 static const uint8_t cr[BAR_W] = { 21, 6, 1, 0, 0, 1, 6, 21 };   /* скругление верха, 1/16 px */
 static int tab_ready, have_prev;
+static wave_pulses_t pl;          /* импульсы бочки по столбикам */
+static int pls[WAVE_W];           /* их сумма по столбцам, 0..256 */
 
 static void init(void)
 {
@@ -69,7 +78,9 @@ static void init(void)
 	for (int i = 0; i < WAVE_BANDS; i++) {
 		bars[i].h = bars[i].pk = HMIN;
 		bars[i].ppos = HMIN << 8;
+		bars[i].lv = HMIN << 8;
 	}
+	memset(&pl, 0, sizeof(pl));
 	have_prev = 0;
 }
 
@@ -84,7 +95,7 @@ static void paint_up(uint16_t *dst, const uint16_t *bg, int i, int klo, int khi)
 	for (int c = 0; c < BAR_W; c++)
 		hc[c] = b->h - imin(cr[c], b->h >> 1);
 	int pa = b->pk > HMIN ? imin(256, ((b->pk - HMIN) * 21) >> 2) : 0;
-	pa = (pa * PK_A) >> 8;
+	pa = (pa * (PK_A + b->fl * (256 - PK_A) / 256)) >> 8;
 	int pe_a = (pa * 154) >> 8;                       /* края черты слабее */
 	khi = imin(khi, KROWS - 1);
 	for (int k = imax(klo, 0); k <= khi; k++) {
@@ -152,14 +163,35 @@ static void render(uint16_t *dst, const uint16_t *bg, const wave_frame_t *f, wav
 	int dt_us = (int)(f->dt * 1e6f), dtq = (int)(f->dt * 65536.0f);
 	dt_us = imin(imax(dt_us, 0), 100000);
 	dtq = imin(imax(dtq, 0), 6553);
-	int oh[WAVE_BANDS], op[WAVE_BANDS];
+	int oh[WAVE_BANDS], op[WAVE_BANDS], of[WAVE_BANDS];
+	static const wave_music_t calm;
+	const wave_music_t *m = f->m ? f->m : &calm;
+	wave_pulses_update(&pl, m, f->dt > 0.1 ? 0.1f : (float)f->dt, pls);
+	int fq = (int)(f->dt * (65536.0f / FALL));
+	fq = imin(imax(fq, 0), 65536);
 
 	for (int i = 0; i < WAVE_BANDS; i++) {
 		bar_t *b = &bars[i];
 		oh[i] = b->h;
 		op[i] = b->pk;
-		int v = (int)(f->spec[i] * (float)gain[i]);
-		int nh = hlut[v < 0 ? 0 : v > 1023 ? 1023 : v];
+		of[i] = b->fl;
+		/* цель: полоса в своём размахе + немного спектра для формы; импульс бочки подбрасывает — пропорционально,
+		 * чтобы форма спектра сохранялась */
+		int pv = pls[i * PITCH + BAR_X0 + BAR_W / 2];
+		float x = f->spec[i] * gain[i] * (1.0f / 1023);
+		if (f->m) {
+			/* обычный уровень полосы — около середины размаха: он внизу, над ним — ход до верха */
+			x = (0.85f * m->band[i] + 0.15f * x - 0.3f) * 1.43f;
+			x = x < 0 ? 0 : x * (0.5f + 0.42f * x);
+		}
+		int v = ((int)(x * 1023) * (256 + (pv >> 1))) >> 8;
+		int nh = hlut[v < 0 ? 0 : v > 1023 ? 1023 : v] << 8;
+		/* вверх — сразу, вниз — плавно */
+		b->lv = nh >= b->lv ? nh : b->lv - (int)(((int64_t)(b->lv - nh) * fq) >> 16);
+		nh = b->lv >> 8;
+		/* вспышка пика: где идёт импульс, и на хэте у верхов */
+		int fl = ((pv * 200) >> 8) + (int)(m->hat * (i > 16 ? (i - 16) * 12 : 0));
+		b->fl = imin(fl, 256) & ~15;
 		int d = nh - b->h;
 		if (d >= DEAD || d <= -DEAD || (d && (nh == HMIN || nh == HMAX)))
 			b->h = nh;
@@ -194,7 +226,7 @@ static void render(uint16_t *dst, const uint16_t *bg, const wave_frame_t *f, wav
 	int nu = 0, nr = 0;
 	for (int i = 0; i < WAVE_BANDS; i++) {
 		int h = bars[i].h, pk = bars[i].pk, x1 = i * PITCH + BAR_X0, x2 = x1 + BAR_W - 1;
-		int dh = h != oh[i], dp = pk != op[i];
+		int dh = h != oh[i], dp = pk != op[i] || bars[i].fl != of[i];
 		if (!dh && !dp)
 			continue;
 		int lo[3], hi[3], n = 0;               /* строки выше центра (k), перекрашиваемые у этого столбика */

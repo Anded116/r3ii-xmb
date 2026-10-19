@@ -1,6 +1,9 @@
 /* Частицы: редкие мягкие «пузырьки света» разного размера неспешно всплывают снизу вверх, слегка покачиваются
- * и мерцают; снизу плавно проявляются, у верха полосы тают. Громкость ускоряет подъём и делает ярче, спектр
- * (басы слева) — местная яркость, удар бочки — короткая вспышка у всех.
+ * и мерцают; снизу плавно проявляются, у верха полосы тают. Музыка (wave_music.c): пузырьки дышат на сглаженном
+ * басу — часть из них чуть крупнее и ярче, пока бас держится; каждая бочка пускает по полосе импульс — где он
+ * проходит, пузырьки вспухают и светлеют, и это место бежит слева направо; подъём быстрее, когда играет плотно,
+ * и с рывком вверх на бочке (положение непрерывно — меняется только скорость); хэт и малый барабан вспыхивают
+ * случайными пузырьками; спектр (басы слева) — местная яркость. В тишине — исходный спокойный подъём.
  *
  * Положение частицы — с суб-пиксельной точностью: спрайты (альфа по радиусу) заранее посчитаны в init для
  * каждого класса радиуса и для 4×4 дробных смещений центра, поэтому движение плавное, без дрожи по пикселям.
@@ -13,9 +16,9 @@
 #include "wave.h"
 
 #define NP 24           /* частиц */
-#define NCLS 9          /* классов радиуса: 2.0, 2.5 … 6.0 */
+#define NCLS 15         /* классов радиуса: 2.0, 2.5 … 9.0; рождаются до 6.0, крупнее — только вспухая */
 #define NPH 16          /* дробных смещений центра: 4 по x × 4 по y */
-#define TAB_N 12624     /* сумма квадратов окон классов × NPH */
+#define TAB_N 39040     /* сумма квадратов окон классов × NPH */
 #define SIN_N 1024
 #define TURN 0xFFFFF    /* фаза: полный оборот = 2^20 */
 #define FADE_IN 7       /* крутизна проявления снизу, 256 = за 36 px */
@@ -29,6 +32,7 @@ typedef struct {
 	uint16_t v;             /* скорость подъёма, px/с в Q4 */
 	uint16_t amp;           /* размах покачивания, px в Q4 */
 	uint8_t cls, bq;        /* класс радиуса, базовая яркость */
+	uint8_t dz;             /* порог вспухания на басу: у каждого свой, поэтому дышат не разом */
 } par_t;
 
 typedef struct {
@@ -46,9 +50,13 @@ static par_t par[NP];
 static st_t st[NP];
 static uint32_t rng;
 static int spawn_x;
-static int lvs, ebase, flash, started;
+static int started;
 static int spec8[WAVE_BANDS + 1];
-static int gbase, spdq;
+static int gbase, spdq, bassq, kickq;
+static wave_pulses_t pl;        /* импульсы бочки по полосе */
+static int pls[WAVE_W];         /* их сумма по столбцам, 0..256 */
+static uint8_t spk[NP];         /* вспышка пузырька от хэта и малого, спадает */
+static unsigned last_hat, last_sn;
 
 static uint32_t rnd(void)
 {
@@ -72,6 +80,7 @@ static void respawn(par_t *p, int y_px)
 	p->fph = rnd() & TURN;
 	p->ff = 450000 + rnd() % 650000;
 	p->bq = (uint8_t)(170 + rnd() % 86);
+	p->dz = (uint8_t)rnd();
 }
 
 static void init(void)
@@ -108,7 +117,10 @@ static void init(void)
 		respawn(&par[i], 0);
 		par[i].y = (int32_t)((rnd() % (WAVE_H + 20)) - 10) << 16;
 	}
-	lvs = ebase = flash = started = 0;
+	started = 0;
+	last_hat = last_sn = 0;
+	memset(&pl, 0, sizeof(pl));
+	memset(spk, 0, sizeof(spk));
 }
 
 static inline int clampi(int v, int lo, int hi)
@@ -136,18 +148,24 @@ static void calc(int i, st_t *s)
 	int x8 = p->x0 + ((sintab[(p->wph >> 10) & (SIN_N - 1)] * p->amp) >> 8);
 	int cxq = x8 >> 6, cyq = p->y >> 14;
 	int xi = clampi(x8 >> 8, 0, WAVE_W - 1);
-	int ib = xi >> 3, fr = xi & 7;
-	int sv = (spec8[ib] * (8 - fr) + spec8[ib + 1] * fr) >> 3;
+	int bp = xi * (WAVE_BANDS * 256 / 8) / (WAVE_W / 8), ib = bp >> 8, fr = bp & 255;
+	int sv = (spec8[ib] * (256 - fr) + spec8[ib + 1] * fr) >> 8;
+	int pv = pls[xi];
 
 	int fl = 200 + ((sintab[(p->fph >> 10) & (SIN_N - 1)] * 56) >> 12);
 	int q = p->bq * fl >> 8;
 	q = q * env >> 8;
-	q = q * (gbase + (sv * 80 >> 8)) >> 8;
+	q = q * (gbase + (sv * 60 >> 8) + (pv * 150 >> 8)) >> 8;
+	q += spk[i] * env >> 8;
 	int lv = clampi(q >> 2, 0, 64);
 	if (!lv)
 		return;
 
-	int c = p->cls, S = cls_s[c];
+	/* вспухание: бас держится — на полкласса в среднем (у каждого свой порог), бочка — у всех чуть, импульс —
+	 * до 3 px радиуса */
+	int c = p->cls + clampi(((bassq * 3 >> 2) + kickq + pv * 7 + p->dz) >> 8, 0, 6);
+	c = c > NCLS - 1 ? NCLS - 1 : c;
+	int S = cls_s[c];
 	int ph = ((cyq & 3) << 2) | (cxq & 3);
 	s->sw = (uint8_t)S;
 	s->off = (uint16_t)(cls_off[c] + ph * S * S);
@@ -186,22 +204,34 @@ static void draw(uint16_t *dst, const st_t *s, int rx1, int ry1, int rx2, int ry
 
 static void render(uint16_t *dst, const uint16_t *bg, const wave_frame_t *f, wave_dirty_t *dirty)
 {
+	static const wave_music_t calm;
+	const wave_music_t *m = f->m ? f->m : &calm;
+	float dts = f->dt > 0.1 ? 0.1f : (float)f->dt;
 	int dq = clampi((int)(f->dt * 16384.0), 0, 983);
-	int lv = clampi((int)(f->level * 256.0f), 0, 256);
-	lvs += (lv - lvs) >> 3;
-	int e = 0;
-	for (int b = 0; b < WAVE_BANDS; b++) {
+	for (int b = 0; b < WAVE_BANDS; b++)
 		spec8[b] = clampi((int)(f->spec[b] * 256.0f), 0, 256);
-		if (b < 5)
-			e += spec8[b];
-	}
 	spec8[WAVE_BANDS] = spec8[WAVE_BANDS - 1];
-	e /= 5;
-	int k = (e - ebase - 20) * 3 / 2;
-	ebase += (e - ebase) >> 4;
-	flash = k > flash ? (k > 200 ? 200 : k) : flash * 236 >> 8;
-	gbase = 250 + (lvs * 70 >> 8) + (flash * 80 >> 8);
-	spdq = (256 + (lvs * 200 >> 8)) * dq;
+	wave_pulses_update(&pl, m, dts, pls);
+	bassq = (int)(m->bass_att * 256);
+	kickq = (int)(m->kick * 200);
+	gbase = 250 + (bassq * 60 >> 8) + (int)(m->kick * 30);
+	/* скорость подъёма: плотная игра — быстрее, бочка — рывок вверх */
+	spdq = (256 + (int)(m->energy * 200) + (int)(m->kick * 600)) * dq;
+	int dec = (int)(256 * expf(-dts / 0.15f));
+	for (int i = 0; i < NP; i++)
+		spk[i] = (uint8_t)(spk[i] * dec >> 8);
+	if (m->hats != last_hat) {
+		last_hat = m->hats;
+		int a = 70 + (int)(m->hat * 110);
+		for (int n = 1 + (int)(m->hat * 3); n > 0; n--)
+			spk[rnd() % NP] = (uint8_t)a;
+	}
+	if (m->snares != last_sn) {
+		last_sn = m->snares;
+		int a = 90 + (int)(m->snare * 130);
+		for (int n = 3 + (int)(m->snare * 4); n > 0; n--)
+			spk[rnd() % NP] = (uint8_t)a;
+	}
 
 	/* движение */
 	for (int i = 0; i < NP; i++) {

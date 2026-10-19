@@ -1,9 +1,13 @@
 /* Волна «Пульс»: спектр → плавная светящаяся кривая через всю ширину (кубическая интерполяция между
- * полосами), мягкое свечение в несколько слоёв и бледное отражение вниз. На ударах бочки вся линия
- * вспыхивает; в тишине — медленное «дыхание». Всё целочисленное, кривая — в четвертях пикселя.
+ * полосами), мягкое свечение в несколько слоёв и бледное отражение вниз. Музыка (wave_music.c): форму в
+ * основном дают полосы в своём размахе (громкий мастеринг не упирает кривую в потолок), кривая дышит на
+ * сглаженном басу — растёт и светлеет; каждая бочка пускает по линии удар пульса — горб с крутым фронтом и
+ * пологим хвостом бежит слева направо, где он прошёл, линия ярче; малый барабан — горб поменьше и уже,
+ * бежит навстречу, справа налево; хэт — короткие искры на линии (только яркость). В тишине — медленное
+ * «дыхание». Всё целочисленное, кривая — в четвертях пикселя.
  *
- * Каждый кадр: высота кривой по столбцам; столбец, где она не изменилась, не трогаем. У изменившегося
- * перерисовываем только строки от старой до новой позиции (с запасом на свечение и отражение).
+ * Каждый кадр: высота и яркость кривой по столбцам; столбец, где они не изменились, не трогаем. У
+ * изменившегося перерисовываем только строки от старой до новой позиции (с запасом на свечение и отражение).
  * На крутых склонах столбец тянется вертикально до середины соседей, чтобы линия не рассыпалась.
  * Dirty — по группам столбцов; группы склеиваются, пока прямоугольников не станет <= WAVE_MAX_DIRTY. */
 #include <math.h>
@@ -18,11 +22,19 @@
 #define HCAP_Q 284
 #define R 5                       /* опорная строка в таблице профиля */
 #define NROW (2 * R + 2)          /* строк в таблице профиля */
-#define NLVL 7                    /* 0 — тишина, 1 — музыка, 2..6 — вспышка бочки */
+#define NLVL 10                   /* 0 — тишина, 1 — музыка, 2..9 — ярче: бас, удары, искры */
 #define CSH 2
 #define NCH (WAVE_W >> CSH)       /* групп столбцов по 4 */
 #define BAND_W (WAVE_W / WAVE_BANDS)
 #define MASK 0x07E0F81Fu
+#define KF 12                     /* горб бочки: фронт и хвост, px */
+#define KB 32
+#define KH_Q 120                  /* его высота при силе 1, четверти пикселя */
+#define NSN 3                     /* горбов малого барабана */
+#define SR 10                     /* их полуширина, px */
+#define SH_Q 60
+#define SV 420.0f                 /* их скорость, px/с */
+#define NSP 6                     /* искр хэта */
 
 typedef struct {
 	int x1, x2, qmin, qmax;
@@ -42,14 +54,30 @@ static uint16_t hlut[1024];
 static int16_t sintab[1024];
 static int tab_ready;
 
+static uint8_t kprof[KB + KF + 1], sprof[2 * SR + 1];             /* профили горбов, 0..255 */
 static int osa[WAVE_W], osb[WAVE_W], ny[WAVE_W + 2], breath[WAVE_W];
-static int have_prev, prev_bq, last_tq;
-static float slow_bass, kick_env;
+static uint8_t olv[WAVE_W];
+static int have_prev, last_tq;
+static wave_pulses_t pl;                /* импульсы бочки */
+static int pls[WAVE_W];                 /* их свечение по столбцам, 0..256 */
+static int kh[WAVE_W], lb[WAVE_W];      /* по столбцам: высота горбов (четверти пикселя) и прибавка яркости */
+static float nb[WAVE_BANDS];            /* полосы разбора, сглаженные как спектр */
+static float snx[NSN], sna[NSN], spx[NSP], spa[NSP];
+static unsigned last_sn, last_hat;
+static uint32_t rnd_s = 2463534242u;
+
+static uint32_t rnd(void)
+{
+	rnd_s ^= rnd_s << 13;
+	rnd_s ^= rnd_s >> 17;
+	rnd_s ^= rnd_s << 5;
+	return rnd_s;
+}
 
 static void init(void)
 {
 	if (!tab_ready) {
-		static const float sc[NLVL] = { 0.55f, 0.85f, 0.97f, 1.09f, 1.21f, 1.33f, 1.45f };
+		static const float sc[NLVL] = { 0.55f, 0.64f, 0.74f, 0.84f, 0.94f, 1.04f, 1.15f, 1.26f, 1.38f, 1.5f };
 		int cmin = NROW, cmax = -1, rmin = NROW, rmax = -1;
 		for (int l = 0; l < NLVL; l++)
 			for (int fr = 0; fr < 4; fr++)
@@ -87,12 +115,83 @@ static void init(void)
 			hlut[v] = (uint16_t)(HMAX_Q * powf(v / 1023.0f, 0.75f) + 0.5f);
 		for (int i = 0; i < 1024; i++)
 			sintab[i] = (int16_t)lroundf(256 * sinf(i * 6.2831853f / 1024));
+		for (int d = -KB; d <= KF; d++) {
+			float u = d > 0 ? d / (float)KF : -d / (float)KB;
+			kprof[d + KB] = (uint8_t)lroundf(255 * expf(-2.5f * u * u));
+		}
+		for (int d = -SR; d <= SR; d++) {
+			float u = d / (float)SR;
+			sprof[d + SR] = (uint8_t)lroundf(255 * expf(-3 * u * u));
+		}
 		tab_ready = 1;
 	}
 	have_prev = 0;
-	prev_bq = -1;
 	last_tq = -1;
-	slow_bass = kick_env = 0;
+	memset(&pl, 0, sizeof(pl));
+	memset(nb, 0, sizeof(nb));
+	memset(sna, 0, sizeof(sna));
+	memset(spa, 0, sizeof(spa));
+	last_sn = last_hat = 0;
+}
+
+/* удары по столбцам: kh — высота горбов, lb — прибавка яркости (0..256 и выше) */
+static void bumps(const wave_music_t *m, float dt)
+{
+	wave_pulses_update(&pl, m, dt, pls);
+	for (int x = 0; x < WAVE_W; x++) {
+		kh[x] = 0;
+		lb[x] = pls[x];
+	}
+	for (int i = 0; i < WAVE_NPULSE; i++) {     /* горб бочки — уже и острее свечения */
+		if (pl.a[i] < 0.02f)
+			continue;
+		int a = (int)(pl.a[i] * KH_Q), hx = (int)pl.x[i];
+		for (int x = hx - KB < 0 ? 0 : hx - KB; x < WAVE_W && x <= hx + KF; x++)
+			kh[x] += (a * kprof[x - hx + KB]) >> 8;
+	}
+	if (m->snares != last_sn) {
+		last_sn = m->snares;
+		int k = 0;
+		for (int i = 1; i < NSN; i++)
+			if (sna[i] < sna[k])
+				k = i;
+		snx[k] = WAVE_W + SR;
+		sna[k] = m->snare;
+	}
+	for (int i = 0; i < NSN; i++) {
+		if (sna[i] < 0.02f)
+			continue;
+		snx[i] -= SV * dt;
+		sna[i] *= expf(-dt / 0.6f);
+		if (snx[i] < -SR) {
+			sna[i] = 0;
+			continue;
+		}
+		int h = (int)(sna[i] * SH_Q), l = (int)(sna[i] * 150), hx = (int)snx[i];
+		for (int x = hx - SR < 0 ? 0 : hx - SR; x < WAVE_W && x <= hx + SR; x++) {
+			kh[x] += (h * sprof[x - hx + SR]) >> 8;
+			lb[x] += (l * sprof[x - hx + SR]) >> 8;
+		}
+	}
+	if (m->hats != last_hat) {
+		last_hat = m->hats;
+		for (int n = 0; n < 2; n++) {
+			int k = 0;
+			for (int i = 1; i < NSP; i++)
+				if (spa[i] < spa[k])
+					k = i;
+			spx[k] = 8 + (float)(rnd() % (WAVE_W - 16));
+			spa[k] = m->hat;
+		}
+	}
+	for (int i = 0; i < NSP; i++) {
+		if (spa[i] < 0.05f)
+			continue;
+		spa[i] *= expf(-dt / 0.14f);
+		int l = (int)(spa[i] * 220), hx = (int)spx[i];
+		for (int d = -4; d <= 4; d++)
+			lb[hx + d] += (l * (5 - (d < 0 ? -d : d))) / 5;
+	}
 }
 
 /* осветлить RGB565 к белому на a/32 */
@@ -161,28 +260,35 @@ static inline int seg_rects(const seg_t *s)
 static void render(uint16_t *dst, const uint16_t *bg, const wave_frame_t *f, wave_dirty_t *dirty)
 {
 	int full = f->full || !have_prev;
+	static const wave_music_t calm;
+	const wave_music_t *m = f->m ? f->m : &calm;
+	float dt = f->dt > 0.1 ? 0.1f : (float)f->dt;
+	float ka = dt * 14 > 1 ? 1 : dt * 14, kd = dt * 5 > 1 ? 1 : dt * 5;
+	float nbs[WAVE_BANDS + 2];
+	for (int b = 0; b < WAVE_BANDS; b++)
+		nbs[b + 1] = nb[b] += (m->band[b] - nb[b]) * (m->band[b] > nb[b] ? ka : kd);
+	nbs[0] = nbs[1];
+	nbs[WAVE_BANDS + 1] = nbs[WAVE_BANDS];
 	int a[WAVE_BANDS + 4];
 	float total = 0;
 	for (int b = 0; b < WAVE_BANDS; b++) {
 		float s = f->spec[b];
 		total += s;
+		/* громкий мастеринг упирает спектр в потолок — форму даёт полоса в своём размахе (без зубцов между
+		 * соседними полосами) */
+		if (f->m)
+			s = 0.4f * s + 0.6f * (nbs[b] + 2 * nbs[b + 1] + nbs[b + 2]) * 0.25f;
 		int v = (int)(s * (1023.0f + b * 13.0f));   /* лёгкий подъём высоких */
 		a[b + 2] = v > 1023 ? 1023 : v < 0 ? 0 : v;
 	}
 	a[0] = a[1] = a[2];
 	a[WAVE_BANDS + 3] = a[WAVE_BANDS + 2] = a[WAVE_BANDS + 1];
 
-	/* бочка: всплеск басов над медленным средним */
-	float bass = (f->spec[0] + f->spec[1] + f->spec[2] + f->spec[3]) * 0.25f;
-	float k = (float)f->dt * 3;
-	slow_bass += (bass - slow_bass) * (k > 1 ? 1 : k);
-	kick_env = fmaxf(kick_env * expf(-(float)f->dt * 6.7f), bass - slow_bass);
+	bumps(m, dt);
 	int silent = f->level < 0.01f && total < 0.3f;
-	int bq = 0;
-	if (!silent) {
-		int e = (int)(kick_env * 10);
-		bq = 1 + (e > 5 ? 5 : e);
-	}
+	/* с разбором музыки кривая ниже — запас под горбы; бас её раскрывает */
+	int ba = (int)(m->bass_att * 256);
+	int gain = f->m ? 160 + ((ba * 80) >> 8) : 256, lvb = (ba * 400) >> 8;
 
 	/* дыхание — обновляем ~11 раз в секунду, чтобы в тишине кадры были пустыми */
 	int tq = (int)(f->t * 11.25);
@@ -199,7 +305,7 @@ static void render(uint16_t *dst, const uint16_t *bg, const wave_frame_t *f, wav
 		const int *p = a + jx[x];
 		int v = (w[0] * p[0] + w[1] * p[1] + w[2] * p[2] + w[3] * p[3]) >> 10;
 		v = v < 0 ? 0 : v > 1023 ? 1023 : v;
-		int h = hlut[v] + breath[x];
+		int h = ((hlut[v] * gain) >> 8) + kh[x] + breath[x];
 		ny[x + 1] = BASE_Q - (h < 0 ? 0 : h > HCAP_Q ? HCAP_Q : h);
 	}
 	ny[0] = ny[1];
@@ -207,7 +313,6 @@ static void render(uint16_t *dst, const uint16_t *bg, const wave_frame_t *f, wav
 
 	if (full)
 		memcpy(dst, bg, sizeof(uint16_t) * WAVE_W * WAVE_H);
-	int lvlchg = bq != prev_bq;
 	int cmin[NCH], cmax[NCH];
 	for (int c = 0; c < NCH; c++) {
 		cmin[c] = 1 << 20;
@@ -217,14 +322,20 @@ static void render(uint16_t *dst, const uint16_t *bg, const wave_frame_t *f, wav
 		int y0 = ny[x + 1], l = (y0 + ny[x]) >> 1, r = (y0 + ny[x + 2]) >> 1;
 		int sa = y0 < l ? (y0 < r ? y0 : r) : (l < r ? l : r);
 		int sb = y0 > l ? (y0 > r ? y0 : r) : (l > r ? l : r);
-		if (!full && !lvlchg && sa == osa[x] && sb == osb[x])
+		int lv = 0;
+		if (!silent) {
+			lv = 1 + ((lvb + lb[x] * 8) >> 8);
+			lv = lv > NLVL - 1 ? NLVL - 1 : lv;
+		}
+		if (!full && lv == olv[x] && sa == osa[x] && sb == osb[x])
 			continue;
+		olv[x] = (uint8_t)lv;
 		int qmin = full ? sa : (sa < osa[x] ? sa : osa[x]), qmax = full ? sb : (sb > osb[x] ? sb : osb[x]);
 		osa[x] = sa;
 		osb[x] = sb;
 		zone_t zc, zr;
-		zone_set(&zc, ctab[bq], sa, sb);
-		zone_set(&zr, rtab[bq], BASE2_Q - sb, BASE2_Q - sa);
+		zone_set(&zc, ctab[lv], sa, sb);
+		zone_set(&zr, rtab[lv], BASE2_Q - sb, BASE2_Q - sa);
 		int clo = (qmin >> 2) - up_c, chi = (qmax >> 2) + dn_c;
 		int rlo = ((BASE2_Q - qmax) >> 2) - up_r, rhi = ((BASE2_Q - qmin) >> 2) + dn_r;
 		if (rlo <= chi + 1) {
@@ -237,7 +348,6 @@ static void render(uint16_t *dst, const uint16_t *bg, const wave_frame_t *f, wav
 		cmin[c] = qmin < cmin[c] ? qmin : cmin[c];
 		cmax[c] = qmax > cmax[c] ? qmax : cmax[c];
 	}
-	prev_bq = bq;
 	have_prev = 1;
 
 	if (full) {

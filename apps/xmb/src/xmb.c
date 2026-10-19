@@ -5427,10 +5427,10 @@ static void eq_touch(lv_point_t p)
 	eq_set(band, (int)lround((EQ_MID - p.y) / (double)EQ_PX));
 }
 
-/* спектр звука — для фонов, которые его показывают (у «Волны PSP» — только уровень), пока экран включён */
+/* спектр звука — фонам (из него и удары), пока экран включён */
 static void spectrum_update(void)
 {
-	audio_set_spectrum(s.screen_on && s.wave != BG_WAVE_PSP && s.wave != BG_WAVE_OFF);
+	audio_set_spectrum(s.screen_on && s.wave != BG_WAVE_OFF);
 }
 
 static void screen(int on)

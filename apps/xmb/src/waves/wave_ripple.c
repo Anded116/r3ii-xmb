@@ -1,5 +1,9 @@
 /* Круги на воде: тонкие сглаженные эллипсы (вид в перспективе) расходятся от случайных точек и тают.
- * Бочка (рост spec[0..3]) рождает кольцо, яркость — по силе удара; в тишине — редкие тихие капли.
+ * Музыка (wave_music.c): каждая бочка — свой круг с внутренним следом, размер и яркость — по силе удара,
+ * в первые доли секунды он быстро раскрывается; малый барабан — круг поменьше, одинарный и короче; хэт —
+ * мелкая капля. Сглаженный бас — дыхание: все круги чуть ярче; когда играет плотно, круги расходятся быстрее.
+ * На каждый вид — свои слоты: при частых ударах место уступает самый старый (уже бледный) круг того же вида,
+ * поэтому кругов на воде не больше MAXR. Без бочки (и в тишине) — редкие тихие капли.
  *
  * Кадр: кольца, что изменились, вместе с теми, что их касаются (замыкание по габаритам), стираются
  * по старому положению (след восстанавливается из bg) и рисуются заново в одном порядке слотов —
@@ -12,7 +16,10 @@
 
 #include "wave.h"
 
-#define MAXR 7
+#define NBIG 4                  /* слоты: бочка и тихие капли, малый барабан, хэт */
+#define NSN 2
+#define NHAT 2
+#define MAXR (NBIG + NSN + NHAT)
 #define ASPECT 88               /* ry = rx * 88/256 */
 #define XS_K 242                /* cos θ0 * 256: до него эллипс «пологий» (идём по столбцам) */
 #define YS_K 83                 /* sin θ0 * 256: дальше — по строкам */
@@ -28,12 +35,13 @@
 #define INNER_MIN (18 * 256)
 
 typedef struct {
-	int cx, cy, rx8, ry8, br;
+	int cx, cy, rx8, ry8, br, in;   /* in — с внутренним кольцом */
 } geo_t;
 
 typedef struct {
-	int on;
-	double t0, inv_life;
+	int on, in;
+	double ph, inv_life;    /* возраст в долях жизни */
+	const uint16_t *rp;     /* рост радиуса */
 	int rmax, amp, cx, cy;
 	int dvalid;             /* кольцо сейчас нарисовано в dst по геометрии d */
 	geo_t d;
@@ -42,13 +50,14 @@ typedef struct {
 static uint16_t SQ[SQN + 1];            /* sqrt(1-u²), u = i/1024, 0..65535 */
 static uint8_t KW[16][4];               /* веса четырёх строк ядра по дробной части */
 static uint16_t RP[257];                /* рост радиуса по возрасту, 0..65535 */
+static uint16_t RP3[257];               /* он же для удара: быстрое раскрытие */
 static uint16_t FP[257];                /* яркость по возрасту, 0..256 */
 static int16_t SLT[MAX_SLICE + 1][MAX_SLICE][4];   /* габариты дуги в долях радиуса /256: x1 x2 y1 y2 */
 
 static ring_t rg[MAXR];
 static uint32_t rnd_s = 12345;
-static double last_beat, next_drop;
-static float prev_e, ema;
+static double next_drop;
+static unsigned last_k, last_s, last_h;
 static int started, last_x;
 
 static uint32_t rnd(void)
@@ -73,6 +82,7 @@ static void init(void)
 	for (int i = 0; i <= 256; i++) {
 		double p = i / 256.0;
 		RP[i] = (uint16_t)(65535.0 * (1 - (1 - p) * (1 - p)));
+		RP3[i] = (uint16_t)(65535.0 * (1 - (1 - p) * (1 - p) * (1 - p)));
 		double fi = p < 0.05 ? p / 0.05 : 1;
 		FP[i] = (uint16_t)(256.0 * pow(1 - p, 1.3) * fi * fi);
 	}
@@ -95,31 +105,36 @@ static void init(void)
 	memset(rg, 0, sizeof(rg));
 	rnd_s = 12345;
 	started = 0;
-	prev_e = ema = 0;
-	last_beat = -1;
 	last_x = WAVE_W / 2;
 }
 
-static void spawn(double t, int amp, int rmax, double life)
+/* новое кольцо в слотах [i0, i1): свободный, иначе самый старый */
+static void spawn(int i0, int i1, int amp, int rmax, double life, const uint16_t *rp, int in)
 {
-	for (int i = 0; i < MAXR; i++) {
-		if (rg[i].on)
-			continue;
-		ring_t *r = &rg[i];
-		int x;
-		do
-			x = 24 + (int)(rnd() % (WAVE_W - 48));
-		while (abs(x - last_x) < 70);
-		last_x = x;
-		r->on = 1;
-		r->t0 = t;
-		r->inv_life = 1 / life;
-		r->rmax = rmax;
-		r->amp = amp;
-		r->cx = x;
-		r->cy = 40 + (int)(rnd() % (WAVE_H - 80));
-		return;
+	int k = i0;
+	for (int i = i0; i < i1; i++) {
+		if (!rg[i].on) {
+			k = i;
+			break;
+		}
+		if (rg[i].ph > rg[k].ph)
+			k = i;
 	}
+	ring_t *r = &rg[k];
+	int x;
+	do
+		x = 24 + (int)(rnd() % (WAVE_W - 48));
+	while (abs(x - last_x) < 70);
+	last_x = x;
+	r->on = 1;
+	r->in = in;
+	r->ph = 0;
+	r->inv_life = 1 / life;
+	r->rp = rp;
+	r->rmax = rmax;
+	r->amp = amp;
+	r->cx = x;
+	r->cy = 40 + (int)(rnd() % (WAVE_H - 80));
 }
 
 /* нарисовать (или стереть до bg) кольцо: пологая часть — по столбцам, крутые концы — по строкам;
@@ -181,13 +196,13 @@ static void trace1(uint16_t *dst, const uint16_t *bg, const geo_t *g, int erase)
 /* внутреннее кольцо — тусклый след за основным */
 static void inner(const geo_t *g, geo_t *o)
 {
-	*o = (geo_t){ g->cx, g->cy, (g->rx8 * INNER_K) >> 8, (g->ry8 * INNER_K) >> 8, (g->br * INNER_B) >> 8 };
+	*o = (geo_t){ g->cx, g->cy, (g->rx8 * INNER_K) >> 8, (g->ry8 * INNER_K) >> 8, (g->br * INNER_B) >> 8, 0 };
 }
 
 static void trace(uint16_t *dst, const uint16_t *bg, const geo_t *g, int erase)
 {
 	trace1(dst, bg, g, erase);
-	if (g->rx8 >= INNER_MIN) {
+	if (g->in && g->rx8 >= INNER_MIN) {
 		geo_t o;
 		inner(g, &o);
 		trace1(dst, bg, &o, erase);
@@ -217,7 +232,7 @@ static void add_arcs(wave_dirty_t *d, const geo_t *a, const geo_t *b, int n)
 		if (!g)
 			continue;
 		gs[ng++] = *g;
-		if (g->rx8 >= INNER_MIN)
+		if (g->in && g->rx8 >= INNER_MIN)
 			inner(g, &gs[ng++]);
 	}
 	for (int s = 0; s < n; s++) {
@@ -248,31 +263,39 @@ static int want_n(int rpx)
 
 static void render(uint16_t *dst, const uint16_t *bg, const wave_frame_t *f, wave_dirty_t *dirty)
 {
-	double t = f->t;
+	static const wave_music_t calm;
+	const wave_music_t *m = f->m ? f->m : &calm;
+	double t = f->t, dt = f->dt > 0.1 ? 0.1 : f->dt;
 	/* рождение колец */
-	float e = (f->spec[0] + f->spec[1] + f->spec[2] + f->spec[3]) * 0.25f, over;
 	if (!started) {
-		ema = prev_e = e;
 		next_drop = t + 0.5;
+		last_k = m->kicks;
+		last_s = m->snares;
+		last_h = m->hats;
 		started = 1;
 	}
-	over = e - ema;
-	if (t - last_beat > 0.15 && e > 0.2f && e - prev_e > 0.05f && over > 0.1f) {
-		float s = over * 2.2f;
-		s = s > 1 ? 1 : s;
-		spawn(t, 150 + (int)(85 * s), 56 + (int)(rnd() % 24) + (int)(40 * s), 3.0 + (rnd() % 100) / 120.0);
-		last_beat = t;
+	if (m->kicks != last_k) {
+		last_k = m->kicks;
+		float s = m->kick;
+		int rmax = 52 + (int)(rnd() % 20) + (int)(45 * s);
+		spawn(0, NBIG, 140 + (int)(110 * s), rmax, 2.0 + (rnd() % 100) / 200.0, RP3, 1);
 		next_drop = t + 2 + (rnd() % 100) / 50.0;
 	}
-	prev_e = e;
-	{
-		float k = (float)(f->dt * 1.5);
-		ema += (e - ema) * (k > 1 ? 1 : k);
+	if (m->snares != last_s) {
+		last_s = m->snares;
+		float s = m->snare;
+		spawn(NBIG, NBIG + NSN, 110 + (int)(100 * s), 30 + (int)(rnd() % 10) + (int)(20 * s), 1.3, RP3, 0);
+	}
+	if (m->hats != last_h) {
+		last_h = m->hats;
+		spawn(NBIG + NSN, MAXR, 70 + (int)(90 * m->hat), 9 + (int)(rnd() % 6), 0.7, RP3, 0);
 	}
 	if (t >= next_drop) {
-		spawn(t, 110 + (int)(rnd() % 40), 50 + (int)(rnd() % 35), 3.6 + (rnd() % 100) / 120.0);
+		spawn(0, NBIG, 110 + (int)(rnd() % 40), 50 + (int)(rnd() % 35), 3.6 + (rnd() % 100) / 120.0, RP, 1);
 		next_drop = t + 2 + (rnd() % 100) / 50.0;
 	}
+	double rate = dt * (1 + 0.6 * m->energy);
+	int lift = 256 + (int)(m->bass_att * 110);
 
 	/* новая геометрия колец; без изменений — остаётся прежняя */
 	geo_t ng[MAXR];
@@ -281,17 +304,19 @@ static void render(uint16_t *dst, const uint16_t *bg, const wave_frame_t *f, wav
 		ring_t *r = &rg[i];
 		nv[i] = 0;
 		if (r->on) {
-			int p = (int)((t - r->t0) * r->inv_life * 256);
+			r->ph += rate * r->inv_life;
+			int p = (int)(r->ph * 256);
 			if (p >= 256) {
 				r->on = 0;
 			} else {
-				int br = (r->amp * FP[p]) >> 8;
+				int br = (((r->amp * lift) >> 8) * FP[p]) >> 8;
+				br = br > 256 ? 256 : br;
 				if (br < BR_MIN && p > 128) {
 					r->on = 0;
 				} else {
-					int rx8 = (r->rmax * RP[p]) >> 8;
+					int rx8 = (r->rmax * r->rp[p]) >> 8;
 					rx8 = rx8 < RMIN8 ? RMIN8 : rx8;
-					ng[i] = (geo_t){ r->cx, r->cy, rx8, (rx8 * ASPECT) >> 8, br };
+					ng[i] = (geo_t){ r->cx, r->cy, rx8, (rx8 * ASPECT) >> 8, br, r->in };
 					nv[i] = 1;
 				}
 			}
@@ -302,8 +327,8 @@ static void render(uint16_t *dst, const uint16_t *bg, const wave_frame_t *f, wav
 			ch[i] = r->dvalid;
 		else {
 			const geo_t *o = &r->d;
-			ch[i] = o->cx != ng[i].cx || o->cy != ng[i].cy || abs(o->rx8 - ng[i].rx8) >= STEP_R ||
-				abs(o->br - ng[i].br) >= STEP_B;
+			ch[i] = o->cx != ng[i].cx || o->cy != ng[i].cy || o->in != ng[i].in ||
+				abs(o->rx8 - ng[i].rx8) >= STEP_R || abs(o->br - ng[i].br) >= STEP_B;
 			if (!ch[i])
 				ng[i] = *o;
 		}
