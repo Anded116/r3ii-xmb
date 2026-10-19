@@ -2,13 +2,13 @@
  * Колышутся медленно (несколько синусов по таблице). Музыка (wave_music.c): занавесь дышит на сглаженном басу —
  * лучи выше и ярче, кромка чуть поднимается; каждая бочка пускает вдоль дуги всплеск — где он проходит, лучи
  * вытягиваются вверх и светлеют, и это место бежит слева направо, как волна яркости по настоящему сиянию;
- * складки и лучи плывут быстрее, когда играет плотно, и с рывком на бочке; малый барабан на миг окрашивает
- * занавесь в розовый, середина углубляет складки, на хэтах вспыхивают и гаснут отдельные лучи; спектр по ширине
- * (басы слева) — местная яркость и мерцание лучей. В тишине — исходное спокойное колыхание.
+ * складки и лучи плывут быстрее, когда играет плотно, и с рывком на бочке; середина углубляет складки, на хэтах
+ * вспыхивают и гаснут отдельные лучи; спектр по ширине (басы слева) — местная яркость и мерцание лучей.
+ * В тишине — исходное спокойное колыхание.
  *
- * Столбцы обновляются группами по CW, каждая — раз в NPH кадров; группа, где музыка (всплеск, вспыхнувшие лучи,
- * оттенок) заметно сменилась с прошлой отрисовки, — в этот же кадр. Пиксели с прежней яркостью не трогаются
- * (кроме смены оттенка группы), dirty — по границам реально изменившихся пикселей группы. */
+ * Столбцы обновляются группами по CW, каждая — раз в NPH кадров; группа, куда только что набежал фронт всплеска,
+ * — в этот же кадр. Пиксели с прежней яркостью не трогаются, dirty — по границам реально изменившихся пикселей
+ * группы. */
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,7 +20,7 @@
 #define NPH 3                   /* группа обновляется раз в NPH кадров */
 #define PROF 64                 /* длина таблиц профиля */
 #define AMAX 170                /* потолок осветления (из 256) */
-#define KEYD 32                 /* сдвиг музыкального ключа группы, после которого она рисуется вне очереди */
+#define KEYD 64                 /* рост всплеска в группе, после которого она рисуется вне очереди, 0..256 */
 
 static int16_t sin_tab[1024];   /* -256..256 */
 static uint16_t prof_up[PROF], prof_dn[PROF];
@@ -34,7 +34,7 @@ static wave_pulses_t pl;        /* всплески бочки вдоль дуг
 static int pls[WAVE_W];         /* их сумма по столбцам, 0..256 */
 static int bs[WAVE_BANDS];      /* полосы спектра, сглаженные, 0..256 */
 static uint8_t fla[WAVE_W];     /* вспыхнувшие на хэте лучи, 0..255 */
-static int gkey[NCH], gtn[NCH]; /* нарисованные ключ музыки и оттенок группы */
+static int gkey[NCH];           /* всплеск в группе при её прошлой отрисовке */
 static unsigned last_hat, rnd;
 
 #define SIN(p) ((int)sin_tab[((unsigned)(p) >> 6) & 1023])
@@ -87,13 +87,12 @@ static void render(uint16_t *dst, const uint16_t *bg, const wave_frame_t *f, wav
 	}
 	spi[WAVE_BANDS] = spi[WAVE_BANDS - 1];
 	int B = (int)(m->bass_att * 256), M = (int)(m->mid_att * 256), E = (int)(m->energy * 256);
-	int sn = (int)(m->snare * 256), tn = sn >> 6;
 	for (int x = 0; x < WAVE_W; x++)
 		fla[x] -= (fla[x] >> 2) + (fla[x] > 0);
 	if (m->hats != last_hat) {
 		last_hat = m->hats;
 		int v = 130 + (int)(m->hat * 125);
-		for (int n = 3 + (int)(m->hat * 5); n > 0; n--) {
+		for (int n = 2 + (int)(m->hat * 3); n > 0; n--) {
 			rnd = rnd * 1103515245u + 12345u;
 			int x = (int)((rnd >> 16) % WAVE_W), w = 1 + ((rnd >> 12) & 1);
 			for (int i = -w; i <= w; i++) {
@@ -115,16 +114,11 @@ static void render(uint16_t *dst, const uint16_t *bg, const wave_frame_t *f, wav
 	}
 
 	for (int c = 0; c < NCH; c++) {
-		int x0 = c * CW, key = sn >> 1;
-		for (int i = 0; i < CW; i++)
-			key += (pls[x0 + i] + 2 * fla[x0 + i]) / CW;
-		int kd = key - gkey[c];
-		if (!full && ((c + fno) % NPH) && kd < KEYD && kd > -KEYD && tn == gtn[c])
+		int x0 = c * CW, key = (pls[x0] + pls[x0 + CW - 1]) >> 1;
+		if (!full && ((c + fno) % NPH) && key - gkey[c] < KEYD)
 			continue;
-		int frc = tn != gtn[c];
 		gkey[c] = key;
-		gtn[c] = tn;
-		int cy[CW], A[CW], ihu[CW], ihd[CW], ctr[CW], ctg[CW], ctb[CW];
+		int cy[CW], A[CW], ihu[CW], ihd[CW], ctr[CW], ctb[CW];
 		int top[CW], bot[CW];
 		int lo = WAVE_H, hi = -1;
 		for (int i = 0; i < CW; i++) {
@@ -153,17 +147,14 @@ static void render(uint16_t *dst, const uint16_t *bg, const wave_frame_t *f, wav
 			a = a > amax ? amax : a;
 			int up = 34 + (a >> 2) + (sp * 10 >> 8) + (B * 12 >> 8) + (pk * 40 >> 8) + (fl * 26 >> 8);
 			up = up > 108 ? 108 : up;
-			int dn = 10 + (a >> 4) + (sp * 6 >> 8) + (pk * 6 >> 8) + (sn * 6 >> 8);
+			int dn = 10 + (a >> 4) + (sp * 6 >> 8) + (pk * 6 >> 8);
 			cy[i] = 90 - (B * 8 >> 8) - (pk * 7 >> 8) + (SIN(x * 190 + p7) * 14 >> 8) + (e * (8 + (M * 10 >> 8)) >> 8);
 			A[i] = a & ~3;
 			ihu[i] = 256 * (PROF - 1) / up;
 			ihd[i] = 256 * (PROF - 1) / dn;
-			/* малый барабан — розовый отсвет: красного больше, зелёного меньше */
 			int h = SIN(x * 330 + p8);
-			ctr[i] = 190 + (h * 30 >> 8) + tn * 16;
-			ctr[i] = ctr[i] > 256 ? 256 : ctr[i];
-			ctg[i] = 256 - tn * 18;
-			ctb[i] = 225 - (h * 30 >> 8) + tn * 6;
+			ctr[i] = 190 + (h * 30 >> 8);
+			ctb[i] = 225 - (h * 30 >> 8);
 			if (A[i]) {
 				top[i] = cy[i] - up < 0 ? 0 : cy[i] - up;
 				bot[i] = cy[i] + dn > WAVE_H - 1 ? WAVE_H - 1 : cy[i] + dn;
@@ -197,14 +188,14 @@ static void render(uint16_t *dst, const uint16_t *bg, const wave_frame_t *f, wav
 					}
 					a &= ~3;
 				}
-				if (a == ap[i] && (!frc || !a))
+				if (a == ap[i])
 					continue;
 				ap[i] = (uint8_t)a;
 				uint16_t p = bp[i];
 				if (a) {
 					int pr = p >> 11, pg = (p >> 5) & 63, pb = p & 31;
 					pr += ((31 - pr) * (a * ctr[i] >> 8)) >> 8;
-					pg += ((63 - pg) * (a * ctg[i] >> 8)) >> 8;
+					pg += ((63 - pg) * a) >> 8;
 					pb += ((31 - pb) * (a * ctb[i] >> 8)) >> 8;
 					p = (uint16_t)((pr << 11) | (pg << 5) | pb);
 				}

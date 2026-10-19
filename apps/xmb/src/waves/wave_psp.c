@@ -4,13 +4,13 @@
  * Заливка зависит только от строки (затухает книзу до нуля у нижнего края полосы), поэтому при сдвиге кромки
  * меняется лишь узкая зона вокруг неё: профиль листа от расстояния до кромки ненулевой в пределах -UP..+DN px,
  * глубже — постоянная заливка строки. Музыка (wave_music.c): листы дышат на сглаженном басу — размах больше,
- * сами чуть поднимаются; каждая бочка пускает по ленте импульс — листы в этом месте вспухают вверх (передний
- * сильнее), кромки светлеют, и этот вал бежит слева направо; течение быстрее, когда играет плотно, и с рывком
- * на бочке; малый барабан на миг подсвечивает кромки, на хэтах по кромкам вспыхивают и гаснут блики.
+ * сами чуть поднимаются; каждая бочка пускает по ленте импульс — передний лист в этом месте вспухает вверх,
+ * кромки всех листов светлеют, и этот вал бежит слева направо; течение быстрее, когда играет плотно, и с рывком
+ * на бочке; на хэтах по кромкам вспыхивают и гаснут блики.
  * В тишине — исходное спокойное течение.
  *
  * Кадр: у каждого листа и столбца — строки вокруг старой и новой кромки, если она сдвинулась хотя бы на HYS/16 px
- * или заметно сменилась яркость кромки или отсвета;
+ * или заметно сменилась яркость кромки;
  * пиксель пересчитывается по всем листам, пишется, только если изменился. dirty — по блокам столбцов от первой
  * до последней изменившейся строки; соседние блоки жадно склеиваются по наименьшему приросту площади, пока
  * прямоугольников больше WAVE_MAX_DIRTY. Всё целочисленное:
@@ -28,9 +28,10 @@
 #define BLK 2                   /* гранулярность прямоугольников, столбцов */
 #define MERGE 8                 /* склеивать и при меньшем числе прямоугольников, если прирост площади не больше */
 #define NBLK (WAVE_W / BLK)
-#define HYS 4                   /* столбец не трогаем, пока кромка сдвинулась меньше, 1/16 px */
+#define HYS 8                   /* столбец не трогаем, пока кромка сдвинулась меньше, 1/16 px */
+#define RHYS 16                 /* и пока яркость кромки сменилась меньше, из 256 */
 #define SNB 12                  /* таблица синуса: 4096 значений */
-#define NGL 6                   /* бликов на хэт */
+#define NGL 3                   /* бликов на хэт */
 #define GLR 12                  /* полуширина блика, столбцов */
 #define SWR 12                  /* полуширина сглаживания вала, столбцов */
 
@@ -45,9 +46,9 @@ typedef struct {
 
 /* сзади вперёд: дальний лист бледнее и шире, передний — ярче кромкой */
 static const sheet_t S[NL] = {
-	{ 78, 14, 0.55, -0.030, 4.0, 1.30,  0.045, 0.10, 0.031, 30,  90, 20, 8 * SUB },
-	{ 90, 16, 0.75,  0.042, 4.5, 1.70, -0.050, 0.45, 0.023, 34, 130, 26, 12 * SUB },
-	{ 102, 12, 0.95, -0.055, 3.5, 2.20,  0.065, 0.80, 0.037, 40, 170, 32, 16 * SUB },
+	{ 78, 14, 0.55, -0.030, 4.0, 1.30,  0.045, 0.10, 0.031, 30,  90, 20, 0 },
+	{ 90, 16, 0.75,  0.042, 4.5, 1.70, -0.050, 0.45, 0.023, 34, 130, 26, 0 },
+	{ 102, 12, 0.95, -0.055, 3.5, 2.20,  0.065, 0.80, 0.037, 40, 170, 32, 14 * SUB },
 };
 
 static int16_t sn[1 << SNB];            /* sin, ±16384 */
@@ -58,8 +59,7 @@ static uint8_t g[WAVE_H];               /* затухание заливки к�
 static int fl[NL][WAVE_H];              /* заливка листа по строке */
 static int ed[NL][WAVE_W];              /* нарисованная кромка, 1/16 px */
 static int rs[NL][WAVE_W];              /* нарисованная яркость кромки (с бликом), 0..256 */
-static int ss[NL][WAVE_W];              /* нарисованный отсвет под кромкой, 0..256 */
-static int ne[WAVE_W + 2], nr[WAVE_W], ns[WAVE_W];
+static int ne[WAVE_W + 2], nr[WAVE_W];
 static int blo[NBLK], bhi[NBLK];
 static int ready;
 static double ft;                       /* время течения: идёт быстрее, когда играет плотно */
@@ -67,7 +67,7 @@ static wave_pulses_t pl;                /* импульсы бочки по ле
 static int pls[WAVE_W];                 /* их сумма по столбцам, 0..256 */
 static uint8_t gl[NL][WAVE_W];          /* блики хэтов на кромках, 0..255 */
 static uint8_t glp[2 * GLR + 1];         /* профиль блика */
-static int mb, me, ms;                  /* бас (сглаженный), плотность, малый барабан — 0..256 */
+static int mb, me;                      /* бас (сглаженный) и плотность, 0..256 */
 static unsigned last_hat, rnd;
 
 static const uint8_t bay[4][4] = {
@@ -119,7 +119,7 @@ static inline uint32_t turns32(double x)
 	return (uint32_t)(uint64_t)(x * 4294967296.0);
 }
 
-/* новая кромка листа k (ne, 1/16 px), яркость кромки (nr) и отсвет под ней (ns) по столбцам */
+/* новая кромка листа k (ne, 1/16 px) и яркость кромки по столбцам (nr) */
 static void sheet_calc(int k, double t)
 {
 	const sheet_t *h = &S[k];
@@ -127,11 +127,11 @@ static void sheet_calc(int k, double t)
 	uint32_t p1 = turns32(h->ph + h->v1 * ft + pw), p2 = turns32(-1.3 * h->ph + h->v2 * ft - 1.6 * pw);
 	uint32_t d1 = (uint32_t)(h->k1 * 4294967296.0 / WAVE_W), d2 = (uint32_t)(h->k2 * 4294967296.0 / WAVE_W);
 	double br = 1 + 0.10 * sin(2 * M_PI * (0.017 * t + 0.3 * k));    /* медленное «дыхание» размаха */
-	int am = 256 + ((mb * 150 + me * 40) >> 8);                        /* дыхание: до +75% размаха */
+	int am = 256 + ((mb * 80 + me * 40) >> 8);                         /* дыхание: до +45% размаха */
 	int A1 = (int)(h->a1 * SUB * br), A2 = (int)(h->a2 * SUB * br);
 	A1 = (A1 * am) >> 8;
 	A2 = (A2 * am) >> 8;
-	int c = (int)(h->ct * SUB) - ((mb * 6 * SUB) >> 8);
+	int c = (int)(h->ct * SUB) - ((mb * 4 * SUB) >> 8);
 	for (int x = 0; x < WAVE_W; x++) {
 		ne[x + 1] = c + ((A1 * sn[p1 >> (32 - SNB)]) >> 14) + ((A2 * sn[p2 >> (32 - SNB)]) >> 14)
 			- ((pls[x] * h->swell) >> 8);
@@ -140,7 +140,7 @@ static void sheet_calc(int k, double t)
 	}
 	ne[0] = 2 * ne[1] - ne[2];
 	ne[WAVE_W + 1] = 2 * ne[WAVE_W] - ne[WAVE_W - 1];
-	int rim = h->rim + ((me * 30 + ms * 80) >> 8);
+	int rim = h->rim + ((me * 30) >> 8);
 	for (int x = 0; x < WAVE_W; x++) {
 		/* наклон в 1/16 px на 2 столбца; блик — где кромка слегка поднимается вправо (свет сверху-слева) */
 		int s = ne[x + 2] - ne[x] + 4;
@@ -150,7 +150,6 @@ static void sheet_calc(int k, double t)
 		sp = (sp * sp) >> 8;
 		int v = ((rim * (150 + ((sp * 106) >> 8))) >> 8) + ((pls[x] * 110) >> 8) + gl[k][x];
 		nr[x] = v > 256 ? 256 : v;
-		ns[x] = h->sheen + ((pls[x] * 130 + ms * 30) >> 8);
 	}
 }
 
@@ -178,7 +177,7 @@ static inline uint16_t pix(const uint16_t *bg, int x, int y)
 		if (i >= PN)
 			a += fl[k][y];
 		else
-			a += ((cov[i] * fl[k][y]) >> 8) + ((rimt[i] * rs[k][x]) >> 8) + ((sht[i] * ss[k][x]) >> 8);
+			a += ((cov[i] * fl[k][y]) >> 8) + ((rimt[i] * rs[k][x]) >> 8) + ((sht[i] * S[k].sheen) >> 8);
 	}
 	return lit(bg[y * WAVE_W + x], a, bay[y & 3][x & 3]);
 }
@@ -229,10 +228,9 @@ static void render(uint16_t *dst, const uint16_t *bg, const wave_frame_t *f, wav
 	static const wave_music_t calm;
 	const wave_music_t *m = f->m ? f->m : &calm;
 	float dt = f->dt > 0.1 ? 0.1f : (float)f->dt;
-	ft += dt * (1 + 1.5f * m->energy + 3.0f * m->kick);
+	ft += dt * (1 + 0.9f * m->energy + 1.6f * m->kick);
 	mb = (int)(m->bass_att * 256);
 	me = (int)(m->energy * 256);
-	ms = (int)(m->snare * 256);
 	wave_pulses_update(&pl, m, dt, pls);
 	for (int x = 0; x < WAVE_W; x++)        /* импульс поднимает сразу и заметно, хвост — мягко */
 		pls[x] = (pls[x] * (512 - pls[x])) >> 8;
@@ -268,7 +266,6 @@ static void render(uint16_t *dst, const uint16_t *bg, const wave_frame_t *f, wav
 			sheet_calc(k, f->t);
 			memcpy(ed[k], ne + 1, sizeof(ed[k]));
 			memcpy(rs[k], nr, sizeof(rs[k]));
-			memcpy(ss[k], ns, sizeof(ss[k]));
 		}
 		for (int x = 0; x < WAVE_W; x++) {
 			int top = ed[0][x];             /* выше всех листов — чистый фон */
@@ -294,12 +291,11 @@ static void render(uint16_t *dst, const uint16_t *bg, const wave_frame_t *f, wav
 		sheet_calc(k, f->t);
 		for (int x = 0; x < WAVE_W; x++) {
 			int eo = ed[k][x], en = ne[x + 1];
-			int de = en - eo, dr = nr[x] - rs[k][x], ds = ns[x] - ss[k][x];
-			if (de < HYS && de > -HYS && dr < HYS * 2 && dr > -HYS * 2 && ds < HYS && ds > -HYS)
+			int de = en - eo, dr = nr[x] - rs[k][x];
+			if (de < HYS && de > -HYS && dr < RHYS && dr > -RHYS)
 				continue;
 			ed[k][x] = en;
 			rs[k][x] = nr[x];
-			ss[k][x] = ns[x];
 			int a = (eo < en ? eo : en) - UP * SUB, z = (eo > en ? eo : en) + DN * SUB;
 			int y0 = a >> 4, y1 = (z >> 4) + 1;
 			y0 = y0 < 0 ? 0 : y0;
