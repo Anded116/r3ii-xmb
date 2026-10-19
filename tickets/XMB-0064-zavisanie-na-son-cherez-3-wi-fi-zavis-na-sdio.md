@@ -8,9 +8,9 @@ area: power
 source: user
 verify-in: review
 created: 2026-10-19
-updated: 2026-10-19
+updated: 2026-10-20
 links: XMB-0061
-commits: 29f0ffe
+commits: 29f0ffe, fe53d2f
 ---
 
 
@@ -31,3 +31,4 @@ commits: 29f0ffe
 - 2026-10-19 (agent): 2026-10-19 17:50: после пробуждения в 17:48:51 Wi-Fi включился, через ~12 с — ошибки контроллера mmc.0 (SDIO Wi-Fi, дамп дескрипторов). Перед следующим сном wifi_park ждал «ifconfig wlan0 down» — он, wpa_supplicant и «ifconfig 0.0.0.0» в состоянии D навсегда; UI заморожен на отсчёте. Позже встали и чтения с карты (mmcblk0 inflight 2, sync в wait_on_page_bit).
 - 2026-10-19 (agent): status open -> fixed; commits 29f0ffe
 - 2026-10-19 (agent): Сделано: интерфейс больше не висит, сон без mem до перезагрузки. Причина самого зависания SDIO после пробуждения не найдена (буфер ядра забит дампом дескрипторов). Гипотеза: Wi-Fi включается сразу после resume, пока шины ещё не устоялись — у Sonix радио поднимается отдельно от пробуждения. Следить: повторится — снять dmesg сразу.
+- 2026-10-20 (agent): commits 29f0ffe, fe53d2f - Повтор 2026-10-20 00:13: защита сработала (без mem), но через ~25 мин интерфейс встал на отсчёте «3» — вероятно, обращение к карте (в прошлый раз зависли и чтения mmcblk0). Таймаут 5 с фактически длился 89 с (posix_spawn?). По опыту Compás (github.com/Starnished66/compas-player, power_suspend.c) и стока: перед mem — wifi_off + bt_suspend, после — радио в фоне. Добавлен bt_suspend: Bluetooth-половина того же модуля уходила в mem включённой. Проверено mem_play_test: bt_suspend → mem → пробуждение → кнопки, чип BT остаётся выключен (bt_off).
