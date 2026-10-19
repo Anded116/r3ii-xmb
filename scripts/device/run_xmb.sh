@@ -14,6 +14,8 @@ echo "=== $(date) запуск" > $LOG
 # причина последнего сброса процессора (CPM RSR, X1600: бит 0 — питание, 1 — сторожевой таймер, им же делаются
 # reboot и паника ядра, 2 — гибернация). Биты копятся — после чтения обнулить: 0 — с прошлого запуска XMB сброса не было
 echo "сброс: $(devmem 0x10000008 32)" >> $LOG
+# чёрный ящик XMB (blackbox.h): прошлый запуск — в .prev
+[ -d $D ] && { mv -f $D/bb.log $D/bb.log.prev 2>/dev/null; echo "=== $(date) запуск, $(tail -1 $LOG)" > $D/bb.log; }
 devmem 0x10000008 32 0
 sh /tmp/stop_stock.sh >> $LOG 2>&1
 chmod +x /tmp/xmb/xmb

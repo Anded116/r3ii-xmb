@@ -1,4 +1,5 @@
 #include "subproc.h"
+#include "blackbox.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -39,6 +40,7 @@ static pid_t spawn(const char *cmd, int io, int io_to)
 	sigaddset(&def, SIGPIPE);
 	posix_spawnattr_setsigdefault(&at, &def);
 	posix_spawnattr_setflags(&at, POSIX_SPAWN_SETSIGDEF);
+	bb("команда: %.80s", cmd);
 	char *argv[] = { "sh", "-c", (char *)cmd, NULL };
 	pid_t pid;
 	if (posix_spawn(&pid, "/bin/sh", &fa, &at, argv, environ))

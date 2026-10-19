@@ -27,6 +27,7 @@
 
 #include "lvgl/lvgl.h"
 #include "audio.h"
+#include "blackbox.h"
 #include "subproc.h"
 #include "filesave.h"
 #include "xmb.h"
@@ -137,7 +138,8 @@ static int wheel_held(void)
 
 static int deep_sleep(void)
 {
-	int slept = 0, host = usb_host();
+	/* XMB_FORCE_MEM — проверка сна на кабеле (сценарий mem): иначе компьютер разбудил бы сразу */
+	int slept = 0, host = usb_host() && !getenv("XMB_FORCE_MEM");
 	xmb_sleep_prepare(!host);
 	screen_set(0);
 	/* компьютер на кабеле будит сразу же, а переподключение USB после пробуждения рвёт adb — только гасим экран */
@@ -154,6 +156,7 @@ static int deep_sleep(void)
 		unsigned long wheel = irq_count("KEY_POWER"), next = irq_count("KEY_PREVIOUSSONG");
 		printf("suspend\n");
 		fflush(stdout);
+		bb("сон: mem");
 		int fd = open("/sys/power/state", O_WRONLY);
 		if (fd >= 0) {
 			if (write(fd, "mem", 3) < 0)
@@ -170,6 +173,7 @@ static int deep_sleep(void)
 		usleep(300000);   /* дать кнопке отпуститься */
 	}
 	woke_ms = slept ? tick_ms() : 0;
+	bb("сон: проснулся (%s)", slept ? "был сон" : "сна не было");
 	xmb_sleep_end();
 	if (!slept) {   /* ядро отказало (кто-то держит блокировку сна): экран не трогать — сна не было */
 		printf("suspend не удался — экран остаётся погашенным, следующая попытка через 5 мин\n");
@@ -416,7 +420,10 @@ static void script_step(lv_timer_t *t)
 		script_tok_ms = tick_ms();
 	}
 	uint32_t t0 = tick_ms();
-	xmb_input_name(tok);
+	if (!strcmp(tok, "mem"))   /* настоящий сон, как от колеса (на кабеле — только с XMB_FORCE_MEM) */
+		deep_sleep();
+	else
+		xmb_input_name(tok);
 	if (tick_ms() - t0 > 5)
 		printf("ввод %s: %u мс\n", tok, tick_ms() - t0);
 }
@@ -768,9 +775,13 @@ int main(int argc, char **argv)
 				case KEY_LEFT:  if (ev.value == 1) xmb_input(XMB_WHEEL_DOWN); break;
 				case KEY_RIGHT: if (ev.value == 1) xmb_input(XMB_WHEEL_UP); break;
 				case KEY_PREVIOUSSONG:   /* кнопка «след. трек» на корпусе */
+					if (ev.value == 1)
+						bb("кнопка: след. трек");
 					btn_event(&b_next, ev.value, now);
 					break;
 				case KEY_PLAYPAUSE:
+					if (ev.value == 1)
+						bb("кнопка: играть");
 					btn_event(&b_play, ev.value, now);
 					break;
 				case KEY_POWER:   /* клик колесом: короткий — выбор (при отпускании), долгий — действия с пунктом */

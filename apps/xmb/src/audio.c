@@ -11,6 +11,7 @@
  * ПК (XMB_HOST): SDL2 audio, громкость программно.
  */
 #include "audio.h"
+#include "blackbox.h"
 #include "subproc.h"
 
 #include <fcntl.h>
@@ -608,8 +609,10 @@ static void apply_volume(void)
 
 static void out_close(void)
 {
-	if (a.pcm)
+	if (a.pcm) {
+		bb("pcm: закрыть");
 		pcm_close(a.pcm);
+	}
 	a.pcm = NULL;
 	if (a.bt_pipe)
 		sp_pclose(a.bt_pipe);
@@ -696,11 +699,13 @@ static int out_open(int rate)
 		return 0;
 	out_close();
 	if (a.port != PORT_PHONES) {
+		bb("тракт: выход %d (был %d), разъём %c", PORT_PHONES, a.port, a.jack ? a.jack : '?');
 		mixer_set("Output Port Switch", PORT_PHONES);   /* до открытия PCM: иначе ядро падает */
 		a.port = PORT_PHONES;
 		apply_volume();
 		usleep(150000);   /* включение тракта (ПЛИС HBC3000, ЦАП) — дать ему устояться, как сток и Sonix */
 	}
+	bb("pcm: открыть %d Гц, период %d", rate, period);
 	/* 24 бита (контейнер 32, S24_LE — его AIC принимает; S32 через преобразование у Sonix роняло ядро); не открылся —
 	 * 16 бит с дизерингом */
 	struct pcm_config cfg = {
@@ -732,6 +737,7 @@ static int out_open(int rate)
 	a.out_rate = rate;
 	a.out_period = period;
 	a.out_fill = 0;
+	bb("pcm: открыт, %d бит", a.out_bits);
 	return 0;
 }
 
@@ -748,24 +754,35 @@ static void out_write(const int32_t *buf, unsigned frames)
 	static int16_t s16[CHUNK * 2];
 	if (a.bt_pipe || a.out_bits == 16)
 		to_s16(buf, s16, frames);
-	if (a.bt_pipe)
+	if (a.bt_pipe) {
 		bt_write(s16, frames);
-	else if (a.pcm && pcm_writei(a.pcm, a.out_bits == 16 ? (const void *)s16 : (const void *)buf, frames) >= 0) {
+		return;
+	}
+	if (!a.pcm)
+		return;
+	/* вывод стартует, когда буфер заполнится: эта запись запускает DMA — шаг, на котором ядро падало (XMB-0024) */
+	unsigned full = (unsigned)a.out_period * 4;
+	int start = a.out_fill < full && a.out_fill + frames >= full;
+	if (start)
+		bb("pcm: старт DMA");
+	if (pcm_writei(a.pcm, a.out_bits == 16 ? (const void *)s16 : (const void *)buf, frames) >= 0) {
+		if (start)
+			bb("pcm: идёт");
 		if (a.out_fill < 1u << 30)   /* нужно лишь «больше буфера» — без переполнения за часы игры */
 			a.out_fill += frames;
-	} else if (a.pcm) {
-		/* недогрузка (поток не успел) — слышна щелчком: считать и раз в 10 с писать в журнал */
-		static unsigned xruns;
-		static time_t said;
-		xruns++;
-		if (time(NULL) - said >= 10) {
-			said = time(NULL);
-			fprintf(stderr, "audio: недогрузка PCM (%u, %d бит, %d Гц): %s\n", xruns, a.out_bits, a.out_rate,
-				pcm_get_error(a.pcm));
-		}
-		pcm_prepare(a.pcm);
-		a.out_fill = 0;
+		return;
 	}
+	/* недогрузка (поток не успел) — слышна щелчком: считать и раз в 10 с писать в журнал */
+	static unsigned xruns;
+	static time_t said;
+	xruns++;
+	if (time(NULL) - said >= 10) {
+		said = time(NULL);
+		fprintf(stderr, "audio: недогрузка PCM (%u, %d бит, %d Гц): %s\n", xruns, a.out_bits, a.out_rate,
+			pcm_get_error(a.pcm));
+	}
+	pcm_prepare(a.pcm);
+	a.out_fill = 0;
 }
 
 /* заявка интерфейса на смену выхода (под a.mu): закрыть текущий, следующая запись откроет новый */
@@ -797,6 +814,7 @@ static void out_power_off(void)
 {
 	out_close();
 	if (a.port != PORT_OFF) {
+		bb("тракт: выключить");
 		mixer_set("Output Port Switch", PORT_OFF);
 		a.port = PORT_OFF;
 	}
@@ -1257,6 +1275,7 @@ static void jack_check(void)
 	if (first || a.bt_path[0] || (!a.pcm && a.port != PORT_PHONES))
 		return;
 	fprintf(stderr, "audio: разъём 3.5 — %s, вывод заново\n", st == '1' ? "вставлен" : "вынут");
+	bb("разъём 3.5: %s, pcm %s", st == '1' ? "вставлен" : "вынут", a.pcm ? "открыт" : "закрыт");
 	out_close();
 	a.port = -1;
 	usleep(300000);
