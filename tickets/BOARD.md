@@ -9,10 +9,10 @@
 | Статус | Тикетов |
 |---|---|
 | `open` | 7 |
-| `fixed` | 16 |
+| `fixed` | 17 |
 | `verified` | 33 |
 | `accepted` | 7 |
-| **всего** | **63** |
+| **всего** | **64** |
 
 | Область | open | in-progress | fixed |
 |---|---|---|---|
@@ -21,7 +21,7 @@
 | audio | 3 | 0 | 3 |
 | library | 0 | 0 | 1 |
 | net | 1 | 0 | 3 |
-| power | 0 | 0 | 3 |
+| power | 0 | 0 | 4 |
 | display | 0 | 0 | 1 |
 | input | 1 | 0 | 0 |
 | firmware | 2 | 0 | 0 |
@@ -47,6 +47,7 @@
 
 - [ ] [XMB-0012](XMB-0012-silnye-tormoza-posle-sna-panel-slomana-snom.md) `[P0/power]` Сильные тормоза после сна: панель сломана сном, сон с Wi-Fi вешал плеер
 - [ ] [XMB-0053](XMB-0053-proizvoditelnost-prosela-nuzhno-stabilno-45-k.md) `[P1/display]` Производительность просела: нужно стабильно 45 к/с с самой тяжёлой анимацией и музыкой
+- [ ] [XMB-0064](XMB-0064-zavisanie-na-son-cherez-3-wi-fi-zavis-na-sdio.md) `[P1/power]` Зависание на «Сон через 3»: Wi-Fi завис на SDIO после пробуждения, XMB ждал ifconfig
 - [ ] [XMB-0001](XMB-0001-sbros-bufera-pcm-pri-pauze-peremotke-i-smene.md) `[P2/audio]` Сброс буфера PCM при паузе, перемотке и смене трека — проверить на щелчки
 - [ ] [XMB-0002](XMB-0002-wi-fi-podklyuchenie-k-novoy-seti-s-parolem.md) `[P2/net]` Wi-Fi: подключение к новой сети с паролем
 - [ ] [XMB-0005](XMB-0005-podkasty-podpiski-vybirayutsya-na-pk-vypuski.md) `[P2/net]` Подкасты: подписки выбираются на ПК, выпуски плеер качает сам по Wi-Fi
