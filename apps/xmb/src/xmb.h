@@ -70,6 +70,7 @@ void xmb_screen_broken(void);   /* вывод кадров не восстана
 
 /* реализуются платформой (main_host.c / main_device.c) */
 int platform_battery(int *charging);   /* заряд в %, -1 — неизвестно */
+void xmb_set_cable(int on);   /* кабель питания (зарядка или компьютер) вставлен — штекер у батареи */
 int platform_battery_mv(void);         /* напряжение, мВ; -1 — неизвестно */
 void platform_brightness(int percent);
 

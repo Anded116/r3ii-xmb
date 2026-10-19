@@ -1649,12 +1649,66 @@ static void layout(void)
 
 /* ---------- верхняя панель, мини-плеер ---------- */
 
+#define BAT_W 34       /* таблетка батареи; справа от неё до края экрана — место штекера */
+#define PLUG_OUT 44    /* штекер за краем экрана */
+
+static int cable = -1;            /* кабель питания вставлен; −1 — ещё не знаем */
+static int plug_dx = PLUG_OUT;    /* сдвиг штекера вправо от таблетки: 0 — воткнут */
+
+static void plug_anim(void *v, int32_t x)
+{
+	(void)v;
+	plug_dx = x;
+	lv_obj_invalidate(s.tb_bat);
+}
+
+/* кабель вставили — справа въезжает штекер и втыкается в таблетку батареи, вынули — уезжает (как в Sailfish) */
+void xmb_set_cable(int on)
+{
+	if (on == cable)
+		return;
+	int first = cable < 0;
+	cable = on;
+	lv_anim_delete(&plug_dx, plug_anim);
+	if (first) {   /* при запуске — сразу на месте */
+		plug_anim(NULL, on ? 0 : PLUG_OUT);
+		return;
+	}
+	lv_anim_t a;
+	lv_anim_init(&a);
+	lv_anim_set_var(&a, &plug_dx);
+	lv_anim_set_exec_cb(&a, plug_anim);
+	lv_anim_set_values(&a, plug_dx, on ? 0 : PLUG_OUT);
+	lv_anim_set_duration(&a, on ? 420 : 300);
+	lv_anim_set_path_cb(&a, on ? lv_anim_path_overshoot : lv_anim_path_ease_in);
+	lv_anim_start(&a);
+}
+
+/* штекер: корпус (на пиксель шире провода с каждой стороны) и провод к краю экрана; x — левый край корпуса */
+static void plug_draw(lv_layer_t *l, int x, int mid)
+{
+	lv_draw_rect_dsc_t d;
+	lv_draw_rect_dsc_init(&d);
+	d.radius = 1;
+	d.bg_color = lv_color_white();
+	d.bg_opa = LV_OPA_COVER;
+	lv_area_t body = { x, mid - 3, x + 5, mid + 2 };
+	lv_draw_rect(l, &d, &body);
+	d.radius = 0;
+	d.bg_opa = 200;
+	lv_area_t wire = { x + 6, mid - 2, x + 60, mid + 1 };
+	lv_draw_rect(l, &d, &wire);
+}
+
 /* батарея как в Android 16: таблетка, процент внутри, заливка — уровень; зелёная при зарядке, красная при ≤15% */
 static void battery_draw(lv_event_t *e)
 {
 	lv_layer_t *l = lv_event_get_layer(e);
 	lv_area_t a;
 	lv_obj_get_coords(s.tb_bat, &a);
+	a.x2 = a.x1 + BAT_W - 1;
+	if (plug_dx < PLUG_OUT)
+		plug_draw(l, a.x2 + 1 + plug_dx, (a.y1 + a.y2 + 1) / 2);
 	int lvl = s.bat < 0 ? 0 : s.bat > 100 ? 100 : s.bat;
 	lv_color_t fill = s.bat_chg ? lv_color_hex(0x5fd068) : lvl <= 15 ? lv_color_hex(0xff5a4e) : lv_color_white();
 	lv_draw_rect_dsc_t d;
@@ -5471,6 +5525,10 @@ int xmb_input_name(const char *name)
 		xmb_set_usb_link(XMB_USB_DAC);
 		return 1;
 	}
+	if (!strncmp(name, "cable:", 6)) {   /* кабель питания: cable:1 — вставили, cable:0 — вынули */
+		xmb_set_cable(name[6] == '1');
+		return 1;
+	}
 	if (!strncmp(name, "usb:link", 8)) {   /* значок подключения: usb:link1 … usb:link4, usb:link0 — нет */
 		xmb_set_usb_link(atoi(name + 8));
 		return 1;
@@ -6654,7 +6712,7 @@ void xmb_init(const char *font_dir)
 	lv_obj_set_style_image_recolor_opa(s.tb_usb, LV_OPA_COVER, 0);
 	lv_obj_set_hidden(s.tb_usb, true);
 	s.tb_bat = plain(tb);
-	lv_obj_set_size(s.tb_bat, 34, 16);
+	lv_obj_set_size(s.tb_bat, 44, 16);   /* до края экрана: справа от таблетки — штекер */
 	lv_obj_set_pos(s.tb_bat, SCR_W - 44, 6);
 	lv_obj_add_event_cb(s.tb_bat, battery_draw, LV_EVENT_DRAW_MAIN, NULL);
 	s.tb_act = plain(tb);   /* между часами и батарейкой */

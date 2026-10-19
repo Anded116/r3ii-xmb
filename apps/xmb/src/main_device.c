@@ -835,6 +835,8 @@ int main(int argc, char **argv)
 				}
 				perror("карта: mount");
 			}
+			char ac[8];
+			xmb_set_cable(usb_power() || (read_line("/sys/class/power_supply/ac/online", ac, sizeof(ac)) && !strcmp(ac, "1")));
 			int h = usb_host();
 			if (h != host && !usb_storage && !usb_dac)
 				xmb_usb_host(h, 1);
