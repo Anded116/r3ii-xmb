@@ -9,14 +9,14 @@
 | Статус | Тикетов |
 |---|---|
 | `open` | 7 |
-| `fixed` | 17 |
-| `verified` | 32 |
+| `fixed` | 16 |
+| `verified` | 33 |
 | `accepted` | 7 |
 | **всего** | **63** |
 
 | Область | open | in-progress | fixed |
 |---|---|---|---|
-| ui | 0 | 0 | 4 |
+| ui | 0 | 0 | 3 |
 | player | 0 | 0 | 1 |
 | audio | 3 | 0 | 3 |
 | library | 0 | 0 | 1 |
@@ -57,7 +57,6 @@
 - [ ] [XMB-0057](XMB-0057-analiz-muzyki-dlya-fonov-normalizatsiya-po.md) `[P2/audio]` Анализ музыки для фонов: нормализация по полосам, бас/середина/верх, удары
 - [ ] [XMB-0059](XMB-0059-zvezdnaya-pyl-reaktsiya-na-muzyku-udarnaya.md) `[P2/ui]` Звёздная пыль: реакция на музыку — ударная волна на бочке, искры на хэтах
 - [ ] [XMB-0062](XMB-0062-ostalnye-fony-slabo-reagiruyut-na-muzyku.md) `[P2/ui]` Остальные фоны слабо реагируют на музыку — перевести на разбор ударов
-- [ ] [XMB-0063](XMB-0063-podsvetka-vybrannogo-elementa-stupeni-vmesto.md) `[P2/ui]` Подсветка выбранного элемента — ступени вместо плавного градиента
 - [ ] [XMB-0028](XMB-0028-pleer-na-pauze-posle-zapuska-xmb-stroka.md) `[P3/player]` Плеер на паузе после запуска XMB: строка формата — только «FLAC», без разрядности и частоты
 
 **Проверить ТЕСТОМ**
@@ -86,14 +85,14 @@
 | ID | Обновлён | Статус | Заголовок |
 |---|---|---|---|
 | [XMB-0058](XMB-0058-volna-ps3-reaktsiya-na-muzyku-dyhanie-na-basu.md) | 2026-10-19 | verified | Волна PS3: реакция на музыку — дыхание на басу, импульсы по ленте на ударах |
-| [XMB-0036](XMB-0036-okno-tsapa-vyhod-kak-v-ostalnoy-sisteme.md) | 2026-10-18 | verified | Окно ЦАПа: выход как в остальной системе |
+| [XMB-0063](XMB-0063-podsvetka-vybrannogo-elementa-stupeni-vmesto.md) | 2026-10-19 | verified | Подсветка выбранного элемента — ступени вместо плавного градиента |
 | [XMB-0038](XMB-0038-status-bar-znachok-rezhima-usb-podklyucheniya.md) | 2026-10-18 | verified | Статус-бар: значок режима USB-подключения |
 | [XMB-0040](XMB-0040-usb-tsap-v-fone-menyu-dostupno-okno-ne.md) | 2026-10-18 | verified | USB-ЦАП в фоне: меню доступно, окно не обязательно |
-| [XMB-0035](XMB-0035-okno-tsapa-vizualizirovat-gromkost.md) | 2026-10-18 | verified | Окно ЦАПа: визуализировать громкость |
-| [XMB-0032](XMB-0032-punkt-bez-vtoroy-stroki-smeschen-vverh.md) | 2026-10-18 | verified | Пункт без второй строки смещён вверх — центрировать |
+| [XMB-0044](XMB-0044-ikonki-xmb-svoi-vmesto-dubliruyuschihsya.md) | 2026-10-18 | verified | Иконки XMB: свои вместо дублирующихся символов LVGL |
+| [XMB-0036](XMB-0036-okno-tsapa-vyhod-kak-v-ostalnoy-sisteme.md) | 2026-10-18 | verified | Окно ЦАПа: выход как в остальной системе |
 | [XMB-0033](XMB-0033-kursor-v-polyah-vvoda-temnyy-hotya-zadan-belym.md) | 2026-10-18 | verified | Курсор в полях ввода тёмный, хотя задан белым |
 | [XMB-0034](XMB-0034-ekran-60-gts-naskolko-riskovanno-i-stoit-li.md) | 2026-10-18 | verified | Экран 60 Гц: насколько рискованно и стоит ли |
-| [XMB-0044](XMB-0044-ikonki-xmb-svoi-vmesto-dubliruyuschihsya.md) | 2026-10-18 | verified | Иконки XMB: свои вместо дублирующихся символов LVGL |
+| [XMB-0035](XMB-0035-okno-tsapa-vizualizirovat-gromkost.md) | 2026-10-18 | verified | Окно ЦАПа: визуализировать громкость |
 | [XMB-0051](XMB-0051-raskrytie-pleera-iz-kartochki-ne-podhodit-k-ee.md) | 2026-10-18 | verified | Раскрытие плеера из «Карточки» не подходит к её виду |
 | [XMB-0052](XMB-0052-podkasty-otdelnyy-razdel-vmesto-punkta-v-muzyke.md) | 2026-10-18 | verified | Подкасты — отдельный раздел вместо пункта в «Музыке» |
 | [XMB-0055](XMB-0055-shtorka-dolgoe-nazhatie-na-plitku-otkryvaet-ee.md) | 2026-10-18 | verified | Шторка: долгое нажатие на плитку открывает её страницу |
@@ -101,6 +100,7 @@
 | [XMB-0047](XMB-0047-shtorka-bez-polzunka-gromkosti-koleso-yarkost.md) | 2026-10-18 | verified | Шторка: без ползунка громкости, колесо — яркость |
 | [XMB-0048](XMB-0048-shtorka-ubrat-knopki-kotorye-est-v-pleere.md) | 2026-10-18 | verified | Шторка: убрать кнопки, которые есть в плеере |
 | [XMB-0049](XMB-0049-pleer-rezkaya-smena-tsveta-fona-pri-raskrytii.md) | 2026-10-18 | verified | Плеер: резкая смена цвета фона при раскрытии мини-плеера |
+| [XMB-0032](XMB-0032-punkt-bez-vtoroy-stroki-smeschen-vverh.md) | 2026-10-18 | verified | Пункт без второй строки смещён вверх — центрировать |
 | [XMB-0021](XMB-0021-svayp-vlevo-vo-vlozhennyh-menyu-na-uroven-vyshe.md) | 2026-10-18 | verified | Свайп влево во вложенных меню — на уровень выше |
 | [XMB-0011](XMB-0011-rezhim-usb-tsap.md) | 2026-10-18 | verified | Режим USB-ЦАП |
 | [XMB-0019](XMB-0019-skrugleniya-uglov-ekrana-ne-sovsem-kruglye.md) | 2026-10-18 | verified | Скругления углов экрана не совсем круглые |
