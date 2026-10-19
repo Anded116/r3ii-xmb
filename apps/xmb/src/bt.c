@@ -29,6 +29,7 @@ static struct {
 	unsigned gen, msg_seq;
 	char status[48], msg[96];
 	char pcm[160];   /* выход звука сейчас */
+	volatile int chip_off;   /* чип обесточен перед сном (bt_suspend): включение — сначала bt_resume */
 } b = { .mu = PTHREAD_MUTEX_INITIALIZER, .cv = PTHREAD_COND_INITIALIZER };
 
 #if XMB_DEVICE
@@ -166,6 +167,10 @@ static void do_op(int op, int on, const char *arg)
 	char cmd[160];
 	switch (op) {
 	case OP_POWER:
+		if (on && b.chip_off) {   /* питание чипа, прошивка, bluetoothd — как сток после сна, ~10 с */
+			run("/usr/bin/bt_resume > /dev/null 2>&1", NULL, NULL);
+			b.chip_off = 0;
+		}
 		snprintf(cmd, sizeof(cmd), "bluetoothctl power %s > /dev/null 2>&1", on ? "on" : "off");
 		run(cmd, NULL, NULL);
 		b.power = on;
@@ -276,6 +281,23 @@ void bt_init(int on)
 void bt_power(int on)
 {
 	post(OP_POWER, on, NULL);
+}
+
+int bt_park(int park)
+{
+#if XMB_DEVICE
+	if (park) {
+		if (b.chip_off)
+			return 0;
+		b.chip_off = 1;
+		return sp_system_timeout("/usr/bin/bt_suspend > /dev/null 2>&1", 5000) == -2 ? -1 : 0;
+	}
+	if (b.power)
+		post(OP_POWER, 1, NULL);
+#else
+	(void)park;
+#endif
+	return 0;
 }
 
 void bt_scan(void)

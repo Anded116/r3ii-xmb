@@ -13,6 +13,10 @@ typedef struct {
 
 void bt_init(int on);
 void bt_power(int on);
+/* перед сном (1): Bluetooth-половина чипа BCM43430 — тот же модуль, что Wi-Fi на SDIO — обесточена, как у стока и
+ * Compás (bt_suspend: hci0 down, rfkill); −1 — не дождались. После (0): включён в настройках — поднимается в фоне
+ * (bt_resume, ~10 с), выключен — остаётся обесточенным до включения */
+int bt_park(int park);
 void bt_scan(void);                       /* поиск ~10 с: найденные появятся в списке */
 void bt_connect(const char *mac);         /* сопряжение (если нужно), доверие, подключение */
 void bt_disconnect(const char *mac);

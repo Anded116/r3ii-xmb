@@ -5801,6 +5801,7 @@ uint32_t xmb_sleep_after_ms(void)
 void xmb_sleep_end(void)
 {
 	wifi_park(0);
+	bt_park(0);
 }
 
 void xmb_wake(void)
@@ -5864,6 +5865,8 @@ int xmb_sleep_prepare(int mem)
 		ok = -1;
 		s.wifi_hung = 1;
 	}
+	if (mem && !ok && bt_park(1) < 0)
+		ok = -1;
 	save_flush();
 	xmb_sleep_countdown(-1, NULL);
 	screen(0);
