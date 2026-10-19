@@ -181,6 +181,8 @@ static int wheel_held(void)
 	return key_fd >= 0 && ioctl(key_fd, EVIOCGKEY(sizeof(k)), k) >= 0 && (k[KEY_POWER / 8] >> (KEY_POWER % 8) & 1);
 }
 
+static int mem_blocked;   /* Wi-Fi завис: сна до перезагрузки нет — и автосон не зажигает экран отсчётом */
+
 static int deep_sleep(void)
 {
 	/* XMB_FORCE_MEM — проверка сна на кабеле (сценарий mem): иначе компьютер разбудил бы сразу */
@@ -192,9 +194,11 @@ static int deep_sleep(void)
 		printf("на кабеле компьютера — без сна, экран погашен\n");
 		return 1;
 	}
-	if (radio < 0) {   /* сон с невыключенным Wi-Fi вешает плеер насовсем */
-		bb("сон: без mem — радио не выключилось");
-		return 1;
+	if (radio < 0) {   /* сон с невыключенным радио вешает плеер насовсем: только экран */
+		bb("сон: без mem — радио %s", radio == -1 ? "зависло, до перезагрузки" : "не выключилось");
+		if (radio == -1)
+			mem_blocked = 1;
+		return 0;
 	}
 	audio_power_down();
 	sync();
@@ -951,7 +955,8 @@ int main(int argc, char **argv)
 			off_since = now;
 		uint32_t after = xmb_sleep_after_ms();
 		/* сон не удался — следующая попытка не раньше чем через 5 мин (иначе экран загорался бы каждые полминуты) */
-		if (!screen && after && now - off_since >= after && !auto_cd && (!sleep_fail || now - sleep_fail > 300000)) {
+		if (!screen && after && now - off_since >= after && !auto_cd && !mem_blocked &&
+		    (!sleep_fail || now - sleep_fail > 300000)) {
 			xmb_wake();
 			auto_cd = tick_ms();
 		}

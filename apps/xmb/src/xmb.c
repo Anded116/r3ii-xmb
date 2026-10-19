@@ -5863,11 +5863,11 @@ int xmb_sleep_prepare(int mem)
 	}
 	int wp = mem ? wifi_park(1) : 0;
 	if (wp < 0)
-		ok = -1;
+		ok = wp;
 	if (wp == -1 && !s.wifi_hung)
 		s.wifi_hung = 1;
 	if (mem && !ok && bt_park(1) < 0)
-		ok = -1;
+		ok = -2;
 	save_flush();
 	xmb_sleep_countdown(-1, NULL);
 	screen(0);
