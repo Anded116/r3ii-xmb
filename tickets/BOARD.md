@@ -9,14 +9,14 @@
 | Статус | Тикетов |
 |---|---|
 | `open` | 7 |
-| `fixed` | 17 |
+| `fixed` | 18 |
 | `verified` | 33 |
 | `accepted` | 7 |
-| **всего** | **64** |
+| **всего** | **65** |
 
 | Область | open | in-progress | fixed |
 |---|---|---|---|
-| ui | 0 | 0 | 3 |
+| ui | 0 | 0 | 4 |
 | player | 0 | 0 | 1 |
 | audio | 3 | 0 | 3 |
 | library | 0 | 0 | 1 |
@@ -59,6 +59,7 @@
 - [ ] [XMB-0059](XMB-0059-zvezdnaya-pyl-reaktsiya-na-muzyku-udarnaya.md) `[P2/ui]` Звёздная пыль: реакция на музыку — ударная волна на бочке, искры на хэтах
 - [ ] [XMB-0062](XMB-0062-ostalnye-fony-slabo-reagiruyut-na-muzyku.md) `[P2/ui]` Остальные фоны слабо реагируют на музыку — перевести на разбор ударов
 - [ ] [XMB-0028](XMB-0028-pleer-na-pauze-posle-zapuska-xmb-stroka.md) `[P3/player]` Плеер на паузе после запуска XMB: строка формата — только «FLAC», без разрядности и частоты
+- [ ] [XMB-0065](XMB-0065-batareya-provod-ot-pravogo-kraya-ekrana-v-oval.md) `[P3/ui]` Батарея: провод от правого края экрана в овал батареи, пока подключена зарядка (въезжает/уезжает)
 
 **Проверить ТЕСТОМ**
 
