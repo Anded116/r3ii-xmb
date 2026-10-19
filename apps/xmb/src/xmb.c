@@ -69,8 +69,8 @@ static const ui_size_t *sz = &ui_sizes[1];
 #define NLET 48        /* букв в алфавитном указателе */
 #define INDEX_MIN 30   /* указатель — у списков от стольких пунктов */
 #define IDX_W 18       /* ширина полосы указателя */
-#define GLOW 72       /* размер пятна свечения под выбранным */
-#define GLOW_PAD 56   /* у обложки пятно больше её на столько */
+#define GLOW 110      /* размер пятна свечения под выбранным */
+#define GLOW_PAD 70   /* у обложки пятно больше её на столько */
 #define POOL 16       /* строк на колонку: привязываются к видимым пунктам, списки любой длины */
 #define ROW_COVER 34  /* обложка в строке */
 #define GRID_COLS 3    /* сетка альбомов: колонки, шаг ячейки, обложка, центр текущего ряда */
@@ -1632,10 +1632,10 @@ static void layout(void)
 	static int glow_cur = GLOW;
 	if (glow_cur != s.glow_sz) {
 		glow_cur = s.glow_sz;
-		lv_image_set_src(s.glow, bg_glow(s.glow_sz));
+		lv_image_set_src(s.glow, bg_glow(s.glow_sz, s.glow_sz > GLOW ? s.glow_sz - GLOW_PAD : 0));
 	}
 	set_pos(s.glow, s.glow_x - s.glow_sz / 2, s.glow_y - s.glow_sz / 2);
-	int gk = (int)((s.glow_sz > GLOW ? 150 : 90) * clamp01(s.glow_k) * (1.0 - fabs(s.slide)) * ui);
+	int gk = (int)((s.glow_sz > GLOW ? 150 : 120) * clamp01(s.glow_k) * (1.0 - fabs(s.slide)) * ui);
 	if (lv_obj_get_style_image_opa(s.glow, 0) != gk)
 		lv_obj_set_style_image_opa(s.glow, (lv_opa_t)gk, 0);
 	set_hidden(s.glow, gk < 4);
@@ -6497,7 +6497,7 @@ void xmb_init(const char *font_dir)
 	s.main = plain(scr);
 	lv_obj_set_size(s.main, SCR_W, SCR_H);
 	s.glow = lv_image_create(s.main);
-	lv_image_set_src(s.glow, bg_glow(GLOW));
+	lv_image_set_src(s.glow, bg_glow(GLOW, 0));
 	lv_obj_set_hidden(s.glow, true);
 
 	for (int c = 0; c < NCAT; c++) {

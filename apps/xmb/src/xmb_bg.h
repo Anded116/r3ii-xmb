@@ -32,6 +32,7 @@ void bg_set_band(int player);               /* 1 — полоса волны п�
 void bg_set_dim(int opa, uint32_t color);
 /* полосы спектра 0..1, от низких частот к высоким: v — сглаженные (для волн), r — как есть (для разбора ударов) */
 void bg_set_spectrum(const float *v, const float *r, int n);
-const lv_image_dsc_t *bg_glow(int size);    /* пятно свечения под выбранным элементом */
+/* пятно свечения под выбранным элементом; core — сторона того, что лежит поверх (обложка), 0 — иконка */
+const lv_image_dsc_t *bg_glow(int size, int core);
 
 #endif

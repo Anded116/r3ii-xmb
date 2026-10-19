@@ -225,23 +225,28 @@ void bg_set_spectrum(const float *v, const float *r, int n)
 }
 
 /* мягкое белое пятно свечения size×size (ARGB8888), строится один раз на размер */
-const lv_image_dsc_t *bg_glow(int size)
+const lv_image_dsc_t *bg_glow(int size, int core)
 {
 	static lv_image_dsc_t dsc[4];
-	static int sizes[4], n;
+	static int sizes[4], cores[4], n;
 	for (int i = 0; i < n; i++)
-		if (sizes[i] == size)
+		if (sizes[i] == size && cores[i] == core)
 			return &dsc[i];
 	if (n == 4)
 		return &dsc[0];
-	/* профиль (1 − r²)³ подходит к краю с нулевым наклоном — излом спада глаз видел бы границей. Пятно ложится на RGB565
-	 * с прозрачностью 35–60%: красному и синему от центра к краю достаётся по 8–12 ступеней, одна ступень — ~50 единиц
-	 * альфы. Порог Байера на ступень рассыпает их в сетку */
+	/* как свет: от ядра (под иконкой — точка, под обложкой — её край) спад по экспоненте, без плато — плато с
+	 * обрывом глаз видит диском; к краю картинки — окно в ноль с нулевым наклоном, иначе на краю видна граница.
+	 * Ореол обложки — по форме скруглённого квадрата (|x|⁴ + |y|⁴), чтобы кайма вокруг неё была ровной. Пятно
+	 * ложится на RGB565 с прозрачностью 40–60%: одна ступень красного и синего — ~50 единиц альфы; порог Байера на
+	 * ступень рассыпает ступени в сетку */
+	double c = (double)core / size;
 	uint32_t *b = lv_malloc(size * size * 4);
 	for (int y = 0; y < size; y++)
 		for (int x = 0; x < size; x++) {
-			double dx = (x + 0.5) / size * 2 - 1, dy = (y + 0.5) / size * 2 - 1, q = 1 - (dx * dx + dy * dy);
-			double a = q > 0 ? 255 * q * q * q : 0;
+			double dx = fabs((x + 0.5) / size * 2 - 1), dy = fabs((y + 0.5) / size * 2 - 1);
+			double r = core ? pow(dx * dx * dx * dx + dy * dy * dy * dy, 0.25) : sqrt(dx * dx + dy * dy);
+			double u = r < c ? 0 : (r - c) / (1 - c), w = u < 1 ? 1 - u * u : 0;
+			double a = 255 * (core ? 0.7 * exp(-4 * u) : exp(-2.4 * u)) * w * w;
 			if (a > 0)
 				a += (bayer[y & 7][x & 7] - 31.5) / 64 * 48;
 			int ai = (int)lround(a < 0 ? 0 : a > 255 ? 255 : a);
@@ -256,7 +261,8 @@ const lv_image_dsc_t *bg_glow(int size)
 	d->header.stride = size * 4;
 	d->data_size = size * size * 4;
 	d->data = (const uint8_t *)b;
-	sizes[n++] = size;
+	sizes[n] = size;
+	cores[n++] = core;
 	return d;
 }
 
