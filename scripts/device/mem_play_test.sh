@@ -24,7 +24,7 @@ XMB_FORCE_MEM=1 XMB_LOG=$LOG XMB_STEP=100 XMB_SCRIPT="wait$(rep wait 20),play$(r
 	./xmb /tmp/xmb/fonts > /dev/null 2>&1 &
 P=$!
 sleep 4
-echo +16 > /sys/class/rtc/rtc0/wakealarm   # сон — через ~8 с после старта сценария
+echo +25 > /sys/class/rtc/rtc0/wakealarm   # сон — через ~8–15 с после старта сценария (радио гасится до ~5 с)
 step "будильник: $(cat /sys/class/rtc/rtc0/wakealarm)"
 until grep -q "^resume" $LOG; do sleep 0.1; done
 step проснулся

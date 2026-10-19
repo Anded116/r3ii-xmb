@@ -1,3 +1,4 @@
+#define _GNU_SOURCE   /* pipe2 */
 #include "subproc.h"
 #include "blackbox.h"
 
@@ -62,7 +63,10 @@ static pid_t spawn(const char *cmd, int io, int io_to)
 FILE *sp_popen(const char *cmd, const char *mode)
 {
 	int w = mode[0] == 'w', p[2];
-	if (pipe(p))
+	/* O_CLOEXEC: команду другого потока, запущенную в тот же миг, канал не унаследует (её список закрываемых
+	 * дескрипторов составлен раньше). Иначе конец для записи уходил, например, к adbd из adb_restart.sh — и
+	 * чтение тут не дожидалось конца никогда. Потомку свой конец передаёт dup2, уже без флага */
+	if (pipe2(p, O_CLOEXEC))
 		return NULL;
 	pid_t pid = spawn(cmd, w ? p[0] : p[1], w ? 0 : 1);
 	if (pid < 0) {

@@ -187,8 +187,8 @@ static int deep_sleep(void)
 {
 	/* XMB_FORCE_MEM — проверка сна на кабеле (сценарий mem): иначе компьютер разбудил бы сразу */
 	int slept = 0, host = usb_host() && !getenv("XMB_FORCE_MEM");
+	screen_set(0);   /* сразу, как сток: выключение радио и звука — секунды, уже в темноте */
 	int radio = xmb_sleep_prepare(!host);
-	screen_set(0);
 	/* компьютер на кабеле будит сразу же, а переподключение USB после пробуждения рвёт adb — только гасим экран */
 	if (host) {
 		printf("на кабеле компьютера — без сна, экран погашен\n");
