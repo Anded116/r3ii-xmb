@@ -124,6 +124,51 @@ static unsigned long irq_count(const char *name)
 	return n;
 }
 
+/* счётчики прерываний по номерам (до 128) — кто разбудил: что прибавилось за сон */
+#define NIRQ 128
+static void irq_snap(unsigned long *n)
+{
+	char line[256];
+	memset(n, 0, sizeof(unsigned long) * NIRQ);
+	FILE *f = fopen("/proc/interrupts", "r");
+	if (!f)
+		return;
+	while (fgets(line, sizeof(line), f)) {
+		char *e;
+		long i = strtol(line, &e, 10);
+		if (e != line && *e == ':' && i >= 0 && i < NIRQ)
+			n[i] = strtoul(e + 1, NULL, 10);
+	}
+	fclose(f);
+}
+
+/* прибавившиеся за сон прерывания с именами, кроме таймера и каскада: «KEY_POWER+1 rtc 1Hz and alarm+1» */
+static void irq_woke(const unsigned long *a, char *out, int cap)
+{
+	char line[256];
+	int len = 0;
+	out[0] = 0;
+	FILE *f = fopen("/proc/interrupts", "r");
+	if (!f)
+		return;
+	while (fgets(line, sizeof(line), f)) {
+		char *e;
+		long i = strtol(line, &e, 10);
+		if (e == line || *e != ':' || i < 0 || i >= NIRQ || strstr(line, "timerost") || strstr(line, "cascade"))
+			continue;
+		unsigned long n;
+		int pos = 0;
+		if (sscanf(e + 1, "%lu %*s %*d %n", &n, &pos) < 1 || n == a[i])
+			continue;
+		char *name = e + 1 + pos;   /* «   97:  11  GPIO  31  KEY_POWER»: счётчик, контроллер, линия, имя */
+		name[strcspn(name, "\n")] = 0;
+		len += snprintf(out + len, len < cap ? cap - len : 0, "%s%s+%lu", len ? ", " : "", *name ? name : "?", n - a[i]);
+		if (len >= cap)
+			break;
+	}
+	fclose(f);
+}
+
 /* глубокий сон (suspend to RAM): пауза, экран гаснет. Железо будит клик колесом и «след. трек» (md-gpio-keys),
  * кнопки на АЦП — нет. Будит только колесо, как кнопка питания: от «след. трек» (карман) — сразу обратно в сон.
  * Запись в /sys/power/state возвращается после сна */
@@ -148,7 +193,7 @@ static int deep_sleep(void)
 		return 1;
 	}
 	if (radio < 0) {   /* сон с невыключенным Wi-Fi вешает плеер насовсем */
-		bb("сон: без mem — Wi-Fi не выключился");
+		bb("сон: без mem — радио не выключилось");
 		return 1;
 	}
 	audio_power_down();
@@ -157,7 +202,8 @@ static int deep_sleep(void)
 	for (int i = 0; i < 100 && wheel_held(); i++)
 		usleep(100000);
 	for (int i = 0; i < 100; i++) {
-		unsigned long wheel = irq_count("KEY_POWER"), next = irq_count("KEY_PREVIOUSSONG");
+		unsigned long wheel = irq_count("KEY_POWER"), next = irq_count("KEY_PREVIOUSSONG"), irq0[NIRQ];
+		irq_snap(irq0);
 		printf("suspend\n");
 		fflush(stdout);
 		bb("сон: mem");
@@ -169,6 +215,9 @@ static int deep_sleep(void)
 				slept = 1;
 			close(fd);
 		}
+		char woke[160];
+		irq_woke(irq0, woke, sizeof(woke));
+		bb("сон: разбудили — %s", woke);
 		if (!slept)
 			break;
 		if (irq_count("KEY_POWER") != wheel || irq_count("KEY_PREVIOUSSONG") == next)

@@ -23,6 +23,7 @@ static struct {
 	int op, op_on;
 	char op_ssid[33], op_psk[64];
 	int power, online, refresh, parked;
+	volatile int busy;   /* поток выполняет заявку (включение — с запуском wpa_supplicant) */
 	char ssid[33];   /* к какой сети подключены */
 	wifi_net_t net[WIFI_MAX];
 	int nnet;
@@ -333,9 +334,11 @@ static void *wifi_thread(void *arg)
 		snprintf(psk, sizeof(psk), "%s", w.op_psk);
 		int has_psk = w.op_psk[0] != 1;   /* 1 — пароля нет (сохранённая сеть) */
 		w.op = OP_NONE;
+		w.busy = op != OP_NONE;
 		pthread_mutex_unlock(&w.mu);
 		if (op)
 			do_op(op, on, ssid, has_psk ? psk : NULL);
+		w.busy = 0;
 		if (w.power) {
 			poll_state();
 			if (w.refresh) {
@@ -389,6 +392,14 @@ int wifi_park(int park)
 	static int hung;
 	if (park && hung)
 		return -1;
+	/* после прошлого сна радио ещё поднимается — дождаться: гашение посреди запуска wpa_supplicant оставило бы его
+	 * работать в mem. Не дождались за 5 с — без сна */
+	for (int i = 0; park && i < 250 && (w.op || w.busy); i++)
+		usleep(20000);
+	if (park && (w.op || w.busy)) {
+		fprintf(stderr, "wifi: занят дольше 5 с — сон пропущен\n");
+		return -2;
+	}
 	if (park && w.power) {
 		w.parked = 1;
 		w.power = 0;

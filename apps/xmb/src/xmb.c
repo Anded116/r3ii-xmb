@@ -5861,10 +5861,11 @@ int xmb_sleep_prepare(int mem)
 		plan_next();
 		printf("сон: трек закрыт на %.1f с\n", s.pos);
 	}
-	if (mem && wifi_park(1) < 0) {
+	int wp = mem ? wifi_park(1) : 0;
+	if (wp < 0)
 		ok = -1;
+	if (wp == -1 && !s.wifi_hung)
 		s.wifi_hung = 1;
-	}
 	if (mem && !ok && bt_park(1) < 0)
 		ok = -1;
 	save_flush();
