@@ -41,7 +41,10 @@
 #include <signal.h>
 #include <sys/ioctl.h>
 #include <tinyalsa/asoundlib.h>
-#define PORT_PHONES 1
+/* «Output Port Switch» — маршруты те же, что у R3 Pro II (тот же HBC3000 и машинный драйвер, ЦАП ES9219; так у Sonix
+ * для R3 II 2025): 1 — линейный выход 3.5, 2 — наушники 3.5, 3 — 4.4, 5 — тракт выключен */
+#define PORT_PHONES 2
+#define PORT_BALANCED 3
 #define PORT_OFF 5
 #define IDLE_POWER_OFF 30.0   /* секунд паузы до выключения тракта */
 #else
@@ -130,7 +133,7 @@ static struct {
 	struct mixer *mixer;
 	int port;
 	double idle;
-	char jack;   /* /sys/class/switch/headset/state при последней проверке */
+	char jack, bal;   /* /sys/class/switch/headset и balance (4.4) при последней проверке: '0', '1'; 0 — не читали */
 	uint32_t jack_ms;
 	/* Bluetooth: канал в «bluealsa-cli open» (pipe — открыт), частота и формат кодека, заявка интерфейса */
 	FILE *bt_pipe;
@@ -688,6 +691,8 @@ static void bt_write(const int16_t *buf, unsigned frames)
 	}
 }
 
+static char switch_state(const char *path);
+
 static int out_open(int rate)
 {
 	if (a.bt_path[0])
@@ -698,10 +703,15 @@ static int out_open(int rate)
 	if (a.pcm && a.out_rate == rate && a.out_period == period)
 		return 0;
 	out_close();
-	if (a.port != PORT_PHONES) {
-		bb("тракт: выход %d (был %d), разъём %c", PORT_PHONES, a.port, a.jack ? a.jack : '?');
-		mixer_set("Output Port Switch", PORT_PHONES);   /* до открытия PCM: иначе ядро падает */
-		a.port = PORT_PHONES;
+	if (!a.jack) {   /* разъёмы ещё не проверялись (первый звук после запуска) */
+		a.jack = switch_state("/sys/class/switch/headset/state");
+		a.bal = switch_state("/sys/class/switch/balance/state");
+	}
+	int port = a.bal == '1' ? PORT_BALANCED : PORT_PHONES;   /* вставлен 4.4 — он, иначе 3.5 (как сток и Sonix) */
+	if (a.port != port) {
+		bb("тракт: выход %d (был %d), 3.5 %c, 4.4 %c", port, a.port, a.jack ? a.jack : '?', a.bal ? a.bal : '?');
+		mixer_set("Output Port Switch", port);   /* до открытия PCM: иначе ядро падает */
+		a.port = port;
 		apply_volume();
 		bb("тракт: включён");
 		/* запись маршрута из выключенного — загрузка ПЛИС HBC3000 по JTAG (~280 мс, синхронно). Старт DMA через
@@ -1257,29 +1267,37 @@ static int usb_step(int32_t *buf)
 	return 0;
 }
 
-/* разъём 3.5 вставили или вынули: как сток — закрыть вывод, дать контактам устояться, следующее открытие заново
- * пишет выход. Вставка штекера даёт помеху (USB при этом переподключается) */
+static char switch_state(const char *path)
+{
+	char st = 0;
+	int fd = open(path, O_RDONLY);
+	if (fd >= 0) {
+		if (read(fd, &st, 1) != 1)
+			st = 0;
+		close(fd);
+	}
+	return st;
+}
+
+/* разъём 3.5 или 4.4 вставили или вынули: как сток — закрыть вывод, дать контактам устояться, следующее открытие
+ * заново пишет выход (на 4.4 — маршрут 3). Вставка штекера даёт помеху (USB при этом переподключается) */
 static void jack_check(void)
 {
 	uint32_t now = now_ms();
 	if (now - a.jack_ms < 250)
 		return;
 	a.jack_ms = now;
-	char st = 0;
-	int fd = open("/sys/class/switch/headset/state", O_RDONLY);
-	if (fd >= 0) {
-		if (read(fd, &st, 1) != 1)
-			st = 0;
-		close(fd);
-	}
-	if (!st || st == a.jack)
+	char st = switch_state("/sys/class/switch/headset/state"), bal = switch_state("/sys/class/switch/balance/state");
+	if (!st || (st == a.jack && bal == a.bal))
 		return;
 	int first = !a.jack;
 	a.jack = st;
-	if (first || a.bt_path[0] || (!a.pcm && a.port != PORT_PHONES))
+	a.bal = bal;
+	if (first || a.bt_path[0] || (!a.pcm && a.port != PORT_PHONES && a.port != PORT_BALANCED))
 		return;
-	fprintf(stderr, "audio: разъём 3.5 — %s, вывод заново\n", st == '1' ? "вставлен" : "вынут");
-	bb("разъём 3.5: %s, pcm %s", st == '1' ? "вставлен" : "вынут", a.pcm ? "открыт" : "закрыт");
+	fprintf(stderr, "audio: разъём 3.5 %s, 4.4 %s — вывод заново\n", st == '1' ? "вставлен" : "вынут",
+		bal == '1' ? "вставлен" : "вынут");
+	bb("разъём: 3.5 %c, 4.4 %c, pcm %s", st, bal ? bal : '?', a.pcm ? "открыт" : "закрыт");
 	out_close();
 	a.port = -1;
 	usleep(300000);
