@@ -4824,7 +4824,7 @@ static void shade_slider(int x)
 
 static struct {
 	lv_obj_t *panel, *track, *fill, *knob, *knob_icon, *hint, *shine, *shine_lbl, *cancel;
-	int steps, dir, dragging, finishing;
+	int steps, dir, dragging, finishing, h;   /* h — высота дорожки: короче SL_H, если длинный текст */
 	double pos, shine_t;
 	uint32_t last_ms;
 	void (*done)(void), (*cancelled)(void);
@@ -4861,7 +4861,7 @@ static void slide_drag_cb(lv_event_t *e)
 		lv_indev_get_point(lv_indev_active(), &p);
 		lv_area_t a;
 		lv_obj_get_coords(sl.track, &a);
-		double k = clamp01((p.y - a.y1 - SL_PAD - SL_KNOB / 2.0) / (SL_H - 2 * SL_PAD - SL_KNOB));
+		double k = clamp01((p.y - a.y1 - SL_PAD - SL_KNOB / 2.0) / (sl.h - 2 * SL_PAD - SL_KNOB));
 		sl.steps = (int)lround((sl.dir > 0 ? k : 1 - k) * SL_STEPS);
 		sl.dragging = 1;
 		sl.last_ms = lv_tick_get();
@@ -4887,20 +4887,37 @@ static void slide_open(const char *icon, const char *title, const char *sub, con
 	lv_obj_set_clickable(sl.panel, true);   /* касания не проходят в меню под панелью */
 
 	lv_obj_t *ic = label(sl.panel, icon_font(icon, 13), icon);
-	lv_obj_align(ic, LV_ALIGN_TOP_MID, 0, 26);
 	lv_obj_t *t1 = label(sl.panel, s.f_title, tx(title));
 	lv_obj_set_width(t1, SCR_W - 24);
 	lv_obj_set_style_text_align(t1, LV_TEXT_ALIGN_CENTER, 0);
-	lv_obj_align(t1, LV_ALIGN_TOP_MID, 0, 84);
 	lv_obj_t *t2 = label(sl.panel, s.f_item, sub);   /* sub — уже переведённый: в нём бывает название */
 	lv_obj_set_width(t2, SCR_W - 32);
 	lv_obj_set_style_text_align(t2, LV_TEXT_ALIGN_CENTER, 0);
 	lv_obj_set_style_text_opa(t2, 180, 0);
-	lv_obj_align(t2, LV_ALIGN_TOP_MID, 0, 118);
+
+	/* сверху вниз: значок, заголовок, пояснение, дорожка, подсказка, «Отмена». Длинное пояснение (переносы на
+	 * других языках) двигает дорожку вниз; не хватает места — верх поднимается, потом дорожка короче */
+	lv_obj_update_layout(sl.panel);
+	int h1 = lv_obj_get_height(t1), h2 = lv_obj_get_height(t2), line = lv_font_get_line_height(s.f_item);
+	int bottom = SCR_H - TOP_H - (cancel_text ? line + 26 : 6) - 16 - line - 16;   /* низ дорожки не ниже */
+	int top = 26;
+	int track = top + 58 + h1 + 10 + h2 + 14;
+	if (track < SL_TOP)
+		track = SL_TOP;
+	int lift = track + SL_H - bottom;
+	lift = lift < 0 ? 0 : lift > 18 ? 18 : lift;
+	top -= lift;
+	track -= lift;
+	sl.h = bottom - track < SL_H ? bottom - track : SL_H;
+	if (sl.h < SL_KNOB + 2 * SL_PAD + 40)
+		sl.h = SL_KNOB + 2 * SL_PAD + 40;
+	lv_obj_align(ic, LV_ALIGN_TOP_MID, 0, top);
+	lv_obj_align(t1, LV_ALIGN_TOP_MID, 0, top + 58);
+	lv_obj_align(t2, LV_ALIGN_TOP_MID, 0, top + 58 + h1 + 10);
 
 	sl.track = plain(sl.panel);
-	lv_obj_set_size(sl.track, SL_W, SL_H);
-	lv_obj_set_pos(sl.track, (SCR_W - SL_W) / 2, SL_TOP);
+	lv_obj_set_size(sl.track, SL_W, sl.h);
+	lv_obj_set_pos(sl.track, (SCR_W - SL_W) / 2, track);
 	lv_obj_set_style_radius(sl.track, LV_RADIUS_CIRCLE, 0);
 	lv_obj_set_style_bg_color(sl.track, lv_color_white(), 0);
 	lv_obj_set_style_bg_opa(sl.track, 40, 0);
@@ -4923,7 +4940,7 @@ static void slide_open(const char *icon, const char *title, const char *sub, con
 	 * «Прокрутите вниз — удалить»: направление и действие */
 	char hb[96];
 	snprintf(hb, sizeof(hb), "%s — %s", tx(dir > 0 ? "Прокрутите вниз" : "Прокрутите вверх"), tx(hint));
-	int hy = SL_TOP + SL_H + 16;
+	int hy = track + sl.h + 16;
 	sl.hint = label(sl.panel, s.f_item, hb);
 	lv_obj_set_width(sl.hint, SCR_W);
 	lv_obj_set_style_text_align(sl.hint, LV_TEXT_ALIGN_CENTER, 0);
@@ -4979,11 +4996,11 @@ static void slide_tick(double dt)
 	else if (!sl.dragging && sl.steps > 0 && now - sl.last_ms > 1000)
 		sl.steps = 0;   /* перестали крутить — пружиной в начало */
 	sl.pos = approach(sl.pos, (double)sl.steps / SL_STEPS, dt, sl.dragging ? 30 : 14);
-	int travel = SL_H - 2 * SL_PAD - SL_KNOB;
+	int travel = sl.h - 2 * SL_PAD - SL_KNOB;
 	int ky = SL_PAD + (int)((sl.dir > 0 ? sl.pos : 1 - sl.pos) * travel);
 	set_pos(sl.knob, (SL_W - SL_KNOB) / 2, ky);
 	/* заливка — от начала дорожки до ползунка */
-	int f0 = sl.dir > 0 ? SL_PAD : ky, f1 = sl.dir > 0 ? ky + SL_KNOB : SL_H - SL_PAD;
+	int f0 = sl.dir > 0 ? SL_PAD : ky, f1 = sl.dir > 0 ? ky + SL_KNOB : sl.h - SL_PAD;
 	if (lv_obj_get_y(sl.fill) != f0 || lv_obj_get_height(sl.fill) != f1 - f0) {
 		lv_obj_set_pos(sl.fill, SL_PAD, f0);
 		lv_obj_set_size(sl.fill, SL_W - 2 * SL_PAD, f1 - f0);
@@ -5541,6 +5558,16 @@ int xmb_input_name(const char *name)
 	if (!strcmp(name, "wake")) {
 		xmb_sleep_end();
 		xmb_wake();
+		return 1;
+	}
+	if (!strcmp(name, "dlg:stock")) {   /* окна подтверждения — для снимков на всех языках */
+		slide_open(ICON_STOCK, "Перезагрузить в сток?",
+			   tx("Один раз загрузится стоковый плеер HiBy, следующая загрузка — снова XMB"), "перезагрузить", 1,
+			   "Отмена", NULL, NULL);
+		return 1;
+	}
+	if (!strcmp(name, "dlg:dac")) {
+		dac_exit_ask();
 		return 1;
 	}
 	if (!strncmp(name, "btn:", 4) && name[4] && name[5]) {   /* кнопка на корпусе: btn:<кнопка><жест>, как в настройках */
