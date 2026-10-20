@@ -466,9 +466,10 @@ static void usb_dac_end(void)
 #define REM_CLICK_MS 300
 #define REM_REPEAT_DELAY_MS 400
 #define REM_REPEAT_MS 150
+#define REM_EXTRA_MS 1000   /* лишнее нажатие после переключения трека — не пауза: в серии легко ошибиться на одно */
 static struct {
 	int fd, usb, clicks, held;
-	uint32_t due, rep;
+	uint32_t due, rep, track;
 	char node[24], name[48];
 } rem[NREM] = { { .fd = -1 }, { .fd = -1 }, { .fd = -1 } };
 static int rem_inputs = -1;   /* устройств в /dev/input при последнем поиске */
@@ -561,6 +562,7 @@ static int remote_read(int i, uint32_t now)
 	while ((r = read(rem[i].fd, &ev, sizeof(ev))) == sizeof(ev)) {
 		if (ev.type != EV_KEY || ev.value == 2 || (int32_t)(now - rem_quiet) < 0)
 			continue;
+		bb("пульт: клавиша %d %s", ev.code, ev.value ? "нажата" : "отпущена");
 		switch (ev.code) {
 		case KEY_PLAYPAUSE:
 		case KEY_MEDIA:   /* гарнитуры Android */
@@ -573,6 +575,7 @@ static int remote_read(int i, uint32_t now)
 		case KEY_PREVIOUSSONG:
 			if (ev.value == 1) {
 				rem[i].clicks = 0;
+				rem[i].track = now;
 				xmb_input(ev.code == KEY_NEXTSONG ? XMB_NEXT_TRACK : XMB_PREV_TRACK);
 			}
 			break;
@@ -608,7 +611,10 @@ static int remote_tick(uint32_t now)
 		if (rem[i].clicks && (int32_t)(now - rem[i].due) >= 0) {
 			int c = rem[i].clicks;
 			rem[i].clicks = 0;
-			xmb_input(c == 1 ? XMB_PLAY : c == 2 ? XMB_NEXT_TRACK : XMB_PREV_TRACK);
+			if (c > 1)
+				rem[i].track = now;
+			if (c > 1 || !rem[i].track || rem[i].due - REM_CLICK_MS - rem[i].track >= REM_EXTRA_MS)
+				xmb_input(c == 1 ? XMB_PLAY : c == 2 ? XMB_NEXT_TRACK : XMB_PREV_TRACK);
 		}
 		if (rem[i].held && (int32_t)(now - rem[i].rep) >= 0) {
 			xmb_input(rem[i].held == KEY_VOLUMEUP ? XMB_VOL_UP : XMB_VOL_DOWN);
