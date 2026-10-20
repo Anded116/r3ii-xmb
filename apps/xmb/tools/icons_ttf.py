@@ -26,7 +26,7 @@ ICONS = ['artists', 'language', 'stock', 'queue', 'albums', 'podcasts', 'search'
         'device', 'equalizer', 'eq_toggle', 'preset', 'replaygain', 'crossfade', 'theme', 'wave',
         'brightness', 'ui_size', 'album_view', 'player_bg', 'mini_player', 'buttons', 'touch',
         'reset', 'sleep_timer', 'dev_sleep', 'kb_layouts', 'kb_start', 'bt_devices',
-        'wifi_networks', 'codec']
+        'wifi_networks', 'codec', 'wifi_1', 'wifi_2', 'wifi_3']
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 U = 50   # единиц шрифта на единицу SVG
 EM = 20 * U

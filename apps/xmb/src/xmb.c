@@ -205,6 +205,9 @@ typedef struct {
 #define ICON_BT_DEVICES    "\xEE\x80\xA5"
 #define ICON_WIFI_NETWORKS "\xEE\x80\xA6"
 #define ICON_CODEC         "\xEE\x80\xA7"
+#define ICON_WIFI_1        "\xEE\x80\xA8"   /* сеть по силе сигнала: слабый, средний, сильный */
+#define ICON_WIFI_2        "\xEE\x80\xA9"
+#define ICON_WIFI_3        "\xEE\x80\xAA"
 
 static const char *const theme_names[] = {
 	"Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
@@ -472,7 +475,6 @@ static const node_t screen_items[] = {
 	OPT(ICON_BRIGHTNESS, "Яркость", bright_names, &s.bright, apply_bright),
 	OPT(ICON_UI_SIZE, "Размер интерфейса", size_names, &s.ui_size, apply_size),
 	OPT(ICON_ALBUM_VIEW, "Вид альбомов", album_views, &s.album_view, NULL),
-	OPT(LV_SYMBOL_EYE_CLOSE, "Гашение экрана", screen_names, &s.screen_off, NULL),
 	OPT(ICON_PLAYER_BG, "Фон плеера", player_bg_names, &s.player_bg, NULL),
 	OPT(ICON_MINI_PLAYER, "Мини-плеер", mini_names, &s.mini_style, apply_mini),
 	OPT(LV_SYMBOL_LEFT, "Рамка: левый край", edge_names, &s.edge_l, apply_edges),
@@ -487,9 +489,10 @@ static const node_t kb_items[] = {
 static const node_t control_items[] = {
 	DIR(ICON_BUTTONS, "Кнопки", "что делают кнопки на корпусе", btn_items),
 	DIR(LV_SYMBOL_KEYBOARD, "Клавиатура", "раскладка при открытии", kb_items),
-	OPT(ICON_TOUCH, "Сенсорное управление", onoff, &s.touch_off, NULL),
+	OPT(ICON_TOUCH, "Касания в списках", onoff, &s.touch_off, NULL),
 };
 static const node_t power_items[] = {
+	OPT(LV_SYMBOL_EYE_CLOSE, "Гашение экрана", screen_names, &s.screen_off, NULL),
 	OPT(ICON_SLEEP_TIMER, "Таймер сна", sleep_names, &s.sleep, sleep_start),
 	OPT(ICON_DEV_SLEEP, "Сон устройства", dev_sleep_names, &s.dev_sleep, NULL),
 };
@@ -504,7 +507,7 @@ static const node_t set_items[] = {
 	DIR(LV_SYMBOL_BLUETOOTH, "Bluetooth", NULL, bt_items),
 	DIR(LV_SYMBOL_WIFI, "Wi-Fi", wifi_items_sub, wifi_items),
 	DIR(ICON_CONTROLS, "Управление", "кнопки, клавиатура, сенсор", control_items),
-	DIR(LV_SYMBOL_POWER, "Питание", "таймер сна, сон устройства", power_items),
+	DIR(LV_SYMBOL_POWER, "Питание", "гашение экрана, таймер сна, сон устройства", power_items),
 	ACT(LV_SYMBOL_USB, "USB", "карта или ЦАП — компьютеру по кабелю", A_USB),
 	OPT(ICON_LANGUAGE, "Язык · Language", lang_names, &s.lang, apply_lang),
 	DIR(ICON_SYSTEM, "Система", "стоковый плеер, о системе", system_items),
@@ -4053,7 +4056,8 @@ static void wifi_build(void)
 		const char *sig = tx(w->signal >= -60 ? "сильный сигнал" : w->signal >= -72 ? "средний сигнал" : "слабый сигнал");
 		snprintf(wifi_sub[i], sizeof(wifi_sub[i]), "%s · %s",
 			 tx(w->connected ? "подключено" : w->saved ? "сохранена" : w->secured ? "с паролем" : "открытая"), sig);
-		wifi_nodes[i] = (node_t){ .icon = LV_SYMBOL_WIFI, .title = w->ssid, .sub = wifi_sub[i],
+		wifi_nodes[i] = (node_t){ .icon = w->signal >= -60 ? ICON_WIFI_3 : w->signal >= -72 ? ICON_WIFI_2 : ICON_WIFI_1,
+					  .title = w->ssid, .sub = wifi_sub[i],
 					  .action = A_WIFINET, .track = i };
 		if (w->connected)
 			conn = i;
@@ -5336,6 +5340,14 @@ static void select_current(void)
 		player_show(1);   /* играющий трек — открыть плеер, а не начать заново */
 	} else if (n->action == A_TRACK) {
 		play_queue(c->nodes, c->count, c->sel);
+	} else if (n->opts == onoff || n->opts == eq_onoff || n->opts == bt_onoff || n->opts == wifi_onoff) {
+		/* вкл/выкл — переключается сразу, без списка из двух строк; состояние — в подписи */
+		*n->val = !*n->val;
+		if (n->apply)
+			n->apply();
+		if (n->commit)
+			n->commit();
+		refresh_subs();
 	} else if (n->opts) {
 		options_open(n);
 	} else if (n->kids && s.depth + 1 < MAX_DEPTH) {
@@ -6114,8 +6126,9 @@ static void touch_cb(lv_event_t *e)
 			 * точка резкого свайпа от края приходит уже ниже панели */
 			int pull = !horiz && dy > 0 &&
 				   (s.t_start.y < TOP_H + 24 || (s.t_start.y < TOP_H + 60 && dy * 1000 > 800 * (int)(now - s.t_ms + 1)));
-			if (s.t_menu_off && !pull && !(in_mini && dy < 0 && !horiz) &&
-			    !(in_mini && horiz))
+			/* касания в списках выключены: нет только прокрутки и тапов по пунктам — свайпы «назад» и по разделам,
+			 * боковое меню, шторка и плеер работают (кнопки «назад» на корпусе нет) */
+			if (s.t_menu_off && !pull && !s.opt_open && !horiz && !(in_mini && dy < 0))
 				s.t_mode = T_NONE;
 			else if (pull && !s.eq_edit)
 				s.t_mode = T_PULL;   /* шторка — свайпом от верхней панели отовсюду, и из плеера */
@@ -6188,7 +6201,7 @@ static void touch_cb(lv_event_t *e)
 		s.t_mode = T_NONE;
 		if (code == LV_EVENT_PRESS_LOST)
 			return;
-		if (mode == T_TAP && s.t_menu_off) {
+		if (mode == T_TAP && s.t_menu_off && !s.opt_open) {
 			if (p.y > SCR_H - MINI_H)
 				mini_tap(p);
 		} else if (mode == T_TAP && now - s.t_ms < 500) {
