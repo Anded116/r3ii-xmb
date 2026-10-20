@@ -343,7 +343,7 @@ static struct {
 	const char *pl_names[MAX_OPTS + 1];
 	node_t pl_menu;
 	lv_obj_t *toast, *toast_lbl;
-	double toast_t;
+	double toast_t, toast_dur;   /* toast_dur — сколько держится, с: по длине текста */
 	int *add_tracks, nadd;                 /* что добавляется в плейлист из меню */
 	lv_obj_t *kb_panel, *kb_ta;            /* экранная клавиатура: имя плейлиста или поиск (kb_pl < 0) */
 	lv_obj_t *kb_info, *kb_prev[4];        /* поиск: сколько найдено и первые находки */
@@ -2465,6 +2465,10 @@ static void toast(const char *fmt, ...)
 	lv_text_get_size(&sz, buf, s.f_item, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
 	lv_obj_set_width(s.toast_lbl, sz.x < SCR_W - 64 ? sz.x + 1 : SCR_W - 64);
 	lv_label_set_text(s.toast_lbl, buf);
+	int chars = 0;   /* знаков, не байтов: кириллица — по два */
+	for (const char *c = buf; *c; c++)
+		chars += ((unsigned char)*c & 0xc0) != 0x80;
+	s.toast_dur = fmin(6.0, fmax(1.8, 1.5 + chars / 14.0));   /* успеть прочитать: ~14 знаков в секунду */
 	s.toast_t = 1.0;
 	s.bhint_t = 0;   /* место сверху одно: уведомление вместо значка кнопки */
 	set_hidden(s.bhint, true);
@@ -4268,7 +4272,7 @@ static void frame_cb(lv_timer_t *t)
 		}
 	}
 	if (s.toast_t > 0) {   /* уведомление — как значок кнопки: сверху по центру, в конце уходит вверх и гаснет */
-		s.toast_t = fmax(0, s.toast_t - dt / 1.8);
+		s.toast_t = fmax(0, s.toast_t - dt / s.toast_dur);
 		double out = clamp01((0.25 - s.toast_t) / 0.25);
 		lv_obj_align(s.toast, LV_ALIGN_TOP_MID, 0, TOP_H + 14 - (int)(out * 14));
 		lv_obj_set_style_opa(s.toast, (lv_opa_t)(230 * (1.0 - out)), 0);
@@ -5646,6 +5650,10 @@ void xmb_input(xmb_input_t in)
 	s.kin = 0;
 	if (in == XMB_POWER || (in == XMB_SELECT && !s.screen_on)) {   /* экран будят кнопка питания и клик колеса */
 		screen(!s.screen_on);
+		return;
+	}
+	if (in == XMB_VOL_UP || in == XMB_VOL_DOWN) {
+		volume_step(in == XMB_VOL_UP ? 1 : -1);
 		return;
 	}
 	if (!s.screen_on && (in == XMB_WHEEL_UP || in == XMB_WHEEL_DOWN)) {   /* погашенный экран: колесо — громкость */

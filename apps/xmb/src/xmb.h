@@ -20,6 +20,8 @@ typedef enum {
 	XMB_FAV,        /* сердечко в плеере (на ПК — клавиша F) */
 	XMB_MENU,       /* действия с пунктом: долгий клик колесом или долгое касание (на ПК — M) */
 	XMB_ADD_PL,     /* «+» в плеере — в плейлист (на ПК — клавиша L) */
+	XMB_VOL_UP,     /* громкость: пульт на проводе или на USB-гарнитуре — и при погашенном экране */
+	XMB_VOL_DOWN,
 } xmb_input_t;
 
 /* font_dir — папка с NotoSans-Regular.ttf и NotoSans-SemiBold.ttf */

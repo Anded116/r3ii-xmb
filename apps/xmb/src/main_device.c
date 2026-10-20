@@ -106,6 +106,7 @@ static int fb_reprogram;
 static void screen_set(int on);
 static uint32_t tick_ms(void);
 static uint32_t woke_ms;   /* когда вернулась запись в /sys/power/state: время до включённого экрана — в журнал */
+static uint32_t rem_quiet;   /* до этого времени кнопки пультов не слушать: проводной после сна шлёт фантомное нажатие */
 
 /* число прерываний кнопки (строка /proc/interrupts с её именем): кто разбудил */
 static unsigned long irq_count(const char *name)
@@ -230,6 +231,8 @@ static int deep_sleep(void)
 		usleep(300000);   /* дать кнопке отпуститься */
 	}
 	woke_ms = slept ? tick_ms() : 0;
+	if (slept)
+		rem_quiet = tick_ms() + 1000;
 	bb("сон: проснулся (%s)", slept ? "был сон" : "сна не было");
 	xmb_sleep_end();
 	if (!slept) {   /* ядро отказало (кто-то держит блокировку сна): экран не трогать — сна не было */
@@ -452,6 +455,145 @@ static void usb_dac_end(void)
 	xmb_dac_end();
 	printf("usb: ЦАП выключен\n");
 	fflush(stdout);
+}
+
+/* ---------- пульты: на проводе 3.5 (earpods_adc) и USB (адаптер-гарнитура, наушники USB-C) ----------
+ * Номера eventN не постоянны (порядок загрузки модулей, USB появляется и пропадает) — опознаём по имени: earpods_* —
+ * провод; неизвестное с кнопками «пауза» или «громкость» — USB. Средняя кнопка — по числу нажатий, как у Apple и
+ * Sonix: одно — пауза, два — следующий трек, три — предыдущий (окно REM_CLICK_MS); громкость — шаг, удержание —
+ * повтор. Кнопки на корпусе (event0, 2, 3) — свои, здесь их нет */
+#define NREM 3
+#define REM_CLICK_MS 300
+#define REM_REPEAT_DELAY_MS 400
+#define REM_REPEAT_MS 150
+static struct {
+	int fd, usb, clicks, held;
+	uint32_t due, rep;
+	char node[24], name[48];
+} rem[NREM] = { { .fd = -1 }, { .fd = -1 }, { .fd = -1 } };
+static int rem_inputs = -1;   /* устройств в /dev/input при последнем поиске */
+
+static int key_bit(int fd, int code)
+{
+	unsigned long b[KEY_MAX / (8 * sizeof(long)) + 1] = { 0 };
+	return ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(b)), b) >= 0 && (b[code / (8 * sizeof(long))] >> (code % (8 * sizeof(long))) & 1);
+}
+
+static void remote_scan(void)
+{
+	DIR *d = opendir("/dev/input");
+	if (!d)
+		return;
+	int n = 0;
+	struct dirent *e;
+	while ((e = readdir(d)))
+		n += !strncmp(e->d_name, "event", 5);
+	if (n == rem_inputs) {
+		closedir(d);
+		return;
+	}
+	rem_inputs = n;
+	rewinddir(d);
+	while ((e = readdir(d))) {
+		if (strncmp(e->d_name, "event", 5))
+			continue;
+		char node[24];
+		snprintf(node, sizeof(node), "/dev/input/%.12s", e->d_name);
+		int have = 0, slot = -1;
+		for (int i = 0; i < NREM; i++) {
+			have |= rem[i].fd >= 0 && !strcmp(rem[i].node, node);
+			if (rem[i].fd < 0 && slot < 0)
+				slot = i;
+		}
+		if (have || slot < 0)
+			continue;
+		int fd = open(node, O_RDONLY | O_NONBLOCK);
+		if (fd < 0)
+			continue;
+		char name[48] = { 0 };
+		if (ioctl(fd, EVIOCGNAME(sizeof(name) - 1), name) < 0)
+			name[0] = 0;
+		int wired = !strncmp(name, "earpods_", 8);
+		int builtin = !strcmp(name, "md-gpio-keys") || !strcmp(name, "goodix-ts") || !strcmp(name, "jz adc keyboard") ||
+			      !strcmp(name, "sa-ring-keys");
+		if (!wired && (builtin || !(key_bit(fd, KEY_PLAYPAUSE) || key_bit(fd, KEY_VOLUMEUP)))) {
+			close(fd);
+			continue;
+		}
+		rem[slot].fd = fd;
+		rem[slot].usb = !wired;
+		rem[slot].clicks = rem[slot].held = 0;
+		snprintf(rem[slot].node, sizeof(rem[slot].node), "%s", node);
+		snprintf(rem[slot].name, sizeof(rem[slot].name), "%s", name);
+		printf("пульт: %s — %s (%s)\n", node, name, wired ? "провод 3.5" : "USB");
+	}
+	closedir(d);
+}
+
+/* события пульта i; 0 — устройство пропало (USB вынули) */
+static int remote_read(int i, uint32_t now)
+{
+	struct input_event ev;
+	ssize_t r;
+	while ((r = read(rem[i].fd, &ev, sizeof(ev))) == sizeof(ev)) {
+		if (ev.type != EV_KEY || ev.value == 2 || (int32_t)(now - rem_quiet) < 0)
+			continue;
+		switch (ev.code) {
+		case KEY_PLAYPAUSE:
+		case KEY_MEDIA:   /* гарнитуры Android */
+			if (ev.value == 1) {
+				rem[i].clicks++;
+				rem[i].due = now + REM_CLICK_MS;
+			}
+			break;
+		case KEY_NEXTSONG:   /* драйвер посчитал нажатия сам */
+		case KEY_PREVIOUSSONG:
+			if (ev.value == 1) {
+				rem[i].clicks = 0;
+				xmb_input(ev.code == KEY_NEXTSONG ? XMB_NEXT_TRACK : XMB_PREV_TRACK);
+			}
+			break;
+		case KEY_VOLUMEUP:
+		case KEY_VOLUMEDOWN:
+			if (ev.value == 1) {
+				xmb_input(ev.code == KEY_VOLUMEUP ? XMB_VOL_UP : XMB_VOL_DOWN);
+				rem[i].held = ev.code;
+				rem[i].rep = now + REM_REPEAT_DELAY_MS;
+			} else if (rem[i].held == ev.code) {
+				rem[i].held = 0;
+			}
+			break;
+		}
+	}
+	if (r < 0 && errno == ENODEV) {
+		printf("пульт: %s — %s отключён\n", rem[i].node, rem[i].name);
+		close(rem[i].fd);
+		rem[i].fd = -1;
+		rem_inputs = -1;
+		return 0;
+	}
+	return 1;
+}
+
+/* досчитанные нажатия и повтор удержанной громкости; 1 — пульт ещё ждёт (часто опрашивать) */
+static int remote_tick(uint32_t now)
+{
+	int busy = 0;
+	for (int i = 0; i < NREM; i++) {
+		if (rem[i].fd < 0)
+			continue;
+		if (rem[i].clicks && (int32_t)(now - rem[i].due) >= 0) {
+			int c = rem[i].clicks;
+			rem[i].clicks = 0;
+			xmb_input(c == 1 ? XMB_PLAY : c == 2 ? XMB_NEXT_TRACK : XMB_PREV_TRACK);
+		}
+		if (rem[i].held && (int32_t)(now - rem[i].rep) >= 0) {
+			xmb_input(rem[i].held == KEY_VOLUMEUP ? XMB_VOL_UP : XMB_VOL_DOWN);
+			rem[i].rep = now + REM_REPEAT_MS;
+		}
+		busy |= rem[i].clicks || rem[i].held;
+	}
+	return busy;
 }
 
 /* XMB_SCRIPT="down,down,enter,wait,…" — сценарий для замеров без рук, шаг XMB_STEP мс (300); в конце — выход */
@@ -768,12 +910,13 @@ int main(int argc, char **argv)
 		lv_timer_create(script_step, getenv("XMB_STEP") ? atoi(getenv("XMB_STEP")) : 300, NULL);
 	}
 
-	struct pollfd pfd[3];
+	struct pollfd pfd[3 + NREM];
 	const char *keys[3] = { "/dev/input/event0", "/dev/input/event2", "/dev/input/event3" };
 	for (int i = 0; i < 3; i++) {
 		pfd[i].fd = open(keys[i], O_RDONLY | O_NONBLOCK);
 		pfd[i].events = POLLIN;
 	}
+	remote_scan();
 	key_fd = pfd[0].fd;
 	signal(SIGUSR1, shot_sig);
 
@@ -803,12 +946,22 @@ int main(int argc, char **argv)
 		/* экран погашен — кадров нет, просыпаться 4 раза в секунду (кнопки будят poll сразу); пока кнопка нажата или
 		 * ждёт второго нажатия — чаще: жест решается по времени */
 		int busy = b_next.held || b_next.pending || b_play.held || b_play.pending || b_screen.held || b_screen.pending ||
-			   sel_down || auto_cd;
+			   sel_down || auto_cd || remote_tick(tick_ms());
 		int cap = screen ? 16 : busy ? 20 : 250;
-		poll(pfd, 3, screen && wait < 16 ? (int)wait : cap);
+		for (int i = 0; i < NREM; i++) {
+			pfd[3 + i].fd = rem[i].fd;
+			pfd[3 + i].events = POLLIN;
+		}
+		poll(pfd, 3 + NREM, screen && wait < 16 ? (int)wait : cap);
 		prof_poll += tick_ms() - t_p;
 
 		uint32_t now = tick_ms();
+		for (int i = 0; i < NREM; i++)
+			if (rem[i].fd >= 0 && !usb_storage && remote_read(i, now) && auto_cd && rem[i].clicks) {
+				auto_cd = 0;   /* отсчёт перед автосном: нажатие на пульте отменяет его */
+				xmb_sleep_countdown(-1, NULL);
+				rem[i].clicks = 0;
+			}
 		for (int i = 0; i < 3; i++) {
 			struct input_event ev;
 			while (pfd[i].fd >= 0 && read(pfd[i].fd, &ev, sizeof(ev)) == sizeof(ev)) {
@@ -876,6 +1029,7 @@ int main(int argc, char **argv)
 		/* USB: раз в секунду — компьютер подключён или отключён; в режиме накопителя — его конец */
 		if (now - usb_ms >= (usb_storage ? 500u : 1000u)) {
 			usb_ms = now;
+			remote_scan();
 			/* карта пропала не по нашей воле: сток при загрузке с кабелем отдаёт её под накопитель, уже когда XMB
 			 * дождался карты и запустился. Вернуть себе и начать заново — библиотеке нужны файлы */
 			if (!usb_storage && sd_heal < 3 && !sd_mounted()) {
