@@ -9,22 +9,22 @@
 | Статус | Тикетов |
 |---|---|
 | `open` | 7 |
-| `fixed` | 18 |
+| `fixed` | 24 |
 | `verified` | 33 |
-| `accepted` | 7 |
-| **всего** | **65** |
+| `accepted` | 8 |
+| **всего** | **72** |
 
 | Область | open | in-progress | fixed |
 |---|---|---|---|
-| ui | 0 | 0 | 4 |
+| ui | 0 | 0 | 7 |
 | player | 0 | 0 | 1 |
 | audio | 3 | 0 | 3 |
 | library | 0 | 0 | 1 |
-| net | 1 | 0 | 3 |
+| net | 1 | 0 | 4 |
 | power | 0 | 0 | 4 |
 | display | 0 | 0 | 1 |
-| input | 1 | 0 | 0 |
-| firmware | 2 | 0 | 0 |
+| input | 1 | 0 | 1 |
+| firmware | 2 | 0 | 1 |
 | tools | 0 | 0 | 1 |
 
 ## 🔥 Открытые (open / in-progress)
@@ -48,6 +48,7 @@
 - [ ] [XMB-0012](XMB-0012-silnye-tormoza-posle-sna-panel-slomana-snom.md) `[P0/power]` Сильные тормоза после сна: панель сломана сном, сон с Wi-Fi вешал плеер
 - [ ] [XMB-0053](XMB-0053-proizvoditelnost-prosela-nuzhno-stabilno-45-k.md) `[P1/display]` Производительность просела: нужно стабильно 45 к/с с самой тяжёлой анимацией и музыкой
 - [ ] [XMB-0064](XMB-0064-zavisanie-na-son-cherez-3-wi-fi-zavis-na-sdio.md) `[P1/power]` Зависание на «Сон через 3»: Wi-Fi завис на SDIO после пробуждения, XMB ждал ifconfig
+- [ ] [XMB-0071](XMB-0071-izuchit-unrau-sonix-player-1-3-0-1-pod-r3ii.md) `[P1/firmware]` Изучить unrau/sonix-player 1.3.0.1 под R3II 2025: сон, звук после сна, Wi-Fi, HBC3000, частота панели
 - [ ] [XMB-0001](XMB-0001-sbros-bufera-pcm-pri-pauze-peremotke-i-smene.md) `[P2/audio]` Сброс буфера PCM при паузе, перемотке и смене трека — проверить на щелчки
 - [ ] [XMB-0002](XMB-0002-wi-fi-podklyuchenie-k-novoy-seti-s-parolem.md) `[P2/net]` Wi-Fi: подключение к новой сети с паролем
 - [ ] [XMB-0005](XMB-0005-podkasty-podpiski-vybirayutsya-na-pk-vypuski.md) `[P2/net]` Подкасты: подписки выбираются на ПК, выпуски плеер качает сам по Wi-Fi
@@ -58,8 +59,13 @@
 - [ ] [XMB-0057](XMB-0057-analiz-muzyki-dlya-fonov-normalizatsiya-po.md) `[P2/audio]` Анализ музыки для фонов: нормализация по полосам, бас/середина/верх, удары
 - [ ] [XMB-0059](XMB-0059-zvezdnaya-pyl-reaktsiya-na-muzyku-udarnaya.md) `[P2/ui]` Звёздная пыль: реакция на музыку — ударная волна на бочке, искры на хэтах
 - [ ] [XMB-0062](XMB-0062-ostalnye-fony-slabo-reagiruyut-na-muzyku.md) `[P2/ui]` Остальные фоны слабо реагируют на музыку — перевести на разбор ударов
+- [ ] [XMB-0066](XMB-0066-okno-perezagruzki-v-stok-tekst-nalezaet-na.md) `[P2/ui]` Окно перезагрузки в сток: текст налезает на слайдер (ru, проверить все языки)
+- [ ] [XMB-0069](XMB-0069-punkty-s-dvumya-sostoyaniyami-wi-fi-i-dr.md) `[P2/ui]` Пункты с двумя состояниями (Wi-Fi и др.) переключаются сразу, без списка
+- [ ] [XMB-0070](XMB-0070-otklyuchenie-sensora-tolko-zhesty-menyu-nazad.md) `[P2/input]` Отключение сенсора — только жесты меню, назад/шторка/плеер работают
 - [ ] [XMB-0028](XMB-0028-pleer-na-pauze-posle-zapuska-xmb-stroka.md) `[P3/player]` Плеер на паузе после запуска XMB: строка формата — только «FLAC», без разрядности и частоты
 - [ ] [XMB-0065](XMB-0065-batareya-provod-ot-pravogo-kraya-ekrana-v-oval.md) `[P3/ui]` Батарея: провод от правого края экрана в овал батареи, пока подключена зарядка (въезжает/уезжает)
+- [ ] [XMB-0067](XMB-0067-wi-fi-ikonki-setey-pokazyvayut-silu-signala.md) `[P3/net]` Wi-Fi: иконки сетей показывают силу сигнала
+- [ ] [XMB-0068](XMB-0068-avtootklyuchenie-ekrana-v-razdel-sna.md) `[P3/ui]` Автоотключение экрана — в раздел сна
 
 **Проверить ТЕСТОМ**
 
@@ -74,13 +80,14 @@
 
 | ID | Принято | Статус | Область | Решение |
 |---|---|---|---|---|
-| [XMB-0045](XMB-0045-ikonki-xmb-stil-sploshnoy-fa-pervye-tri.md) | 2026-10-18 | accepted | ui | Иконки XMB: стиль сплошной FA, первые три — Исполнители v3, Язык v1, Стоковый плеер v4 |
+| [XMB-0072](XMB-0072-reshenie-dvuhpozitsionnye-punkty-srazu.md) | 2026-10-20 | accepted | ui | Решение: двухпозиционные пункты — сразу переключать; сенсор выкл — только жесты меню |
 | [XMB-0042](XMB-0042-znachki-usb-nabor-a-shteker-znachok-rezhima.md) | 2026-10-18 | accepted | ui | Значки USB: набор A (штекер + значок режима) |
 | [XMB-0043](XMB-0043-tsap-v-fone-pleer-istochnik-kompyuter-svoya.md) | 2026-10-18 | accepted | audio | ЦАП в фоне: плеер-источник «Компьютер», своя музыка на паузе, буфер 50 мс |
+| [XMB-0045](XMB-0045-ikonki-xmb-stil-sploshnoy-fa-pervye-tri.md) | 2026-10-18 | accepted | ui | Иконки XMB: стиль сплошной FA, первые три — Исполнители v3, Язык v1, Стоковый плеер v4 |
 | [XMB-0039](XMB-0039-usb-znachki-dlya-vseh-rezhimov-bez.md) | 2026-10-18 | accepted | ui | USB: значки для всех режимов без обязательного полноэкранного окна; ЦАП — в фон |
 | [XMB-0016](XMB-0016-fon-volnu-v-pokoe-ne-trogaem-chastota-kadrov.md) | 2026-10-17 | accepted | display | Фон-волну в покое не трогаем: частота кадров фона не снижается |
-| [XMB-0030](XMB-0030-stroki-spiska-u-mini-pleera-ne-uvodit-v.md) | 2026-10-17 | accepted | ui | Строки списка у мини-плеера не уводить в прозрачность — решать оформлением самого мини-плеера |
 | [XMB-0017](XMB-0017-podkasty-vybirayutsya-na-pk-pleer-tolko.md) | 2026-10-17 | accepted | net | Подкасты выбираются на ПК, плеер только подгружает новые выпуски |
+| [XMB-0030](XMB-0030-stroki-spiska-u-mini-pleera-ne-uvodit-v.md) | 2026-10-17 | accepted | ui | Строки списка у мини-плеера не уводить в прозрачность — решать оформлением самого мини-плеера |
 
 ## ✅ Недавно закрытые (14 дней)
 
