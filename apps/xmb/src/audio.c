@@ -144,6 +144,13 @@ static struct {
 	int out_bits, s24_bad;   /* формат открытого PCM; s24_bad — драйвер 24 бита не принял, дальше только 16 */
 	int out_period;          /* кадров в периоде открытого PCM */
 	unsigned out_fill;       /* записано в PCM с открытия или сброса (до полного буфера) */
+	/* внешний USB-ЦАП (адаптер в разъёме, плеер — хост): номер карты (0 — нет), частота и формат её потока, громкость
+	 * Q15 — программно, как у Bluetooth; пересчёт частоты, если частоту файла карта не берёт */
+	int ext_card, ext_rate, ext_bits, ext_gain;
+	uint32_t ext_ms, ers_ph;
+	int32_t ers_last[2];
+	char ext_name[64];
+	volatile unsigned ext_gen;   /* сменился выход: вставили или вынули */
 	/* USB-ЦАП: /dev/uac_sa (−1 — нет), заявка интерфейса, частота потока с компьютера (0 — не идёт) */
 	int usb_fd, usb_rq_fd, usb_rq, usb_rate;
 	uint32_t usb_last_ms;   /* когда пришёл последний пакет */
@@ -608,6 +615,7 @@ static void apply_volume(void)
 	mixer_set("Left Playback Volume", att);
 	mixer_set("Right Playback Volume", att);
 	a.bt_gain = att == 255 ? 0 : (int)(32768 * pow(10, -att * 0.5 / 20));   /* та же кривая — программно */
+	a.ext_gain = a.bt_gain;
 }
 
 static void out_close(void)
@@ -692,11 +700,170 @@ static void bt_write(const int16_t *buf, unsigned frames)
 }
 
 static char switch_state(const char *path);
+static void out_power_off(void);
+static uint32_t now_ms(void);
+
+/* внешний USB-ЦАП: частота файла, если карта её берёт, иначе 48 или 44,1 кГц (с пересчётом); формат — 32, 24 (по три
+ * байта) или 16 бит, что карта примет. Встроенный тракт при этом выключен */
+static int ext_open(int rate)
+{
+	if (a.pcm && a.out_rate == rate)
+		return 0;
+	out_close();
+	struct pcm_params *pp = pcm_params_get(a.ext_card, 0, PCM_OUT);
+	unsigned lo = pp ? pcm_params_get_min(pp, PCM_PARAM_RATE) : 44100, hi = pp ? pcm_params_get_max(pp, PCM_PARAM_RATE) : 48000;
+	static const enum pcm_format fmts[] = { PCM_FORMAT_S32_LE, PCM_FORMAT_S24_3LE, PCM_FORMAT_S16_LE };
+	static const int bits[] = { 32, 24, 16 };
+	int rates[] = { rate, 48000, 44100 };
+	for (int r = 0; r < 3 && !a.pcm; r++) {
+		if (rates[r] < (int)lo || rates[r] > (int)hi || (r && rates[r] == rate))
+			continue;
+		for (int f = 0; f < 3 && !a.pcm; f++) {
+			if (pp && !pcm_params_format_test(pp, fmts[f]))
+				continue;
+			struct pcm_config cfg = { .channels = 2, .rate = rates[r], .period_size = 1024, .period_count = 4,
+						  .format = fmts[f] };
+			a.pcm = pcm_open(a.ext_card, 0, PCM_OUT, &cfg);
+			if (a.pcm && !pcm_is_ready(a.pcm)) {
+				pcm_close(a.pcm);
+				a.pcm = NULL;
+			}
+			if (a.pcm) {
+				a.ext_rate = rates[r];
+				a.ext_bits = bits[f];
+			}
+		}
+	}
+	if (pp)
+		pcm_params_free(pp);
+	if (!a.pcm) {
+		static time_t said;
+		if (time(NULL) - said >= 10) {
+			said = time(NULL);
+			fprintf(stderr, "audio: USB-ЦАП %s: не открылся на %d Гц (карта берёт %u–%u)\n", a.ext_name, rate, lo, hi);
+		}
+		return -1;
+	}
+	a.out_rate = rate;
+	a.out_period = 1024;
+	a.out_bits = 24;
+	a.out_fill = 0;
+	a.ers_ph = 0;
+	a.ers_last[0] = a.ers_last[1] = 0;
+	fprintf(stderr, "audio: вывод — USB-ЦАП %s, %d Гц, %d бит (файл %d Гц)\n", a.ext_name, a.ext_rate, a.ext_bits, rate);
+	bb("usb-цап: %s, %d Гц, %d бит", a.ext_name, a.ext_rate, a.ext_bits);
+	return 0;
+}
+
+/* 24 бита в int32: частота файла → частота карты, линейно; фаза Q16 переносится между кусками */
+static unsigned resample32(const int32_t *in, unsigned n, int32_t *out, unsigned max, int from, int to)
+{
+	uint32_t step = (uint32_t)(((uint64_t)from << 16) / to);
+	unsigned k = 0;
+	while ((a.ers_ph >> 16) < n && k < max) {
+		unsigned i = a.ers_ph >> 16;
+		int64_t f = a.ers_ph & 0xffff;
+		const int32_t *p = i ? in + (i - 1) * 2 : a.ers_last, *q = in + i * 2;
+		out[k * 2] = (int32_t)(p[0] + (((q[0] - p[0]) * f) >> 16));
+		out[k * 2 + 1] = (int32_t)(p[1] + (((q[1] - p[1]) * f) >> 16));
+		k++;
+		a.ers_ph += step;
+	}
+	a.ers_ph -= n << 16;
+	a.ers_last[0] = in[(n - 1) * 2];
+	a.ers_last[1] = in[(n - 1) * 2 + 1];
+	return k;
+}
+
+static void ext_write(const int32_t *buf, unsigned frames)
+{
+	static int32_t rs[CHUNK * 2 * 8];
+	static uint8_t out[CHUNK * 8 * 8];
+	const int32_t *src = buf;
+	unsigned n = frames;
+	if (a.out_rate != a.ext_rate) {
+		n = resample32(buf, frames, rs, CHUNK * 8, a.out_rate, a.ext_rate);
+		src = rs;
+	}
+	for (unsigned i = 0; i < n * 2; i++) {
+		int32_t v = (int32_t)(((int64_t)src[i] * a.ext_gain) >> 15);
+		if (a.ext_bits == 32) {
+			((int32_t *)out)[i] = v * 256;
+		} else if (a.ext_bits == 24) {
+			out[i * 3] = (uint8_t)v;
+			out[i * 3 + 1] = (uint8_t)(v >> 8);
+			out[i * 3 + 2] = (uint8_t)(v >> 16);
+		} else {
+			((int16_t *)out)[i] = (int16_t)(v >> 8);
+		}
+	}
+	if (pcm_writei(a.pcm, out, n) >= 0) {
+		if (a.out_fill < 1u << 30)
+			a.out_fill += n;
+		return;
+	}
+	char node[32];
+	snprintf(node, sizeof(node), "/dev/snd/pcmC%dD0p", a.ext_card);
+	if (access(node, F_OK)) {   /* адаптер вынули: ext_check вернёт вывод в разъём */
+		out_close();
+		return;
+	}
+	pcm_prepare(a.pcm);   /* недогрузка */
+	a.out_fill = 0;
+}
+
+/* раз в секунду: вставили или вынули USB-ЦАП (звуковая карта с номером больше 0). Смена — вывод закрыт, следующее
+ * открытие идёт туда, куда теперь нужно */
+static void ext_check(void)
+{
+	uint32_t now = now_ms();
+	if (now - a.ext_ms < 1000)
+		return;
+	a.ext_ms = now;
+	int card = 0;
+	char path[64];
+	for (int c = 1; c < 8 && !card; c++) {
+		snprintf(path, sizeof(path), "/dev/snd/pcmC%dD0p", c);
+		if (access(path, F_OK) == 0)
+			card = c;
+	}
+	if (card == a.ext_card)
+		return;
+	out_close();
+	a.ext_card = card;
+	a.ext_name[0] = 0;
+	if (card) {
+		/* имя — у устройства USB, на два уровня выше интерфейса звуковой карты */
+		snprintf(path, sizeof(path), "/sys/class/sound/card%d/device/../product", card);
+		FILE *f = fopen(path, "r");
+		if (f) {
+			if (fgets(a.ext_name, sizeof(a.ext_name), f))
+				a.ext_name[strcspn(a.ext_name, "\n")] = 0;
+			fclose(f);
+		}
+		while (a.ext_name[0] && a.ext_name[strlen(a.ext_name) - 1] == ' ')
+			a.ext_name[strlen(a.ext_name) - 1] = 0;
+		if (!a.ext_name[0])
+			snprintf(a.ext_name, sizeof(a.ext_name), "карта %d", card);
+		out_power_off();   /* встроенный тракт не нужен */
+	}
+	fprintf(stderr, "audio: USB-ЦАП %s\n", card ? a.ext_name : "вынут — вывод в разъём");
+	bb("usb-цап: %s", card ? a.ext_name : "вынут");
+	a.ext_gen++;
+}
+
+const char *audio_ext_output(unsigned *gen)
+{
+	*gen = a.ext_gen;
+	return a.ext_card ? a.ext_name : NULL;
+}
 
 static int out_open(int rate)
 {
 	if (a.bt_path[0])
 		return bt_open(rate);
+	if (a.ext_card)
+		return ext_open(rate);
 	/* файлы — буфер поглубже (~170 мс на 48 кГц: декодер бывает задерживается на обложках); звук с компьютера —
 	 * ~50 мс на любой частоте: к видео и играм не должен заметно отставать, а пакеты с компьютера идут ровно */
 	int period = a.usb_rate ? rate / 80 : CHUNK * 2;
@@ -774,6 +941,10 @@ static void out_write(const int32_t *buf, unsigned frames)
 	}
 	if (!a.pcm)
 		return;
+	if (a.ext_card) {
+		ext_write(buf, frames);
+		return;
+	}
 	/* вывод стартует, когда буфер заполнится: эта запись запускает DMA — шаг, на котором ядро падало (XMB-0024) */
 	unsigned full = (unsigned)a.out_period * 4;
 	int start = a.out_fill < full && a.out_fill + frames >= full;
@@ -861,6 +1032,12 @@ static void out_write(const int32_t *b24, unsigned frames)
 	while (SDL_GetQueuedAudioSize(a.dev) > CHUNK * 4 * 4)
 		SDL_Delay(5);
 	SDL_QueueAudio(a.dev, buf, frames * 4);
+}
+
+const char *audio_ext_output(unsigned *gen)
+{
+	*gen = 0;
+	return NULL;
 }
 
 static void apply_volume(void) {}
@@ -1312,6 +1489,7 @@ static void *audio_thread(void *arg)
 	for (;;) {
 #if XMB_DEVICE
 		jack_check();
+		ext_check();
 		if (usb_step(buf))
 			continue;
 #endif

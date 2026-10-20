@@ -4369,6 +4369,16 @@ static void frame_cb(lv_timer_t *t)
 		update_topbar();
 		activity_tick();
 		dac_tick();
+		static unsigned ext_gen;   /* вставили или вынули USB-ЦАП — сказать, куда теперь звук */
+		unsigned eg;
+		const char *ext = audio_ext_output(&eg);
+		if (eg != ext_gen) {
+			ext_gen = eg;
+			if (ext)
+				toast("Звук — в %s", ext);
+			else
+				toast("%s", "USB-ЦАП отключён — звук в разъём");
+		}
 		uint32_t t2 = lv_tick_get();
 		if (prof && t2 - t0 > 8)
 			printf("кадр логики: раскладка %u мс, волна и верх %u мс\n", t1 - t0, t2 - t1);
