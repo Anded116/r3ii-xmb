@@ -479,8 +479,31 @@ static int key_bit(int fd, int code)
 	return ioctl(fd, EVIOCGBIT(EV_KEY, sizeof(b)), b) >= 0 && (b[code / (8 * sizeof(long))] >> (code % (8 * sizeof(long))) & 1);
 }
 
+/* опрос кнопки на проводе драйвер начинает только после «on» в этот файл (иное — выключает; при загрузке выключен,
+ * стоковый плеер включает его сам). Проверяем раз в секунду: после сна или переподключения может сброситься */
+static void earpods_enable(void)
+{
+	static const char *sw = "/sys/devices/platform/earpods_adc/earpods_adc/earpods_adc_sw";
+	char v = 0;
+	int fd = open(sw, O_RDONLY);
+	if (fd < 0)
+		return;
+	if (read(fd, &v, 1) != 1)
+		v = 0;
+	close(fd);
+	if (v == '1')
+		return;
+	fd = open(sw, O_WRONLY);
+	if (fd >= 0) {
+		if (write(fd, "on", 2) == 2)
+			printf("пульт: опрос кнопки на проводе 3.5 включён\n");
+		close(fd);
+	}
+}
+
 static void remote_scan(void)
 {
+	earpods_enable();
 	DIR *d = opendir("/dev/input");
 	if (!d)
 		return;
