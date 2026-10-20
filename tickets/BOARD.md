@@ -9,21 +9,21 @@
 | Статус | Тикетов |
 |---|---|
 | `open` | 7 |
-| `fixed` | 24 |
-| `verified` | 33 |
+| `fixed` | 27 |
+| `verified` | 34 |
 | `accepted` | 8 |
-| **всего** | **72** |
+| **всего** | **76** |
 
 | Область | open | in-progress | fixed |
 |---|---|---|---|
-| ui | 0 | 0 | 7 |
+| ui | 0 | 0 | 9 |
 | player | 0 | 0 | 1 |
-| audio | 3 | 0 | 3 |
+| audio | 3 | 0 | 4 |
 | library | 0 | 0 | 1 |
-| net | 1 | 0 | 4 |
+| net | 1 | 0 | 3 |
 | power | 0 | 0 | 4 |
 | display | 0 | 0 | 1 |
-| input | 1 | 0 | 1 |
+| input | 1 | 0 | 2 |
 | firmware | 2 | 0 | 1 |
 | tools | 0 | 0 | 1 |
 
@@ -62,10 +62,13 @@
 - [ ] [XMB-0066](XMB-0066-okno-perezagruzki-v-stok-tekst-nalezaet-na.md) `[P2/ui]` Окно перезагрузки в сток: текст налезает на слайдер (ru, проверить все языки)
 - [ ] [XMB-0069](XMB-0069-punkty-s-dvumya-sostoyaniyami-wi-fi-i-dr.md) `[P2/ui]` Пункты с двумя состояниями (Wi-Fi и др.) переключаются сразу, без списка
 - [ ] [XMB-0070](XMB-0070-otklyuchenie-sensora-tolko-zhesty-menyu-nazad.md) `[P2/input]` Отключение сенсора — только жесты меню, назад/шторка/плеер работают
+- [ ] [XMB-0074](XMB-0074-zvuk-cherez-vneshniy-usb-tsap-adapter-apple.md) `[P2/audio]` Звук через внешний USB-ЦАП (адаптер Apple USB-C → 3.5)
+- [ ] [XMB-0075](XMB-0075-knopki-pultov-na-provode-3-5-i-na-usb-garniture.md) `[P2/input]` Кнопки пультов: на проводе 3.5 и на USB-гарнитуре
 - [ ] [XMB-0028](XMB-0028-pleer-na-pauze-posle-zapuska-xmb-stroka.md) `[P3/player]` Плеер на паузе после запуска XMB: строка формата — только «FLAC», без разрядности и частоты
 - [ ] [XMB-0065](XMB-0065-batareya-provod-ot-pravogo-kraya-ekrana-v-oval.md) `[P3/ui]` Батарея: провод от правого края экрана в овал батареи, пока подключена зарядка (въезжает/уезжает)
-- [ ] [XMB-0067](XMB-0067-wi-fi-ikonki-setey-pokazyvayut-silu-signala.md) `[P3/net]` Wi-Fi: иконки сетей показывают силу сигнала
 - [ ] [XMB-0068](XMB-0068-avtootklyuchenie-ekrana-v-razdel-sna.md) `[P3/ui]` Автоотключение экрана — в раздел сна
+- [ ] [XMB-0073](XMB-0073-mini-pleer-bez-treka-pokazyvaet-pauzu-vmesto.md) `[P3/ui]` Мини-плеер без трека показывает паузу вместо «играть»
+- [ ] [XMB-0076](XMB-0076-podskazki-propadayut-slishkom-bystro-vremya-po.md) `[P3/ui]` Подсказки пропадают слишком быстро — время по длине текста
 
 **Проверить ТЕСТОМ**
 
@@ -93,6 +96,7 @@
 
 | ID | Обновлён | Статус | Заголовок |
 |---|---|---|---|
+| [XMB-0067](XMB-0067-wi-fi-ikonki-setey-pokazyvayut-silu-signala.md) | 2026-10-20 | verified | Wi-Fi: иконки сетей показывают силу сигнала |
 | [XMB-0058](XMB-0058-volna-ps3-reaktsiya-na-muzyku-dyhanie-na-basu.md) | 2026-10-19 | verified | Волна PS3: реакция на музыку — дыхание на басу, импульсы по ленте на ударах |
 | [XMB-0063](XMB-0063-podsvetka-vybrannogo-elementa-stupeni-vmesto.md) | 2026-10-19 | verified | Подсветка выбранного элемента — ступени вместо плавного градиента |
 | [XMB-0038](XMB-0038-status-bar-znachok-rezhima-usb-podklyucheniya.md) | 2026-10-18 | verified | Статус-бар: значок режима USB-подключения |
@@ -109,16 +113,16 @@
 | [XMB-0047](XMB-0047-shtorka-bez-polzunka-gromkosti-koleso-yarkost.md) | 2026-10-18 | verified | Шторка: без ползунка громкости, колесо — яркость |
 | [XMB-0048](XMB-0048-shtorka-ubrat-knopki-kotorye-est-v-pleere.md) | 2026-10-18 | verified | Шторка: убрать кнопки, которые есть в плеере |
 | [XMB-0049](XMB-0049-pleer-rezkaya-smena-tsveta-fona-pri-raskrytii.md) | 2026-10-18 | verified | Плеер: резкая смена цвета фона при раскрытии мини-плеера |
-| [XMB-0032](XMB-0032-punkt-bez-vtoroy-stroki-smeschen-vverh.md) | 2026-10-18 | verified | Пункт без второй строки смещён вверх — центрировать |
-| [XMB-0021](XMB-0021-svayp-vlevo-vo-vlozhennyh-menyu-na-uroven-vyshe.md) | 2026-10-18 | verified | Свайп влево во вложенных меню — на уровень выше |
 | [XMB-0011](XMB-0011-rezhim-usb-tsap.md) | 2026-10-18 | verified | Режим USB-ЦАП |
 | [XMB-0019](XMB-0019-skrugleniya-uglov-ekrana-ne-sovsem-kruglye.md) | 2026-10-18 | verified | Скругления углов экрана не совсем круглые |
 | [XMB-0015](XMB-0015-ekran-zagoraetsya-cherez-1-4-1-75-s-posle.md) | 2026-10-18 | verified | Экран загорается через 1,4–1,75 с после пробуждения |
+| [XMB-0021](XMB-0021-svayp-vlevo-vo-vlozhennyh-menyu-na-uroven-vyshe.md) | 2026-10-18 | verified | Свайп влево во вложенных меню — на уровень выше |
 | [XMB-0029](XMB-0029-varianty-oformleniya-mini-pleera-stroki-spiska.md) | 2026-10-18 | verified | Варианты оформления мини-плеера: строки списка не должны просвечивать сквозь него |
-| [XMB-0003](XMB-0003-teksty-pesen-iz-lrclib-chetvertaya-knopka-pleera.md) | 2026-10-17 | verified | Тексты песен из LRCLIB (четвёртая кнопка плеера) |
+| [XMB-0032](XMB-0032-punkt-bez-vtoroy-stroki-smeschen-vverh.md) | 2026-10-18 | verified | Пункт без второй строки смещён вверх — центрировать |
 | [XMB-0007](XMB-0007-niz-spiskov-gasnet-nad-mini-pleerom.md) | 2026-10-17 | verified | Низ списков гаснет над мини-плеером |
-| [XMB-0014](XMB-0014-otpuskanie-kolesa-budilo-pleer-srazu-posle.md) | 2026-10-17 | verified | Отпускание колеса будило плеер сразу после засыпания |
 | [XMB-0004](XMB-0004-ramka-ekrana-chernaya-verhnyaya-panel-i.md) | 2026-10-17 | verified | Рамка экрана: чёрная верхняя панель и скругления углов |
+| [XMB-0003](XMB-0003-teksty-pesen-iz-lrclib-chetvertaya-knopka-pleera.md) | 2026-10-17 | verified | Тексты песен из LRCLIB (четвёртая кнопка плеера) |
+| [XMB-0014](XMB-0014-otpuskanie-kolesa-budilo-pleer-srazu-posle.md) | 2026-10-17 | verified | Отпускание колеса будило плеер сразу после засыпания |
 | [XMB-0018](XMB-0018-podsvetka-alboma-po-obschemu-standartu-ui-bez.md) | 2026-10-17 | verified | Подсветка альбома по общему стандарту UI, без сильного приглушения соседей |
 | [XMB-0025](XMB-0025-status-bar-pri-fonovoy-rabote-sverhu-tekst.md) | 2026-10-17 | verified | Статус-бар при фоновой работе: сверху текст, что идёт, снизу полоса; остальные значки скрыть |
 | [XMB-0026](XMB-0026-podkasty-proveryayutsya-slishkom-chasto-pri.md) | 2026-10-17 | verified | Подкасты проверяются слишком часто — при каждом запуске XMB |
