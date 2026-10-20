@@ -25,6 +25,7 @@
 #include "xmb_bg.h"
 #include "xmb_player.h"
 #include "bt.h"
+#include "blackbox.h"
 #include "wifi.h"
 #include "podcast.h"
 #include <pthread.h>
@@ -300,6 +301,7 @@ static struct {
 	lv_obj_t *glow, *main, *mini, *mini_thumb, *mini_artist, *mini_time;
 	double cat_pos, depth_t, focus_t, hint_t[2], bhint_t, slide;
 	/* настройки */
+	int diag_off;   /* «Журнал диагностики» (чёрный ящик) выключен */
 	int theme, wave, touch_off, bright, sleep, bt_off, wifi_off, codec, shuffle, repeat, usb_dac, eq_on, ui_size;
 	int screen_off, album_view, dev_sleep, gain, rg_mode, xfade, lang, player_bg, kb_start, kb_langs;
 	int mini_style, edge_l, edge_r;   /* вид мини-плеера; сколько пикселей экрана слева и справа закрывает рамка */
@@ -496,8 +498,14 @@ static const node_t power_items[] = {
 	OPT(ICON_SLEEP_TIMER, "Таймер сна", sleep_names, &s.sleep, sleep_start),
 	OPT(ICON_DEV_SLEEP, "Сон устройства", dev_sleep_names, &s.dev_sleep, NULL),
 };
+static void diag_apply(void)
+{
+	bb_set(!s.diag_off);
+}
+
 static const node_t system_items[] = {
 	ACT(ICON_STOCK, "Стоковый плеер", "обновление прошивки", A_STOCK),
+	OPT(LV_SYMBOL_FILE, "Журнал диагностики", onoff, &s.diag_off, diag_apply),
 	{ ICON_INFO, "О системе", "HiBy R3II 2025 · XMB", about_items, N(about_items) },
 };
 
@@ -510,7 +518,7 @@ static const node_t set_items[] = {
 	DIR(LV_SYMBOL_POWER, "Питание", "гашение экрана, таймер сна, сон устройства", power_items),
 	ACT(LV_SYMBOL_USB, "USB", "карта или ЦАП — компьютеру по кабелю", A_USB),
 	OPT(ICON_LANGUAGE, "Язык · Language", lang_names, &s.lang, apply_lang),
-	DIR(ICON_SYSTEM, "Система", "стоковый плеер, о системе", system_items),
+	DIR(ICON_SYSTEM, "Система", "стоковый плеер, журнал, о системе", system_items),
 };
 /* «Музыка» и «Папки» строятся из библиотеки после сканирования */
 static char scan_sub[48];
@@ -2188,7 +2196,7 @@ static void update_np_labels(void)
 		dac_mini();
 		return;
 	}
-	lv_label_set_text(s.mini_icon, s.playing ? LV_SYMBOL_PLAY : LV_SYMBOL_PAUSE);
+	lv_label_set_text(s.mini_icon, s.track < 0 ? "" : s.playing ? LV_SYMBOL_PLAY : LV_SYMBOL_PAUSE);   /* состояние, не кнопка */
 	lv_obj_invalidate(s.mini_ring);
 	if (s.track < 0) {
 		lv_label_set_text(s.mini_text, tx("Нет трека"));
@@ -6458,7 +6466,7 @@ static const struct {
 	const char *key;
 	int *val, max;
 } settings[] = {
-	{ "theme", &s.theme, 11 }, { "bg", &s.wave, BG_WAVE_COUNT - 1 }, { "touch_off", &s.touch_off, 1 },
+	{ "theme", &s.theme, 11 }, { "bg", &s.wave, BG_WAVE_COUNT - 1 }, { "touch_off", &s.touch_off, 1 }, { "diag_off", &s.diag_off, 1 },
 	{ "bright", &s.bright, 9 }, { "bt_off", &s.bt_off, 1 }, { "wifi_off", &s.wifi_off, 1 }, { "player_bg", &s.player_bg, 1 },
 	{ "codec", &s.codec, 5 }, { "shuffle", &s.shuffle, 1 }, { "repeat", &s.repeat, 2 }, { "eq_on", &s.eq_on, 1 },
 	{ "ui_size", &s.ui_size, 3 }, { "volume", &s.volume, 100 }, { "screen_off", &s.screen_off, 5 },
@@ -6586,6 +6594,7 @@ void xmb_init(const char *font_dir)
 	s.ui_size = 1;
 	s.seek_preview = -1;
 	settings_load();
+	bb_set(!s.diag_off);
 	bt_init(!s.bt_off);
 	wifi_init(!s.wifi_off);
 	pod_init(music_root());

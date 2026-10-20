@@ -42,7 +42,10 @@ static pid_t spawn(const char *cmd, int io, int io_to)
 	sigaddset(&def, SIGPIPE);
 	posix_spawnattr_setsigdefault(&at, &def);
 	posix_spawnattr_setflags(&at, POSIX_SPAWN_SETSIGDEF);
-	bb("команда: %.80s", cmd);
+	/* опросы раз в несколько секунд (состояние Wi-Fi, Bluetooth) — не в журнал: карта писалась бы непрерывно */
+	if (strncmp(cmd, "wpa_cli", 7) && strncmp(cmd, "bluealsa-cli", 12) && strncmp(cmd, "bluetoothctl info", 17) &&
+	    strncmp(cmd, "bluetoothctl devices", 20))
+		bb("команда: %.80s", cmd);
 	char *argv[] = { "sh", "-c", (char *)cmd, NULL };
 	/* без служебных XMB_*: иначе их унаследует, например, перезапущенный adbd — и сценарий проверки (XMB_SCRIPT,
 	 * XMB_FORCE_MEM) достанется каждому следующему запуску XMB из adb */

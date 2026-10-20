@@ -9,9 +9,18 @@
 #define BB_PATH "/data/mnt/sd_0/hiby_dev/bb.log"
 #define BB_MAX (256 * 1024)
 
+static volatile int bb_on = 1;
+
+void bb_set(int on)
+{
+	bb_on = on;
+}
+
 void bb(const char *fmt, ...)
 {
 #if XMB_DEVICE
+	if (!bb_on)
+		return;
 	char line[192];
 	struct timespec ts;
 	clock_gettime(CLOCK_MONOTONIC, &ts);
